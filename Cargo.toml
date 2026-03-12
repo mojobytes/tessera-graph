@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tessera-server",
+    "crates/tessera-protocol",
+    "crates/tessera-auth",
+    "crates/tessera-storage-enterprise",
+    "crates/tessera-import",
+    "crates/tessera-streaming",
+    "crates/tessera-monitor",
+    "crates/tessera-audit",
+    "crates/tessera-config",
+    "crates/tessera-replication",
+    "crates/tessera-tenant",
+]
+
+[workspace.package]
+version     = "0.1.0"
+edition     = "2024"
+authors     = ["BelowZero Security OU <info@belowzerosecurity.io>"]
+license     = "LicenseRef-Proprietary"
+rust-version = "1.85"
+
+[workspace.dependencies]
+tessera-graph              = { path = "../tessera-graph" }
+tessera-protocol           = { path = "crates/tessera-protocol" }
+tessera-auth               = { path = "crates/tessera-auth" }
+tessera-storage-enterprise = { path = "crates/tessera-storage-enterprise" }
+tessera-import             = { path = "crates/tessera-import" }
+tessera-streaming          = { path = "crates/tessera-streaming" }
+tessera-monitor            = { path = "crates/tessera-monitor" }
+tessera-audit              = { path = "crates/tessera-audit" }
+tessera-config             = { path = "crates/tessera-config" }
+tessera-replication        = { path = "crates/tessera-replication" }
+tessera-tenant             = { path = "crates/tessera-tenant" }
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all      = { level = "deny",  priority = -1 }
+pedantic = { level = "warn",  priority = -1 }
+nursery  = { level = "warn",  priority = -1 }

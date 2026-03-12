@@ -1,0 +1,14 @@
+[package]
+name        = "tessera-monitor"
+description = "WebSocket monitoring server for tessera-graph-enterprise"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
