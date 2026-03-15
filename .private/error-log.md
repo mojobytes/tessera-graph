@@ -35,3 +35,9 @@
 - **Causa raíz:** No consideré que `cargo test` compila en debug por defecto y que los benchmarks/throughput tests necesitan thresholds diferentes para debug vs release.
 - **Cómo lo solucioné:** Añadí `cfg!(debug_assertions)` para usar 10k en debug y 50k en release.
 - **Regla para evitarlo:** SIEMPRE usar thresholds condicionales en tests de rendimiento: `if cfg!(debug_assertions) { threshold_debug } else { threshold_release }`. Los tests de throughput en debug son ~3-5x más lentos.
+
+### [2026-03-15] Pre-existing clippy issues descubiertas al agregar --tests flag
+- **Qué hice mal:** Al correr `cargo clippy --workspace --tests -- -D warnings`, surgieron varios errores pre-existentes en crates stub (`BelowZero` en doc-comments `//!`, `derivable_impls` en Default manual, `missing_const_for_fn` en main() vacío, `match_wildcard_for_single_variants` en test). Estos no eran visibles antes porque los tests no se compilaban.
+- **Causa raíz:** Los crates stub no tenían tests previos, por lo que el flag `--tests` los compilaba por primera vez con las reglas estrictas de clippy. El copyright como `//!` (doc comment) hace que `BelowZero` se detecte como CamelCase no documentado.
+- **Cómo lo solucioné:** (1) Cambié `//! Copyright ...` → `// Copyright ...` en todos los crates stub. (2) Reemplacé `impl Default` manual por `#[derive(Default)]` con `#[default]` en enum. (3) Añadí `#[allow(clippy::missing_const_for_fn)]` en main() stub. (4) Cambié `_ =>` por el variant explícito en match arms de tests.
+- **Regla para evitarlo:** El copyright de empresa NUNCA va en `//!` (doc comment), siempre en `//` (comment regular). Las líneas `//!` son parte de la documentación pública y clippy las analiza. Al crear nuevos crates, revisar: (1) copyright en `//`, (2) Default derivable si aplica, (3) wildcards en match de enums cerrados.

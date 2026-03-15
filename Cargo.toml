@@ -12,6 +12,7 @@ members = [
     "crates/tessera-config",
     "crates/tessera-replication",
     "crates/tessera-tenant",
+    "crates/tessera-cypher",
 ]
 
 [workspace.package]
@@ -31,6 +32,7 @@ tessera-streaming          = { path = "crates/tessera-streaming" }
 tessera-monitor            = { path = "crates/tessera-monitor" }
 tessera-audit              = { path = "crates/tessera-audit" }
 tessera-config             = { path = "crates/tessera-config" }
+tessera-cypher             = { path = "crates/tessera-cypher" }
 tessera-replication        = { path = "crates/tessera-replication" }
 tessera-tenant             = { path = "crates/tessera-tenant" }
 thiserror  = "2"

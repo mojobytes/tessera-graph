@@ -79,13 +79,20 @@ fn cypher_compat_handles_backtick_ident() {
 
 #[test]
 fn cypher_compat_handles_backtick_with_spaces() {
-    // `my node` becomes my_node after preprocessing
+    let mut g = Graph::new();
+    g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     let stmt = parse_with_mode(
-        "MATCH (my_node:Person) RETURN my_node.name",
+        "MATCH (`my node`:Person) RETURN `my node`.name",
         QueryLanguage::CypherCompat,
     )
     .unwrap();
-    assert!(matches!(stmt, GqlStatement::Query(_)));
+    match stmt {
+        GqlStatement::Query(q) => {
+            let rows = gql::execute(&g, &q).unwrap();
+            assert_eq!(rows.len(), 1);
+        }
+        GqlStatement::Mutation(_) => panic!("expected Query"),
+    }
 }
 
 #[test]
@@ -128,9 +135,9 @@ fn cypher_compat_unclosed_backtick_errors() {
 
 #[test]
 fn cypher_compat_nested_block_comments() {
-    // /* outer /* inner */ end */ — first close terminates, "end */" is parsed as query text.
-    // The first /* is closed by the first */, leaving "end */ MATCH (n) RETURN n" as query text.
-    // "end" will cause a parse error at the GQL parser level, which is correct behavior.
+    // Neo4j does not support nested block comments. `/* outer /* inner */ end */`
+    // is parsed as: comment `/* outer /* inner */` followed by text `end */`.
+    // The trailing `end */` causes a parse error. This matches Neo4j behavior.
     let err = parse_with_mode(
         "/* outer /* inner */ end */ MATCH (n) RETURN n",
         QueryLanguage::CypherCompat,
@@ -453,6 +460,102 @@ fn strict_gql_rejects_remove() {
     )
     .unwrap_err();
     assert!(err.to_string().contains("REMOVE"), "got: {err}");
+}
+
+// ── Cycle 1: String-literal blindness (C4 + R1 + R2) ────────────────────────
+
+#[test]
+fn strict_gql_does_not_reject_cypher_keyword_inside_string() {
+    let result = parse_with_mode(
+        "MATCH (n:Person) WHERE n.bio = 'uses STARTS WITH operator' RETURN n.bio",
+        QueryLanguage::StrictGql,
+    );
+    assert!(result.is_ok(), "got error: {:?}", result.unwrap_err());
+}
+
+#[test]
+fn strict_gql_does_not_reject_block_comment_marker_inside_string() {
+    let result = parse_with_mode(
+        "MATCH (n) WHERE n.code = '/* not a comment */' RETURN n.code",
+        QueryLanguage::StrictGql,
+    );
+    assert!(result.is_ok(), "got error: {:?}", result.unwrap_err());
+}
+
+#[test]
+fn strict_gql_does_not_reject_backtick_inside_string() {
+    let result = parse_with_mode(
+        "MATCH (n) WHERE n.note = 'use `backtick` syntax' RETURN n.note",
+        QueryLanguage::StrictGql,
+    );
+    assert!(result.is_ok(), "got error: {:?}", result.unwrap_err());
+}
+
+#[test]
+fn cypher_compat_block_comment_strip_skips_string_literal_content() {
+    let result = parse_with_mode(
+        "/* header */ MATCH (n) WHERE n.code = '/* keep me */' RETURN n.code",
+        QueryLanguage::CypherCompat,
+    );
+    assert!(result.is_ok(), "got error: {:?}", result.unwrap_err());
+}
+
+#[test]
+fn cypher_compat_backtick_conversion_skips_string_literal_content() {
+    let result = parse_with_mode(
+        "MATCH (n:Person) WHERE n.note = 'use `backtick`' RETURN n.note",
+        QueryLanguage::CypherCompat,
+    );
+    if let Err(e) = &result {
+        assert!(
+            !e.to_string().contains("unclosed backtick"),
+            "preprocessor incorrectly treated backtick inside string as ident: {e}"
+        );
+    }
+}
+
+// ── Cycle 2: Unicode byte-length in block comments (C1) ──────────────────────
+
+#[test]
+fn cypher_compat_block_comment_with_unicode_preserves_byte_length() {
+    let input = "/* café */ MATCH (n) RETURN n";
+    let output = tessera_cypher::preprocessor::cypher_to_gql(input)
+        .expect("strip should succeed");
+    assert_eq!(
+        output.len(),
+        input.len(),
+        "stripped output byte length ({}) differs from input ({})",
+        output.len(),
+        input.len()
+    );
+}
+
+// ── Cycle 3: IN operator error message (C3) ───────────────────────────────────
+
+#[test]
+fn cypher_compat_in_variable_gives_clear_error_message() {
+    let err = parse_with_mode(
+        "MATCH (n:Person) WHERE n.name IN allowed RETURN n.name",
+        QueryLanguage::CypherCompat,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("IN") && (msg.contains("literal") || msg.contains("list") || msg.contains('[')),
+        "error should explain IN limitation, got: {msg}"
+    );
+}
+
+// ── Cycle 6: Tab-blindness in find_cypher_operator (R5) ──────────────────────
+
+#[test]
+fn strict_gql_rejects_starts_with_tab_separated() {
+    let err = parse_with_mode(
+        "MATCH (n:Person) WHERE n.name STARTS\tWITH 'Al' RETURN n.name",
+        QueryLanguage::StrictGql,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("STARTS WITH"), "got: {err}");
 }
 
 // ── Phase 12: Wiring verification ────────────────────────────────────────────

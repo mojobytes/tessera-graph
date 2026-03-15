@@ -56,8 +56,11 @@ pub fn cypher_to_gql(input: &str) -> tessera_graph::Result<String> {
 ///
 /// Returns `GqlSyntaxError` when any Cypher-only construct is detected.
 pub fn reject_cypher_constructs(input: &str) -> tessera_graph::Result<()> {
+    // Blank out string literals so keywords inside strings are not flagged.
+    let masked = blank_string_literals(input);
+
     // Check for block comments
-    if let Some(pos) = input.find("/*") {
+    if let Some(pos) = masked.find("/*") {
         return Err(Error::GqlSyntaxError {
             line: find_line(input, pos),
             col: find_col(input, pos),
@@ -68,7 +71,7 @@ pub fn reject_cypher_constructs(input: &str) -> tessera_graph::Result<()> {
     }
 
     // Check for backtick identifiers
-    if let Some(pos) = input.find('`') {
+    if let Some(pos) = masked.find('`') {
         return Err(Error::GqlSyntaxError {
             line: find_line(input, pos),
             col: find_col(input, pos),
@@ -79,7 +82,7 @@ pub fn reject_cypher_constructs(input: &str) -> tessera_graph::Result<()> {
     }
 
     // Check for Cypher string/list operators (case-insensitive word-boundary scan).
-    let upper = input.to_ascii_uppercase();
+    let upper = masked.to_ascii_uppercase();
 
     if let Some(pos) = find_cypher_operator(&upper, "STARTS WITH") {
         return Err(Error::GqlSyntaxError {
@@ -152,6 +155,56 @@ pub fn reject_cypher_constructs(input: &str) -> tessera_graph::Result<()> {
     Ok(())
 }
 
+// ── String-literal masking ─────────────────────────────────────────────────
+
+/// Returns a copy of `input` with the *contents* of single-quoted (`'...'`)
+/// and double-quoted (`"..."`) string literals replaced by space characters,
+/// preserving byte offsets of all non-literal characters.
+///
+/// The enclosing quote characters themselves are kept so that the surrounding
+/// context is still recognisable (e.g. the parser can still see `'...'`).
+/// Escape sequences (`\'`, `\"`, `\\`) are skipped so an escaped quote does
+/// not terminate the literal prematurely.
+fn blank_string_literals(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        result.push(ch);
+        i += 1;
+        if ch == '\'' || ch == '"' {
+            let quote = ch;
+            while i < chars.len() {
+                let c = chars[i];
+                if c == '\\' && i + 1 < chars.len() {
+                    // Consume the escape sequence as spaces.
+                    for _ in 0..c.len_utf8() {
+                        result.push(' ');
+                    }
+                    i += 1;
+                    for _ in 0..chars[i].len_utf8() {
+                        result.push(' ');
+                    }
+                    i += 1;
+                    continue;
+                }
+                if c == quote {
+                    result.push(c);
+                    i += 1;
+                    break;
+                }
+                // Replace literal content with spaces (preserving byte length).
+                for _ in 0..c.len_utf8() {
+                    result.push(' ');
+                }
+                i += 1;
+            }
+        }
+    }
+    result
+}
+
 // ── Operator detection helpers ────────────────────────────────────────────────
 
 /// Searches for a multi-word Cypher operator (e.g. `STARTS WITH`) in an
@@ -178,9 +231,9 @@ fn find_cypher_operator(upper_input: &str, operator: &str) -> Option<usize> {
             search_from = abs + 1;
             continue;
         }
-        // Skip whitespace between the two words.
+        // Skip whitespace between the two words (tabs, spaces, etc.).
         let mut gap = after_first;
-        while gap < upper_input.len() && upper_input.as_bytes()[gap] == b' ' {
+        while gap < upper_input.len() && upper_input.as_bytes()[gap].is_ascii_whitespace() {
             gap += 1;
         }
         // Check that `second` follows.
@@ -234,7 +287,7 @@ fn find_in_list_operator(upper_input: &str) -> Option<usize> {
         if before_ok && after_ok {
             // Skip whitespace to see if `[` follows.
             let mut cursor = after_in;
-            while cursor < bytes.len() && bytes[cursor] == b' ' {
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
                 cursor += 1;
             }
             if cursor < bytes.len() && bytes[cursor] == b'[' {
@@ -265,11 +318,37 @@ fn find_function_call(upper_input: &str, pattern: &str) -> Option<usize> {
 }
 
 /// Strips `/* ... */` block comments, replacing them with equivalent whitespace.
+///
+/// String literal content is not treated as comment markers — a `/*` inside
+/// a string literal is passed through unchanged.
 fn strip_block_comments(input: &str) -> tessera_graph::Result<String> {
     let mut result = String::with_capacity(input.len());
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        // Skip string literals without scanning for comment markers inside them.
+        if chars[i] == '\'' || chars[i] == '"' {
+            let quote = chars[i];
+            result.push(quote);
+            i += 1;
+            while i < chars.len() {
+                let c = chars[i];
+                if c == '\\' && i + 1 < chars.len() {
+                    result.push(c);
+                    i += 1;
+                    result.push(chars[i]);
+                    i += 1;
+                    continue;
+                }
+                result.push(c);
+                i += 1;
+                if c == quote {
+                    break;
+                }
+            }
+            continue;
+        }
+
         if i + 1 < chars.len() && chars[i] == '/' && chars[i + 1] == '*' {
             let start = i;
             i += 2;
@@ -284,16 +363,20 @@ fn strip_block_comments(input: &str) -> tessera_graph::Result<String> {
             }
             if !found_close {
                 // Byte offset of the start of the comment
-                let byte_offset = chars[..start].iter().map(|c| c.len_utf8()).sum();
+                let byte_offset: usize = chars[..start].iter().map(|c| c.len_utf8()).sum();
                 return Err(Error::GqlSyntaxError {
                     line: find_line(input, byte_offset),
                     col: find_col(input, byte_offset),
                     message: "unclosed block comment".into(),
                 });
             }
-            // Replace with spaces to preserve relative positions
-            for _ in start..i {
-                result.push(' ');
+            // Replace with spaces to preserve relative byte positions.
+            // Each character in the comment is replaced by exactly as many
+            // space bytes as the character occupies (len_utf8 spaces).
+            for c in &chars[start..i] {
+                for _ in 0..c.len_utf8() {
+                    result.push(' ');
+                }
             }
         } else {
             result.push(chars[i]);
@@ -306,11 +389,35 @@ fn strip_block_comments(input: &str) -> tessera_graph::Result<String> {
 /// Converts backtick-quoted identifiers to standard identifiers.
 ///
 /// Spaces within backtick-quoted identifiers become underscores.
+/// Backtick characters inside string literals are passed through unchanged.
 fn convert_backtick_idents(input: &str) -> tessera_graph::Result<String> {
     let mut result = String::with_capacity(input.len());
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
     while i < chars.len() {
+        // Skip string literals — backticks inside strings are not identifiers.
+        if chars[i] == '\'' || chars[i] == '"' {
+            let quote = chars[i];
+            result.push(quote);
+            i += 1;
+            while i < chars.len() {
+                let c = chars[i];
+                if c == '\\' && i + 1 < chars.len() {
+                    result.push(c);
+                    i += 1;
+                    result.push(chars[i]);
+                    i += 1;
+                    continue;
+                }
+                result.push(c);
+                i += 1;
+                if c == quote {
+                    break;
+                }
+            }
+            continue;
+        }
+
         if chars[i] == '`' {
             let start = i;
             i += 1;
@@ -330,7 +437,7 @@ fn convert_backtick_idents(input: &str) -> tessera_graph::Result<String> {
                 i += 1;
             }
             if !found_close {
-                let byte_offset = chars[..start].iter().map(|c| c.len_utf8()).sum();
+                let byte_offset: usize = chars[..start].iter().map(|c| c.len_utf8()).sum();
                 return Err(Error::GqlSyntaxError {
                     line: find_line(input, byte_offset),
                     col: find_col(input, byte_offset),
@@ -366,5 +473,53 @@ fn find_col(input: &str, byte_offset: usize) -> u32 {
     #[allow(clippy::cast_possible_truncation)]
     {
         col as u32
+    }
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── O3: Position helpers ──────────────────────────────────────────────────
+
+    #[test]
+    fn find_line_first_line() {
+        assert_eq!(find_line("hello", 0), 1);
+    }
+
+    #[test]
+    fn find_line_second_line() {
+        assert_eq!(find_line("line1\nline2", 6), 2);
+    }
+
+    #[test]
+    fn find_col_first_col() {
+        assert_eq!(find_col("hello", 0), 1);
+    }
+
+    #[test]
+    fn find_col_after_newline() {
+        assert_eq!(find_col("abc\ndef", 4), 1);
+    }
+
+    #[test]
+    fn find_cypher_operator_no_match() {
+        assert!(find_cypher_operator("MATCH (N) RETURN N", "STARTS WITH").is_none());
+    }
+
+    // ── R5: Tab-blindness in find_cypher_operator ─────────────────────────────
+
+    #[test]
+    fn find_cypher_operator_detects_tab_separated_words() {
+        let input = "N.NAME STARTS\tWITH 'AL'";
+        assert!(find_cypher_operator(&input.to_ascii_uppercase(), "STARTS WITH").is_some());
+    }
+
+    #[test]
+    fn find_cypher_operator_detects_multiple_spaces() {
+        let input = "N.NAME STARTS   WITH 'AL'";
+        assert!(find_cypher_operator(&input.to_ascii_uppercase(), "STARTS WITH").is_some());
     }
 }
