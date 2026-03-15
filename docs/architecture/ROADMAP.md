@@ -72,7 +72,7 @@ tessera-graph (MIT, embeddable library)
 - Path dependency on tessera-graph
 - Workspace-level lints: `forbid(unsafe_code)`, `deny(clippy::all)`
 
-#### 1.2 — Concurrency & Transactions
+#### 1.2 — Concurrency & Transactions ✅
 - Make `Graph` `Send + Sync` with granular locking (RwLock per page/segment)
 - Transaction manager: Begin/Commit/Rollback with WAL integration
 - Isolation levels:
@@ -80,7 +80,7 @@ tessera-graph (MIT, embeddable library)
   - Read Committed (reads see only committed data)
   - Snapshot Isolation via MVCC (version chains in slots, visibility map)
 
-#### 1.3 — Backup & Recovery
+#### 1.3 — Backup & Recovery ✅
 - Online snapshot: freeze pages → copy files → resume
 - WAL tail copy for point-in-time recovery
 - Restore: snapshot replay + WAL replay
@@ -88,7 +88,7 @@ tessera-graph (MIT, embeddable library)
 
 ### PHASE 1.5: GQL Query Language Engine (P0)
 
-#### 1.5.1 — GQL Parser
+#### 1.5.1 — GQL Parser ✅ (in MIT core)
 - Full GQL parser (ISO/IEC 39075:2024)
 - Lexer + typed AST
 - Core clauses: `MATCH`, `RETURN`, `WHERE`, `ORDER BY`, `LIMIT`, `WITH`, `OPTIONAL MATCH`
@@ -97,7 +97,7 @@ tessera-graph (MIT, embeddable library)
 - Multi-label support
 - Subqueries: `CALL { ... }`, `EXISTS { ... }`
 
-#### 1.5.2 — GQL Planner / Compiler
+#### 1.5.2 — GQL Planner / Compiler ✅ (in MIT core, EXPLAIN pending)
 - Compile GQL AST → Layer 2 operations (PatternBuilder)
 - Basic query optimizer:
   - Predicate reordering (most selective first)
@@ -105,17 +105,19 @@ tessera-graph (MIT, embeddable library)
   - WHERE filter push-down into pattern matching
 - `EXPLAIN` for execution plan inspection
 
-#### 1.5.3 — Mutations via GQL
+#### 1.5.3 — Mutations via GQL ✅ (enterprise-only)
 - `CREATE (n:Label {props})` → `graph.add_node()`
 - `CREATE (a)-[:REL {props}]->(b)` → `graph.add_edge()`
 - `SET n.prop = value` → `graph.update_node()`
 - `DELETE n` / `DETACH DELETE n` → `graph.remove_node()` with edge cleanup
 - `MERGE` (create if not exists)
 
-#### 1.5.4 — Cypher Compatibility Mode (P1)
+#### 1.5.4 — Cypher Compatibility Mode (P1) ✅
 - Accept Cypher syntax where it diverges from GQL
 - Configuration flag: `query_language: gql | cypher-compat | strict-gql`
 - Migration path from Neo4j/Memgraph
+- Implemented: backticks, block comments, STARTS WITH, ENDS WITH, CONTAINS, IN, id(), type(), labels()
+- Deferred to 1.5.5+: REMOVE, OPTIONAL MATCH, WITH, UNWIND
 
 #### 1.5.5 — SQL/PGQ Bridge (P3)
 - Subset of SQL/PGQ (ISO 9075-16) for SQL-familiar users
