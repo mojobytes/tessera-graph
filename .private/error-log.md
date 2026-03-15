@@ -1,5 +1,11 @@
 # Error Log — TesseraGraph Enterprise
 
+### [2026-03-15] Mismatch de tipos en helper `run_mutation` al llamar `execute_mut`
+- **Qué hice mal:** El helper `run_mutation` en el test de enterprise pasaba `ms` (valor de tipo `MutationStatement`) en lugar de `&ms` a `execute_mut`. La función requiere `&MutationStatement`.
+- **Causa raíz:** El método `as_mutation()` retorna un valor owned (no una referencia), entonces al escribir `execute_mut(graph, ms)` sin el `&`, el tipo no coincidía. El test original del core usaba `&stmt.as_mutation().unwrap()` aplicando el `&` directamente al resultado de la llamada.
+- **Cómo lo solucioné:** Cambié `execute_mut(graph, ms)` a `execute_mut(graph, &ms)`.
+- **Regla para evitarlo:** Cuando se copia código entre repos y se cambia el call site de un método, verificar que todos los `&` de borrows se preservan. El patrón `method().unwrap()` vs `let x = method().unwrap(); use(&x)` son equivalentes, pero el segundo necesita explícitamente el `&` en el uso.
+
 ### [2026-03-14] Commit enterprise Phase 1.2 directamente en `develop` sin rama feature
 - **Qué hice mal:** Comité los cambios de Phase 1.2 (TransactionManager, MVCC snapshots) directamente en la rama `develop` del repo enterprise, sin crear una rama `feature/concurrency-transactions` primero.
 - **Causa raíz:** Seguí el flujo del repo tessera-graph (que sí tenía rama feature) pero no repliqué el mismo patrón en el repo enterprise. Asumí que como era el primer commit sustancial del enterprise, podía ir directo a develop.
