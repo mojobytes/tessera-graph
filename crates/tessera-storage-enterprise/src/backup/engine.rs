@@ -253,6 +253,13 @@ impl BackupEngine {
             fs::copy(&src, &dst)?;
         }
 
+        // Copy the manifest itself so the restored directory is self-contained
+        // and can be passed to `verify_backup` independently.
+        fs::copy(
+            backup_dir.join(MANIFEST_NAME),
+            restore_dir.join(MANIFEST_NAME),
+        )?;
+
         Ok(())
     }
 }
