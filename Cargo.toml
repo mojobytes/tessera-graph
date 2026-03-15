@@ -33,7 +33,8 @@ tessera-audit              = { path = "crates/tessera-audit" }
 tessera-config             = { path = "crates/tessera-config" }
 tessera-replication        = { path = "crates/tessera-replication" }
 tessera-tenant             = { path = "crates/tessera-tenant" }
-thiserror = "2"
+thiserror  = "2"
+crc32fast  = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

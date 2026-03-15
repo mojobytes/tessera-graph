@@ -16,6 +16,22 @@ pub enum EnterpriseError {
     /// A lock was poisoned by a panicking thread.
     #[error("lock poisoned: {0}")]
     LockPoisoned(&'static str),
+
+    /// Backup operation failed.
+    #[error("backup failed: {reason}")]
+    BackupFailed { reason: String },
+
+    /// Restore operation failed.
+    #[error("restore failed: {reason}")]
+    RestoreFailed { reason: String },
+
+    /// Backup manifest is missing, unreadable, or has a checksum mismatch.
+    #[error("manifest corrupt: {0}")]
+    ManifestCorrupt(String),
+
+    /// A backup already exists at the target path.
+    #[error("backup already exists at: {}", _0.display())]
+    BackupAlreadyExists(std::path::PathBuf),
 }
 
 /// Convenience alias for enterprise storage results.
@@ -32,5 +48,30 @@ mod tests {
         let mut s = String::new();
         write!(s, "{e}").unwrap();
         assert!(s.contains("commit log"));
+    }
+
+    #[test]
+    fn backup_failed_formats_reason() {
+        let msg = format!("{}", EnterpriseError::BackupFailed { reason: "disk full".into() });
+        assert!(msg.contains("disk full"));
+    }
+
+    #[test]
+    fn restore_failed_formats_reason() {
+        let msg = format!("{}", EnterpriseError::RestoreFailed { reason: "corrupt".into() });
+        assert!(msg.contains("corrupt"));
+    }
+
+    #[test]
+    fn manifest_corrupt_formats_detail() {
+        let msg = format!("{}", EnterpriseError::ManifestCorrupt("missing lsn".into()));
+        assert!(msg.contains("missing lsn"));
+    }
+
+    #[test]
+    fn backup_already_exists_formats_path() {
+        use std::path::PathBuf;
+        let msg = format!("{}", EnterpriseError::BackupAlreadyExists(PathBuf::from("/tmp/bk")));
+        assert!(msg.contains("/tmp/bk"));
     }
 }
