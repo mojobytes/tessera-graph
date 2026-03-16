@@ -1,0 +1,34 @@
+[package]
+name        = "tessera-benchmark"
+description = "Multi-target benchmark harness for tessera-graph-enterprise"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+rust-version.workspace = true
+
+[features]
+memgraph           = ["dep:neo4rs", "dep:tokio"]
+integration-tests  = []
+
+[dependencies]
+tessera-graph = { workspace = true, features = ["benchmarks"] }
+thiserror     = { workspace = true }
+
+# Memgraph / Bolt target (optional)
+neo4rs = { version = "0.8", optional = true }
+tokio  = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name    = "write_scenarios"
+harness = false
+
+[[bench]]
+name    = "traversal_scenarios"
+harness = false
+
+[lints]
+workspace = true
