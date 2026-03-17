@@ -14,6 +14,10 @@ pub enum BenchmarkError {
     /// A report generation error.
     #[error("report error: {0}")]
     Report(String),
+
+    /// An error from an external target (e.g. Memgraph via Bolt).
+    #[error("external target error: {0}")]
+    External(String),
 }
 
 impl BenchmarkError {
@@ -25,6 +29,11 @@ impl BenchmarkError {
     /// Creates a report error from any string-like value.
     pub fn report(msg: impl Into<String>) -> Self {
         Self::Report(msg.into())
+    }
+
+    /// Creates an external target error from any string-like value.
+    pub fn external(msg: impl Into<String>) -> Self {
+        Self::External(msg.into())
     }
 }
 
@@ -46,5 +55,11 @@ mod tests {
     fn report_error_display() {
         let e = BenchmarkError::report("write failed");
         assert!(e.to_string().contains("write failed"));
+    }
+
+    #[test]
+    fn external_error_display() {
+        let e = BenchmarkError::external("bolt connection refused");
+        assert!(e.to_string().contains("bolt connection refused"));
     }
 }

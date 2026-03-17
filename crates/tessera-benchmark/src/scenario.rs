@@ -243,6 +243,103 @@ impl Scenario for MixedScenario {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ConcurrentScenario
+// ---------------------------------------------------------------------------
+
+/// Measures throughput under concurrent load: N threads each performing a
+/// mix of writes and reads against independent target instances.
+///
+/// Each thread gets its own target (via a factory closure) to avoid
+/// artificial mutex contention — this mirrors real multi-client workloads
+/// where each connection has its own session.
+pub struct ConcurrentScenario {
+    /// Number of concurrent threads.
+    pub thread_count: usize,
+    /// Number of operations each thread performs.
+    pub ops_per_thread: usize,
+    /// Fraction of operations that are writes (0.0–1.0).
+    pub write_ratio: f64,
+}
+
+impl ConcurrentScenario {
+    /// Runs the concurrent scenario using `factory` to create one target per thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::BenchmarkError`] if any thread encounters an error.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn run_with_factory<F>(&self, factory: F) -> Result<ScenarioResult>
+    where
+        F: Fn() -> Box<dyn BenchmarkTarget + Send> + Send + Sync,
+    {
+        let target_name = factory().name().to_string();
+        let thread_count = self.thread_count;
+        let ops_per_thread = self.ops_per_thread;
+        let write_ratio = self.write_ratio;
+
+        let write_every = if write_ratio > 0.0 {
+            (1.0 / write_ratio).round() as usize
+        } else {
+            usize::MAX
+        };
+
+        let wall_start = std::time::Instant::now();
+
+        let handles: Vec<_> = (0..thread_count)
+            .map(|_| {
+                let f = &factory;
+                // SAFETY: factory is Sync, we only call it from the spawning thread
+                // to build each target before the thread starts its work loop.
+                let mut target = f();
+                std::thread::spawn(move || {
+                    let mut samples = Vec::with_capacity(ops_per_thread);
+                    let mut created: Vec<NodeHandle> = Vec::new();
+
+                    for op_idx in 0..ops_per_thread {
+                        let is_write = created.is_empty() || op_idx % write_every == 0;
+                        let t0 = std::time::Instant::now();
+                        if is_write {
+                            if let Ok(h) = target.create_node("N", Properties::new()) {
+                                created.push(h);
+                            }
+                        } else {
+                            let h = created[op_idx % created.len()];
+                            let _ = target.get_node(h);
+                        }
+                        samples.push(t0.elapsed().as_nanos() as u64);
+                    }
+                    samples
+                })
+            })
+            .collect();
+
+        let mut all_samples = Vec::with_capacity(thread_count * ops_per_thread);
+        for h in handles {
+            let thread_samples = h.join().map_err(|_| {
+                crate::error::BenchmarkError::scenario("concurrent thread panicked")
+            })?;
+            all_samples.extend(thread_samples);
+        }
+
+        let wall_elapsed = wall_start.elapsed();
+        let total_ops = all_samples.len() as u64;
+
+        // Throughput = total ops across all threads / wall-clock time
+        let throughput = if wall_elapsed.as_nanos() > 0 {
+            total_ops * 1_000_000_000 / wall_elapsed.as_nanos() as u64
+        } else {
+            0
+        };
+
+        let measurement = Measurement::from_nanos(&all_samples);
+        let mut result = ScenarioResult::from_measurement(&measurement, "concurrent", &target_name);
+        // Override throughput with wall-clock-based aggregate (more meaningful for concurrent)
+        result.throughput_ops_per_sec = throughput;
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,5 +420,45 @@ mod tests {
         let r = s.run(&mut t).unwrap();
         assert_eq!(r.scenario_name, "mixed");
         assert_eq!(r.sample_count, 100);
+    }
+
+    #[test]
+    fn concurrent_scenario_aggregates_all_thread_samples() {
+        let s = ConcurrentScenario {
+            thread_count: 4,
+            ops_per_thread: 50,
+            write_ratio: 0.5,
+        };
+        let r = s
+            .run_with_factory(|| Box::new(TesseraTarget::new()))
+            .unwrap();
+        assert_eq!(r.sample_count, 200); // 4 * 50
+    }
+
+    #[test]
+    fn concurrent_scenario_throughput_positive() {
+        let s = ConcurrentScenario {
+            thread_count: 2,
+            ops_per_thread: 50,
+            write_ratio: 0.5,
+        };
+        let r = s
+            .run_with_factory(|| Box::new(TesseraTarget::new()))
+            .unwrap();
+        assert!(r.throughput_ops_per_sec > 0);
+    }
+
+    #[test]
+    fn concurrent_scenario_name_is_concurrent() {
+        let s = ConcurrentScenario {
+            thread_count: 2,
+            ops_per_thread: 10,
+            write_ratio: 1.0,
+        };
+        let r = s
+            .run_with_factory(|| Box::new(TesseraTarget::new()))
+            .unwrap();
+        assert_eq!(r.scenario_name, "concurrent");
+        assert_eq!(r.target_name, "tessera");
     }
 }

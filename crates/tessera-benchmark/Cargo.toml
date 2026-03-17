@@ -30,5 +30,17 @@ harness = false
 name    = "traversal_scenarios"
 harness = false
 
+[[bench]]
+name    = "read_scenarios"
+harness = false
+
+[[bench]]
+name    = "pathfinding_scenarios"
+harness = false
+
+[[bench]]
+name    = "mixed_scenarios"
+harness = false
+
 [lints]
 workspace = true

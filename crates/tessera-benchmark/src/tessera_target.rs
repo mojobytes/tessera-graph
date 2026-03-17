@@ -248,6 +248,30 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_insert_throughput_regression_guard() {
+        use crate::scenario::ConcurrentScenario;
+        let s = ConcurrentScenario {
+            thread_count: 4,
+            ops_per_thread: 2_500,
+            write_ratio: 1.0,
+        };
+        let r = s
+            .run_with_factory(|| Box::new(TesseraTarget::new()))
+            .unwrap();
+        let threshold: u64 = if cfg!(debug_assertions) {
+            5_000
+        } else {
+            20_000
+        };
+        assert!(
+            r.throughput_ops_per_sec >= threshold,
+            "Concurrent insert throughput regression: {} ops/s < {} ops/s minimum",
+            r.throughput_ops_per_sec,
+            threshold
+        );
+    }
+
+    #[test]
     fn bfs_throughput_regression_guard() {
         use std::time::Instant;
         let mut t = TesseraTarget::new();
