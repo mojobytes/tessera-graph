@@ -1,5 +1,11 @@
 # Error Log — TesseraGraph Enterprise
 
+### [2026-03-18] `significant_drop_tightening` on new read-lock scope in `validate()`
+- **Qué hice mal:** Implementé el read-lock happy path en `SessionManager::validate()` usando un bloque `{ let sessions = ...; ... }` para limitar el scope. Clippy `significant_drop_tightening` disparó en ambas variables (`sessions` read-lock y `sessions` write-lock) dentro de esa implementación.
+- **Causa raíz:** La lint `significant_drop_tightening` detecta RwLock/Mutex guards cuyo drop podría adelantarse. El bloque explícito no satisface a clippy — necesita que el guard se use directamente o que se suprima la lint explícitamente.
+- **Cómo lo solucioné:** Añadí `#[allow(clippy::significant_drop_tightening)]` al método `validate()`. El patrón es correcto semánticamente (el bloque garantiza que el read-lock se libera antes de adquirir el write-lock), pero clippy no puede inferir la intención de diseño.
+- **Regla para evitarlo:** Cuando se implementa read-lock-then-write-lock en un mismo método, anticipar `significant_drop_tightening`. El patrón correcto requiere `#[allow(clippy::significant_drop_tightening)]` en el método. No intentar reestructurar el código para satisfacer clippy — eso podría introducir bugs de liveness o deadlocks.
+
 ### [2026-03-15] Mismatch de tipos en helper `run_mutation` al llamar `execute_mut`
 - **Qué hice mal:** El helper `run_mutation` en el test de enterprise pasaba `ms` (valor de tipo `MutationStatement`) en lugar de `&ms` a `execute_mut`. La función requiere `&MutationStatement`.
 - **Causa raíz:** El método `as_mutation()` retorna un valor owned (no una referencia), entonces al escribir `execute_mut(graph, ms)` sin el `&`, el tipo no coincidía. El test original del core usaba `&stmt.as_mutation().unwrap()` aplicando el `&` directamente al resultado de la llamada.
@@ -41,3 +47,9 @@
 - **Causa raíz:** Los crates stub no tenían tests previos, por lo que el flag `--tests` los compilaba por primera vez con las reglas estrictas de clippy. El copyright como `//!` (doc comment) hace que `BelowZero` se detecte como CamelCase no documentado.
 - **Cómo lo solucioné:** (1) Cambié `//! Copyright ...` → `// Copyright ...` en todos los crates stub. (2) Reemplacé `impl Default` manual por `#[derive(Default)]` con `#[default]` en enum. (3) Añadí `#[allow(clippy::missing_const_for_fn)]` en main() stub. (4) Cambié `_ =>` por el variant explícito en match arms de tests.
 - **Regla para evitarlo:** El copyright de empresa NUNCA va en `//!` (doc comment), siempre en `//` (comment regular). Las líneas `//!` son parte de la documentación pública y clippy las analiza. Al crear nuevos crates, revisar: (1) copyright en `//`, (2) Default derivable si aplica, (3) wildcards en match de enums cerrados.
+
+### [2026-03-18] rand_core version conflict con argon2/password-hash
+- **Qué hice mal:** Usé `rand::rngs::OsRng` directamente con `SaltString::generate()` de password-hash. El crate `password-hash` 0.5 depende de `rand_core` 0.6, pero `rand` 0.9 usa `rand_core` 0.9. Los traits `CryptoRng` son incompatibles entre versiones.
+- **Causa raíz:** No verifiqué que `argon2`/`password-hash` dependen de una versión anterior de `rand_core` que es incompatible con `rand` 0.9.
+- **Cómo lo solucioné:** Generé el salt manualmente: 16 bytes random con `rand::rng().fill_bytes()`, encode a base64 con `Base64Unpadded`, y parseo con `SaltString::from_b64()`.
+- **Regla para evitarlo:** Cuando se usa `argon2`/`password-hash`, NUNCA pasar `OsRng` de `rand` 0.9 a `SaltString::generate()`. Generar el salt con `rand` y convertir a `SaltString` vía base64. Verificar siempre con `cargo tree` que las versiones de `rand_core` sean compatibles.
