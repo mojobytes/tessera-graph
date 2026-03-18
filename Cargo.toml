@@ -13,6 +13,7 @@ members = [
     "crates/tessera-replication",
     "crates/tessera-tenant",
     "crates/tessera-cypher",
+    "crates/tessera-benchmark",
 ]
 
 [workspace.package]
