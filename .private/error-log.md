@@ -53,3 +53,9 @@
 - **Causa raíz:** No verifiqué que `argon2`/`password-hash` dependen de una versión anterior de `rand_core` que es incompatible con `rand` 0.9.
 - **Cómo lo solucioné:** Generé el salt manualmente: 16 bytes random con `rand::rng().fill_bytes()`, encode a base64 con `Base64Unpadded`, y parseo con `SaltString::from_b64()`.
 - **Regla para evitarlo:** Cuando se usa `argon2`/`password-hash`, NUNCA pasar `OsRng` de `rand` 0.9 a `SaltString::generate()`. Generar el salt con `rand` y convertir a `SaltString` vía base64. Verificar siempre con `cargo tree` que las versiones de `rand_core` sean compatibles.
+
+### [2026-03-18] cross-repo-write-guard.sh: prefix match false positive (tessera-graph vs tessera-graph-enterprise)
+- **Qué hice mal:** El guard usaba `[[ "$RESOLVED_PATH" == "$MIT_ROOT"* ]]` para detectar paths del repo MIT. Como `tessera-graph` es prefijo de `tessera-graph-enterprise`, TODOS los paths del enterprise eran bloqueados como si fueran del MIT.
+- **Causa raíz:** Comparación de string prefix sin delimitador. `/path/tessera-graph-enterprise/...` empieza con `/path/tessera-graph`, lo que produce un falso positivo.
+- **Cómo lo solucioné:** Cambié la comparación a `"$MIT_ROOT/"*` (con `/` trailing) para que solo match paths que realmente están DENTRO del directorio MIT.
+- **Regla para evitarlo:** Cuando se comparan paths por prefix en bash, SIEMPRE añadir `/` al final del directorio base: `"$DIR/"*` en vez de `"$DIR"*`. Esto evita falsos positivos cuando un directorio es prefijo de otro.
