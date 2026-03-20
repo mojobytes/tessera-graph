@@ -35,7 +35,7 @@ fn test_context() -> ServerContext {
         Arc::new(UserStoreHandle::new("admin", &admin_pw, &PasswordPolicy::default()).unwrap());
     let sessions = Arc::new(SessionManager::new(3600));
     let policy = Arc::new(AuthPolicy::new(
-        user_store,
+        Arc::clone(&user_store),
         RoleStoreHandle::with_defaults(),
     ));
 
@@ -44,7 +44,7 @@ fn test_context() -> ServerContext {
 
     let tls = test_tls_config();
 
-    ServerContext::new(policy, sessions, audit, tls)
+    ServerContext::new(policy, sessions, audit, tls, user_store)
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn permission_check_propagates_through_context() {
     let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
     let tls = test_tls_config();
 
-    let ctx2 = ServerContext::new(policy, sessions, audit, tls);
+    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store);
     assert!(
         ctx2.check_permission(&token, Permission::NodeCreate)
             .is_ok()
