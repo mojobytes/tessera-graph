@@ -205,3 +205,46 @@ fn coerce_str_value_inf_is_string_not_float() {
         Some(&Property::String("inf".to_owned())),
     );
 }
+
+#[test]
+fn import_nodes_csv_invalid_property_key_in_header_returns_error() {
+    let mut g = empty_graph();
+    // Header key "has space" is invalid — must be rejected before any graph write.
+    let csv = "label,has space\nPerson,Alice\n";
+    let result = import_nodes_csv(&mut g, csv);
+    assert!(
+        matches!(result, Err(ImportError::InvalidPropertyKey(_))),
+        "expected InvalidPropertyKey for header with space, got: {result:?}"
+    );
+    // No partial writes should have occurred.
+    assert_eq!(g.node_count(), 0);
+}
+
+#[test]
+fn import_nodes_csv_invalid_property_key_digit_prefix_returns_error() {
+    let mut g = empty_graph();
+    let csv = "label,1bad_key\nPerson,Alice\n";
+    let result = import_nodes_csv(&mut g, csv);
+    assert!(
+        matches!(result, Err(ImportError::InvalidPropertyKey(_))),
+        "expected InvalidPropertyKey for key starting with digit, got: {result:?}"
+    );
+}
+
+#[test]
+fn import_nodes_csv_unclosed_quote_returns_error() {
+    let mut g = empty_graph();
+    // The name field opens a quote that is never closed.
+    let csv = "label,name\nPerson,\"Alice\n";
+    let result = import_nodes_csv(&mut g, csv);
+    assert!(
+        matches!(result, Err(ImportError::CsvParse { row: 2, .. })),
+        "expected CsvParse(row=2) for unclosed quote, got: {result:?}"
+    );
+    if let Err(ImportError::CsvParse { reason, .. }) = &result {
+        assert!(
+            reason.contains("unclosed"),
+            "reason should mention 'unclosed', got: {reason}"
+        );
+    }
+}

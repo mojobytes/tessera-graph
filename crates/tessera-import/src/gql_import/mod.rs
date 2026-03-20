@@ -58,10 +58,15 @@ pub fn import_gql(graph: &mut Graph, gql_text: &str) -> ImportResult<GqlImportSu
                         }
                     })?;
                 summary.statements_executed += 1;
-                summary.nodes_created +=
-                    usize::try_from(result.nodes_created).unwrap_or(usize::MAX);
-                summary.edges_created +=
-                    usize::try_from(result.edges_created).unwrap_or(usize::MAX);
+                // `saturating_add` ensures the counter never wraps in debug
+                // builds if a statement creates an astronomically large number
+                // of nodes/edges (e.g. usize::MAX from a failed conversion).
+                summary.nodes_created = summary
+                    .nodes_created
+                    .saturating_add(usize::try_from(result.nodes_created).unwrap_or(usize::MAX));
+                summary.edges_created = summary
+                    .edges_created
+                    .saturating_add(usize::try_from(result.edges_created).unwrap_or(usize::MAX));
             }
             GqlStatement::Query(_) => {
                 // Read-only queries are silently skipped.

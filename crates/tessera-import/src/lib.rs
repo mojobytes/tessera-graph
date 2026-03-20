@@ -8,4 +8,4 @@ pub mod gql_export;
 pub mod gql_import;
 pub mod json;
 pub(crate) mod node_lookup;
-pub(crate) mod property_coerce;
+pub mod property_coerce;

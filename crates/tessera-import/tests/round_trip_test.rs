@@ -153,3 +153,63 @@ fn json_node_round_trip_preserves_properties() {
     assert_eq!(summary.nodes_imported, 2);
     assert_eq!(restored.nodes_by_label("Person").len(), 2);
 }
+
+/// Verifies that typed property values survive the JSON export → import round
+/// trip without silent type corruption. Mirrors the CSV equivalent test
+/// `csv_node_round_trip_preserves_integer_property` for symmetry.
+#[test]
+fn json_node_round_trip_preserves_property_values() {
+    let original = alice_bob_graph();
+    let json_str = export_json(&original).unwrap();
+
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+    let nodes_only = serde_json::json!({
+        "nodes": parsed["nodes"].clone(),
+        "edges": []
+    });
+
+    let mut restored = Graph::new();
+    import_json(&mut restored, &nodes_only.to_string()).unwrap();
+
+    // Find Alice.
+    let alice_id = restored.nodes_by_label("Person").into_iter().find(|&id| {
+        restored
+            .node(id)
+            .ok()
+            .and_then(|n| n.properties().get("name").cloned())
+            == Some(Property::String("Alice".to_owned()))
+    });
+    let alice_id = alice_id.expect("Alice not found after JSON round-trip");
+    let alice = restored.node(alice_id).unwrap();
+    assert_eq!(
+        alice.properties().get("age"),
+        Some(&Property::I64(30)),
+        "Alice age must survive as I64"
+    );
+    assert_eq!(
+        alice.properties().get("active"),
+        Some(&Property::Bool(true)),
+        "Alice active must survive as Bool"
+    );
+
+    // Find Bob.
+    let bob_id = restored.nodes_by_label("Person").into_iter().find(|&id| {
+        restored
+            .node(id)
+            .ok()
+            .and_then(|n| n.properties().get("name").cloned())
+            == Some(Property::String("Bob".to_owned()))
+    });
+    let bob_id = bob_id.expect("Bob not found after JSON round-trip");
+    let bob = restored.node(bob_id).unwrap();
+    assert_eq!(
+        bob.properties().get("age"),
+        Some(&Property::I64(25)),
+        "Bob age must survive as I64"
+    );
+    assert_eq!(
+        bob.properties().get("score"),
+        Some(&Property::F64(9.5)),
+        "Bob score must survive as F64"
+    );
+}

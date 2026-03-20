@@ -7,6 +7,7 @@ use crate::error::{ExportError, ExportResult};
 /// Coerce a raw string to the most specific Property type.
 /// Priority: i64 → f64 → bool → String.
 /// NaN and infinity are rejected as f64 — they fall through to String.
+#[must_use]
 pub fn coerce_str_value(raw: &str) -> Property {
     if let Ok(i) = raw.parse::<i64>() {
         return Property::I64(i);
@@ -78,6 +79,26 @@ pub fn property_to_gql_literal(p: &Property) -> ExportResult<String> {
     }
 }
 
+/// Return `true` if `key` matches `[a-zA-Z_][a-zA-Z0-9_]*`.
+///
+/// This is the single source of truth for property-key validation. Both
+/// [`validate_property_key`] (export path) and the import-time validators in
+/// `csv/mod.rs` and `json/mod.rs` delegate to this function.
+#[must_use]
+pub fn is_valid_property_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            return false;
+        }
+    }
+    true
+}
+
 /// Validate that a property key matches `[a-zA-Z_][a-zA-Z0-9_]*`.
 ///
 /// # Errors
@@ -85,15 +106,9 @@ pub fn property_to_gql_literal(p: &Property) -> ExportResult<String> {
 /// Returns [`ExportError::InvalidPropertyKey`] if the key is empty or contains
 /// characters outside the allowed set.
 pub fn validate_property_key(key: &str) -> Result<(), ExportError> {
-    let mut chars = key.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return Err(ExportError::InvalidPropertyKey(key.to_owned())),
+    if is_valid_property_key(key) {
+        Ok(())
+    } else {
+        Err(ExportError::InvalidPropertyKey(key.to_owned()))
     }
-    for c in chars {
-        if !c.is_ascii_alphanumeric() && c != '_' {
-            return Err(ExportError::InvalidPropertyKey(key.to_owned()));
-        }
-    }
-    Ok(())
 }

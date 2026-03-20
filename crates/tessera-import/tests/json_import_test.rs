@@ -141,6 +141,31 @@ fn import_json_edge_multi_key_match_returns_error() {
 }
 
 #[test]
+fn import_json_invalid_property_key_returns_error() {
+    let mut g = empty_graph();
+    // Property key "1bad" starts with a digit — must be rejected.
+    let json = r#"{"nodes":[{"label":"Person","properties":{"1bad":42}}],"edges":[]}"#;
+    let result = import_json(&mut g, json);
+    assert!(
+        matches!(result, Err(ImportError::InvalidPropertyKey(_))),
+        "expected InvalidPropertyKey for key starting with digit, got: {result:?}"
+    );
+    // No partial writes should have occurred.
+    assert_eq!(g.node_count(), 0);
+}
+
+#[test]
+fn import_json_invalid_property_key_with_space_returns_error() {
+    let mut g = empty_graph();
+    let json = r#"{"nodes":[{"label":"Person","properties":{"has space":"val"}}],"edges":[]}"#;
+    let result = import_json(&mut g, json);
+    assert!(
+        matches!(result, Err(ImportError::InvalidPropertyKey(_))),
+        "expected InvalidPropertyKey for key with space, got: {result:?}"
+    );
+}
+
+#[test]
 fn import_json_error_node_not_found_for_edge() {
     let mut g = empty_graph();
     let json = r#"{

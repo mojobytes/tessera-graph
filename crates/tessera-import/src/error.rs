@@ -22,6 +22,9 @@ pub enum ImportError {
     #[error("GQL statement error at line {line}: {reason}")]
     GqlStatement { line: usize, reason: String },
 
+    #[error("graph read error: {0}")]
+    GraphRead(String),
+
     #[error("graph write error: {0}")]
     GraphWrite(String),
 

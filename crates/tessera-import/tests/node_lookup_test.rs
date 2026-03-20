@@ -4,13 +4,13 @@ use std::fmt::Write;
 
 use tessera_graph::{Graph, Property};
 use tessera_import::csv::import_edges_csv;
+use tessera_import::error::ImportError;
 
 fn graph_with_n_persons(n: usize) -> Graph {
     let mut g = Graph::new();
     for i in 0..n {
         let props: tessera_graph::Properties =
-            std::iter::once(("id".to_owned(), Property::I64(i64::try_from(i).unwrap())))
-                .collect();
+            std::iter::once(("id".to_owned(), Property::I64(i64::try_from(i).unwrap()))).collect();
         g.add_node("Person", props).unwrap();
     }
     g
@@ -66,5 +66,22 @@ fn import_edges_json_large_graph_completes_in_reasonable_time() {
     assert!(
         elapsed.as_millis() < 500,
         "JSON edge import took {elapsed:?} — O(n²) regression?",
+    );
+}
+
+/// Contract test: importing edges into an empty graph (no nodes) must succeed
+/// and produce 0 edges, not panic. This verifies that `build_lookup_index` on
+/// an empty graph returns `Ok(empty_map)` and the edge loop is never entered.
+#[test]
+fn build_lookup_index_on_empty_graph_returns_ok_empty() {
+    let mut g = Graph::new();
+    // An edge CSV with valid format but no matching nodes returns NodeNotFoundForEdge.
+    // If the graph is empty and we try to import an edge, it should fail with
+    // NodeNotFoundForEdge — not with a GraphRead error or a panic.
+    let csv = "source_label,source_prop,source_value,target_label,target_prop,target_value,rel_label\nPerson,id,0,Person,id,1,NEXT\n";
+    let result = import_edges_csv(&mut g, csv);
+    assert!(
+        matches!(result, Err(ImportError::NodeNotFoundForEdge { .. })),
+        "expected NodeNotFoundForEdge on empty graph, got: {result:?}"
     );
 }

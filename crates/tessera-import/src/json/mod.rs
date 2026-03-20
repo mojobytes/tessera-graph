@@ -8,7 +8,7 @@ use tessera_graph::Graph;
 
 use crate::error::{ExportResult, ImportError, ImportResult};
 use crate::node_lookup::{NodeLookupIndex, build_lookup_index, find_node_in_index};
-use crate::property_coerce::{json_value_to_property, property_to_json};
+use crate::property_coerce::{is_valid_property_key, json_value_to_property, property_to_json};
 
 /// Summary returned after a successful JSON import.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +79,9 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
         if let Some(props_val) = node_obj.get("properties") {
             if let Some(props_obj) = props_val.as_object() {
                 for (k, v) in props_obj {
+                    if !is_valid_property_key(k) {
+                        return Err(ImportError::InvalidPropertyKey(k.clone()));
+                    }
                     properties.insert(k.clone(), json_value_to_property(v));
                 }
             }
@@ -99,7 +102,7 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
     let mut edges_imported = 0_usize;
 
     if !edges_arr.is_empty() {
-        let index = build_lookup_index(graph);
+        let index = build_lookup_index(graph)?;
 
         for edge_val in edges_arr {
             let edge_obj = edge_val.as_object().ok_or_else(|| {
@@ -119,6 +122,9 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
             if let Some(props_val) = edge_obj.get("properties") {
                 if let Some(props_obj) = props_val.as_object() {
                     for (k, v) in props_obj {
+                        if !is_valid_property_key(k) {
+                            return Err(ImportError::InvalidPropertyKey(k.clone()));
+                        }
                         edge_props.insert(k.clone(), json_value_to_property(v));
                     }
                 }

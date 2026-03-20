@@ -21,12 +21,18 @@ use tessera_graph::{Graph, Property};
 
 use crate::error::{ExportResult, ImportError, ImportResult};
 use crate::node_lookup::{build_lookup_index, find_node_in_index};
-use crate::property_coerce::{coerce_str_value, property_to_json};
+use crate::property_coerce::{coerce_str_value, is_valid_property_key, property_to_json};
 
 // ── CSV parsing helpers ──────────────────────────────────────────────────────
 
 /// Parse a single CSV line into fields, respecting double-quoted fields.
-fn parse_csv_line(line: &str) -> Vec<String> {
+///
+/// # Errors
+///
+/// Returns `Err("unclosed quoted field")` if the line ends with an open quote
+/// (i.e. `in_quotes` is still true after consuming all characters). This
+/// catches malformed CSV that would otherwise produce silently corrupted data.
+fn parse_csv_line(line: &str) -> Result<Vec<String>, &'static str> {
     let mut fields = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
@@ -55,8 +61,13 @@ fn parse_csv_line(line: &str) -> Vec<String> {
             }
         }
     }
+
+    if in_quotes {
+        return Err("unclosed quoted field");
+    }
+
     fields.push(current);
-    fields
+    Ok(fields)
 }
 
 /// Quote a CSV field value if it contains commas, double-quotes, or newlines.
@@ -93,7 +104,10 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
         row: 0,
         reason: "empty CSV input".to_owned(),
     })?;
-    let headers = parse_csv_line(header_line);
+    let headers = parse_csv_line(header_line).map_err(|reason| ImportError::CsvParse {
+        row: 0,
+        reason: reason.to_owned(),
+    })?;
     if headers.is_empty() || headers[0].trim() != "label" {
         return Err(ImportError::CsvParse {
             row: 0,
@@ -102,6 +116,15 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
     }
 
     let prop_keys: Vec<&str> = headers[1..].iter().map(|s| s.trim()).collect();
+
+    // Validate property key names in the header up-front so we catch bad keys
+    // before touching the graph.
+    for &key in &prop_keys {
+        if !is_valid_property_key(key) {
+            return Err(ImportError::InvalidPropertyKey(key.to_owned()));
+        }
+    }
+
     let mut count = 0_usize;
 
     for (row_idx, line) in lines.enumerate() {
@@ -110,7 +133,10 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
             continue;
         }
 
-        let fields = parse_csv_line(line);
+        let fields = parse_csv_line(line).map_err(|reason| ImportError::CsvParse {
+            row: row_num,
+            reason: reason.to_owned(),
+        })?;
         if fields.is_empty() {
             continue;
         }
@@ -168,7 +194,10 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
         row: 0,
         reason: "empty CSV input".to_owned(),
     })?;
-    let headers = parse_csv_line(header_line);
+    let headers = parse_csv_line(header_line).map_err(|reason| ImportError::CsvParse {
+        row: 0,
+        reason: reason.to_owned(),
+    })?;
     if headers.len() < 7 {
         return Err(ImportError::CsvParse {
             row: 0,
@@ -181,10 +210,18 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 
     // Property keys start at column index 7.
     let edge_prop_keys: Vec<&str> = headers[7..].iter().map(|s| s.trim()).collect();
+
+    // Validate edge property key names up-front.
+    for &key in &edge_prop_keys {
+        if !is_valid_property_key(key) {
+            return Err(ImportError::InvalidPropertyKey(key.to_owned()));
+        }
+    }
+
     let mut count = 0_usize;
 
     // Build lookup index once before the loop — O(N) build, O(1) lookups per edge.
-    let index = build_lookup_index(graph);
+    let index = build_lookup_index(graph)?;
 
     for (row_idx, line) in lines.enumerate() {
         let row_num = row_idx + 2;
@@ -192,7 +229,10 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
             continue;
         }
 
-        let fields = parse_csv_line(line);
+        let fields = parse_csv_line(line).map_err(|reason| ImportError::CsvParse {
+            row: row_num,
+            reason: reason.to_owned(),
+        })?;
         if fields.len() < 7 {
             return Err(ImportError::CsvParse {
                 row: row_num,
@@ -258,10 +298,15 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
     use crate::error::ExportError;
 
+    // Collect all node IDs once — avoids a second call later for capacity hint
+    // and data-row iteration, which keeps the two uses consistent.
+    let mut node_ids = graph.node_ids();
+    node_ids.sort_unstable_by_key(|id| id.as_u64());
+
     // Collect all property keys — union across all nodes, sorted.
     let all_keys: Vec<String> = {
         let mut key_set = std::collections::BTreeSet::new();
-        for id in graph.node_ids() {
+        for &id in &node_ids {
             let node = graph
                 .node(id)
                 .map_err(|e| ExportError::GraphRead(e.to_string()))?;
@@ -272,8 +317,7 @@ pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
         key_set.into_iter().collect()
     };
 
-    let node_count = graph.node_ids().len();
-    let mut out = String::with_capacity(30 * (node_count + 1));
+    let mut out = String::with_capacity(30 * (node_ids.len() + 1));
 
     // Header row.
     out.push_str("label");
@@ -283,9 +327,7 @@ pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
     }
     out.push('\n');
 
-    // Data rows — deterministic order via sorted node IDs.
-    let mut node_ids = graph.node_ids();
-    node_ids.sort_unstable_by_key(|id| id.as_u64());
+    // Data rows — already in sorted order from the collection step above.
 
     for id in node_ids {
         let node = graph
