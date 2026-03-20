@@ -6,7 +6,7 @@ use tessera_audit::AuditLog;
 use tessera_auth::policy::AuthPolicy;
 use tessera_auth::rbac::Permission;
 use tessera_auth::session::{SessionManager, SessionToken};
-use tessera_auth::user::UserId;
+use tessera_auth::user::{UserId, UserStoreHandle};
 use tessera_protocol::tls::TlsConfig;
 
 /// Server context that holds all security components.
@@ -17,7 +17,8 @@ pub struct ServerContext {
     auth_policy: Arc<AuthPolicy>,
     sessions: Arc<SessionManager>,
     audit: Arc<AuditLog>,
-    _tls: TlsConfig,
+    tls: TlsConfig,
+    user_store: Arc<UserStoreHandle>,
 }
 
 impl ServerContext {
@@ -29,13 +30,45 @@ impl ServerContext {
         sessions: Arc<SessionManager>,
         audit: Arc<AuditLog>,
         tls: TlsConfig,
+        user_store: Arc<UserStoreHandle>,
     ) -> Self {
         Self {
             auth_policy,
             sessions,
             audit,
-            _tls: tls,
+            tls,
+            user_store,
         }
+    }
+
+    /// Access the TLS configuration.
+    #[must_use]
+    pub const fn tls_config(&self) -> &TlsConfig {
+        &self.tls
+    }
+
+    /// Access the authentication policy.
+    #[must_use]
+    pub const fn auth_policy(&self) -> &Arc<AuthPolicy> {
+        &self.auth_policy
+    }
+
+    /// Access the session manager.
+    #[must_use]
+    pub const fn sessions(&self) -> &Arc<SessionManager> {
+        &self.sessions
+    }
+
+    /// Access the audit log.
+    #[must_use]
+    pub const fn audit(&self) -> &Arc<AuditLog> {
+        &self.audit
+    }
+
+    /// Access the user store.
+    #[must_use]
+    pub const fn user_store(&self) -> &Arc<UserStoreHandle> {
+        &self.user_store
     }
 
     /// Validate a session token and check the required permission.
