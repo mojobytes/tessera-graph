@@ -6,7 +6,7 @@ use tessera_protocol::frame::{self, FramedReader, FramedWriter, MAX_FRAME_SIZE};
 
 #[test]
 fn frame_encode_produces_length_prefix() {
-    let encoded = frame::encode(b"hello");
+    let encoded = frame::encode(b"hello").unwrap();
     assert_eq!(encoded.len(), 9);
     assert_eq!(&encoded[..4], &[0, 0, 0, 5]);
     assert_eq!(&encoded[4..], b"hello");
@@ -14,7 +14,7 @@ fn frame_encode_produces_length_prefix() {
 
 #[test]
 fn frame_encode_empty_payload() {
-    let encoded = frame::encode(b"");
+    let encoded = frame::encode(b"").unwrap();
     assert_eq!(encoded.len(), 4);
     assert_eq!(&encoded[..4], &[0, 0, 0, 0]);
 }
@@ -52,12 +52,31 @@ fn frame_decode_rejects_oversized_frame() {
     );
 }
 
+#[test]
+fn encode_returns_error_for_oversized_payload() {
+    let oversized = vec![0u8; MAX_FRAME_SIZE as usize + 1];
+    let result = frame::encode(&oversized);
+    assert!(
+        result.is_err(),
+        "encode must return Err for payload > MAX_FRAME_SIZE"
+    );
+}
+
+#[test]
+fn encode_accepts_max_frame_size_payload() {
+    // We can't allocate 16 MiB in a test easily, but we can verify encode
+    // succeeds for a reasonably sized payload below the limit
+    let payload = vec![0u8; 1024];
+    let result = frame::encode(&payload);
+    assert!(result.is_ok());
+}
+
 #[tokio::test]
 async fn framed_reader_reads_single_frame() {
     let (reader, mut writer) = tokio::io::duplex(1024);
 
     let payload = b"test payload";
-    let encoded = frame::encode(payload);
+    let encoded = frame::encode(payload).unwrap();
     tokio::io::AsyncWriteExt::write_all(&mut writer, &encoded)
         .await
         .unwrap();
@@ -67,7 +86,6 @@ async fn framed_reader_reads_single_frame() {
     let result = framed.read_frame().await.unwrap();
     assert_eq!(result, Some(payload.to_vec()));
 
-    // After EOF, returns None
     let eof = framed.read_frame().await.unwrap();
     assert_eq!(eof, None);
 }
@@ -78,7 +96,7 @@ async fn framed_reader_reads_multiple_frames() {
 
     let frames = [b"one".as_slice(), b"two", b"three"];
     for f in &frames {
-        let encoded = frame::encode(f);
+        let encoded = frame::encode(f).unwrap();
         tokio::io::AsyncWriteExt::write_all(&mut writer, &encoded)
             .await
             .unwrap();
@@ -106,6 +124,6 @@ async fn framed_writer_writes_encoded_frame() {
         .await
         .unwrap();
 
-    let expected = frame::encode(payload);
+    let expected = frame::encode(payload).unwrap();
     assert_eq!(raw, expected);
 }

@@ -17,14 +17,20 @@ pub const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
 const HEADER_SIZE: usize = 4;
 
 /// Encode a payload into a length-prefixed frame.
-#[must_use]
-pub fn encode(payload: &[u8]) -> Vec<u8> {
-    #[allow(clippy::cast_possible_truncation)]
-    let len = payload.len() as u32;
+///
+/// # Errors
+///
+/// Returns `ProtocolError::FrameTooLarge` if `payload.len()` exceeds [`MAX_FRAME_SIZE`].
+pub fn encode(payload: &[u8]) -> Result<Vec<u8>> {
+    let len = u32::try_from(payload.len())
+        .map_err(|_| ProtocolError::FrameTooLarge { declared: u32::MAX })?;
+    if len > MAX_FRAME_SIZE {
+        return Err(ProtocolError::FrameTooLarge { declared: len });
+    }
     let mut buf = Vec::with_capacity(HEADER_SIZE + payload.len());
     buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(payload);
-    buf
+    Ok(buf)
 }
 
 /// Attempt to decode a single frame from a buffer.
@@ -119,7 +125,7 @@ impl<W: AsyncWrite + Unpin> FramedWriter<W> {
     ///
     /// Returns `ProtocolError::Io` on write failure.
     pub async fn write_frame(&mut self, payload: &[u8]) -> Result<()> {
-        let frame = encode(payload);
+        let frame = encode(payload)?;
         self.writer.write_all(&frame).await?;
         self.writer.flush().await?;
         Ok(())

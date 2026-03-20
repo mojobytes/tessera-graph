@@ -10,7 +10,7 @@ fn frame_codec_throughput_guard() {
     let start = std::time::Instant::now();
 
     for _ in 0..n {
-        let encoded = frame::encode(&payload);
+        let encoded = frame::encode(&payload).unwrap();
         let mut buf = BytesMut::from(encoded.as_slice());
         let _ = frame::decode(&mut buf).unwrap();
     }

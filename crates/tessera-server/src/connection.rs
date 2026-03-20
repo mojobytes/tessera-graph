@@ -17,6 +17,10 @@ use tessera_protocol::message::{ClientMessage, ServerMessage};
 use crate::context::ServerContext;
 use crate::error::{Result, ServerError};
 
+/// Generic message returned for all authentication failures.
+/// Must never include internal details — prevents user enumeration and info leakage.
+const AUTH_FAILURE_MSG: &str = "authentication failed";
+
 /// Handles a single client connection over the `TesseraGraph` wire protocol.
 pub struct ConnectionHandler<S: AsyncRead + AsyncWrite + Unpin> {
     reader: FramedReader<tokio::io::ReadHalf<S>>,
@@ -88,15 +92,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                 return Ok(());
             };
 
-            let msg: ClientMessage = match serde_json::from_slice(&frame) {
-                Ok(m) => m,
-                Err(e) => {
-                    self.send_message(&ServerMessage::AuthError {
-                        reason: format!("invalid message: {e}"),
-                    })
-                    .await?;
-                    continue;
-                }
+            let Ok(msg) = serde_json::from_slice::<ClientMessage>(&frame) else {
+                self.send_message(&ServerMessage::ProtocolError {
+                    reason: "invalid message format".into(),
+                })
+                .await?;
+                continue;
             };
 
             match msg {
@@ -128,11 +129,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
         let password = match Password::new(password) {
             Ok(p) => p,
             Err(e) => {
-                self.send_message(&ServerMessage::AuthError {
-                    reason: e.to_string(),
-                })
-                .await?;
-                return Ok(());
+                return self
+                    .send_auth_failure(&format!("auth failure for user {username:?}: {e}"))
+                    .await;
             }
         };
 
@@ -148,21 +147,33 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                             .await?;
                     }
                     Err(e) => {
-                        self.send_message(&ServerMessage::AuthError {
-                            reason: e.to_string(),
-                        })
-                        .await?;
+                        return self
+                            .send_auth_failure(&format!(
+                                "session creation failed for user {username:?}: {e}"
+                            ))
+                            .await;
                     }
                 }
             }
             Err(e) => {
-                self.send_message(&ServerMessage::AuthError {
-                    reason: e.to_string(),
-                })
-                .await?;
+                return self
+                    .send_auth_failure(&format!("auth failure for user {username:?}: {e}"))
+                    .await;
             }
         }
         Ok(())
+    }
+
+    /// Send a generic auth failure response and log the internal detail to the audit log.
+    async fn send_auth_failure(&mut self, audit_detail: &str) -> Result<()> {
+        let _ = self
+            .ctx
+            .audit()
+            .record_error(None, "login", None, audit_detail);
+        self.send_message(&ServerMessage::AuthError {
+            reason: AUTH_FAILURE_MSG.into(),
+        })
+        .await
     }
 
     async fn handle_logout(&mut self) -> Result<()> {
@@ -199,38 +210,43 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
             }
         };
 
-        // Build the response while holding the lock, then send after releasing it.
+        // SAFETY: std::sync::RwLock is held only within the synchronous block below.
+        // The guard is dropped at the closing `}`, before the `.await` in `send_message`.
+        // If this invariant is violated, `clippy::await_holding_lock` will catch it.
         let response = match stmt {
             GqlStatement::Query(ref q) => {
-                let graph = self.graph.read().map_err(|_| {
-                    ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
-                })?;
-                match tessera_graph::gql::execute(&graph, q) {
-                    Ok(rows) => {
-                        let (columns, json_rows) = gql_result_to_json(&rows);
-                        ServerMessage::QueryResult {
-                            columns,
-                            rows: json_rows,
-                        }
-                    }
+                let result = {
+                    let graph = self.graph.read().map_err(|_| {
+                        ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
+                    })?;
+                    tessera_graph::gql::execute(&graph, q).map(|rows| gql_result_to_json(&rows))
+                };
+                match result {
+                    Ok((columns, json_rows)) => ServerMessage::QueryResult {
+                        columns,
+                        rows: json_rows,
+                    },
                     Err(e) => ServerMessage::QueryError {
                         reason: e.to_string(),
                     },
                 }
             }
             GqlStatement::Mutation(ref m) => {
-                let mut graph = self.graph.write().map_err(|_| {
-                    ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
-                })?;
-                match tessera_storage_enterprise::gql::execute_mut(&mut graph, m) {
-                    Ok(result) => ServerMessage::QueryResult {
+                let result = {
+                    let mut graph = self.graph.write().map_err(|_| {
+                        ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
+                    })?;
+                    tessera_storage_enterprise::gql::execute_mut(&mut graph, m)
+                };
+                match result {
+                    Ok(r) => ServerMessage::QueryResult {
                         columns: vec!["summary".into()],
                         rows: vec![vec![serde_json::json!({
-                            "nodes_created": result.nodes_created,
-                            "edges_created": result.edges_created,
-                            "nodes_deleted": result.nodes_deleted,
-                            "edges_deleted": result.edges_deleted,
-                            "properties_set": result.properties_set,
+                            "nodes_created": r.nodes_created,
+                            "edges_created": r.edges_created,
+                            "nodes_deleted": r.nodes_deleted,
+                            "edges_deleted": r.edges_deleted,
+                            "properties_set": r.properties_set,
                         })]],
                     },
                     Err(e) => ServerMessage::QueryError {

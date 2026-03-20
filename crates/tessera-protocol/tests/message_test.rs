@@ -92,3 +92,59 @@ fn client_message_login_json_has_type_tag() {
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains(r#""type":"login""#));
 }
+
+#[test]
+fn client_message_login_debug_redacts_password() {
+    let msg = ClientMessage::Login {
+        username: "admin".into(),
+        password: "super-secret-123".into(),
+    };
+    let debug = format!("{msg:?}");
+    assert!(
+        !debug.contains("super-secret-123"),
+        "Debug output must not contain the password: {debug}"
+    );
+    assert!(
+        debug.contains("[REDACTED]"),
+        "Debug output must show a redaction marker: {debug}"
+    );
+}
+
+#[test]
+fn client_message_query_debug_contains_query_text() {
+    let msg = ClientMessage::Query {
+        query: "MATCH (n) RETURN n".into(),
+        language: "gql".into(),
+    };
+    let debug = format!("{msg:?}");
+    assert!(
+        debug.contains("MATCH"),
+        "Query debug should contain query text: {debug}"
+    );
+}
+
+#[test]
+fn client_message_ping_debug() {
+    let debug = format!("{:?}", ClientMessage::Ping);
+    assert_eq!(debug, "Ping");
+}
+
+#[test]
+fn server_message_protocol_error_roundtrip() {
+    let msg = ServerMessage::ProtocolError {
+        reason: "bad format".into(),
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, msg);
+}
+
+#[test]
+fn server_message_capacity_error_roundtrip() {
+    let msg = ServerMessage::CapacityError {
+        reason: "server at capacity".into(),
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    let decoded: ServerMessage = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, msg);
+}

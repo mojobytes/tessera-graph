@@ -3,12 +3,12 @@
 //! TCP listener and accept loop for the `TesseraGraph` server.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::sync::{Semaphore, watch};
+use tokio::task::JoinSet;
+use tokio_rustls::TlsAcceptor;
 
 use tessera_graph::Graph;
 use tessera_protocol::frame::FramedWriter;
@@ -20,7 +20,7 @@ use crate::error::Result;
 
 /// TCP listener for `TesseraGraph`.
 pub struct TesseraListener {
-    inner: TcpListener,
+    inner: tokio::net::TcpListener,
 }
 
 impl TesseraListener {
@@ -30,7 +30,7 @@ impl TesseraListener {
     ///
     /// Returns `ServerError::Io` if binding fails.
     pub async fn bind(addr: &str) -> Result<Self> {
-        let listener = TcpListener::bind(addr).await?;
+        let listener = tokio::net::TcpListener::bind(addr).await?;
         Ok(Self { inner: listener })
     }
 
@@ -53,10 +53,9 @@ impl TesseraListener {
         Ok((stream, addr))
     }
 
-    /// Run the accept loop, spawning a handler task per connection.
+    /// Plain TCP accept loop — for testing only.
     ///
-    /// Accepts connections until a shutdown signal is received.
-    /// Enforces `max_connections` and `idle_timeout` per connection.
+    /// Production code must use [`serve_tls`](Self::serve_tls).
     ///
     /// # Errors
     ///
@@ -69,14 +68,23 @@ impl TesseraListener {
         max_connections: usize,
         idle_timeout: Duration,
     ) -> Result<()> {
-        let active = Arc::new(AtomicUsize::new(0));
+        let semaphore = Arc::new(Semaphore::new(max_connections));
+        let mut tasks: JoinSet<()> = JoinSet::new();
 
         loop {
+            // Reap completed tasks (non-blocking)
+            while tasks.try_join_next().is_some() {}
+
             let stream = tokio::select! {
                 biased;
 
                 _ = shutdown.changed() => {
                     if *shutdown.borrow() {
+                        let drain_timeout = Duration::from_secs(30);
+                        let _ = tokio::time::timeout(drain_timeout, async {
+                            while tasks.join_next().await.is_some() {}
+                        })
+                        .await;
                         return Ok(());
                     }
                     continue;
@@ -86,41 +94,121 @@ impl TesseraListener {
                     match result {
                         Ok((stream, _addr)) => stream,
                         Err(e) => {
-                            // Transient accept errors — log and continue
-                            eprintln!("accept error: {e}");
+                            tracing::warn!("accept error: {e}");
                             continue;
                         }
                     }
                 }
             };
 
-            // Enforce connection limit
-            let current = active.load(Ordering::SeqCst);
-            if current >= max_connections {
-                // Write capacity error and close
-                let (_, write_half) = tokio::io::split(stream);
-                let mut writer = FramedWriter::new(write_half);
-                let msg = ServerMessage::AuthError {
-                    reason: "server at capacity".into(),
-                };
-                let json = serde_json::to_vec(&msg).unwrap_or_default();
-                let _ = writer.write_frame(&json).await;
+            let Ok(permit) = Arc::clone(&semaphore).try_acquire_owned() else {
+                Self::send_capacity_error(stream).await;
                 continue;
-            }
-
-            active.fetch_add(1, Ordering::SeqCst);
+            };
 
             let ctx = Arc::clone(&ctx);
             let graph = Arc::clone(&graph);
-            let active = Arc::clone(&active);
             let shutdown_rx = shutdown.clone();
 
-            tokio::spawn(async move {
+            tasks.spawn(async move {
+                let _permit = permit;
                 let mut handler =
                     ConnectionHandler::new(stream, ctx, graph, idle_timeout, shutdown_rx);
                 let _ = handler.run().await;
-                active.fetch_sub(1, Ordering::SeqCst);
             });
+        }
+    }
+
+    /// TLS-enabled accept loop — mandatory for production.
+    ///
+    /// Each accepted `TcpStream` is wrapped with a TLS handshake before being
+    /// passed to `ConnectionHandler`. Connections that fail the TLS handshake
+    /// are dropped without spawning a handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServerError` on unrecoverable listener failure.
+    pub async fn serve_tls(
+        self,
+        ctx: Arc<ServerContext>,
+        graph: Arc<RwLock<Graph>>,
+        mut shutdown: watch::Receiver<bool>,
+        max_connections: usize,
+        idle_timeout: Duration,
+    ) -> Result<()> {
+        let tls_acceptor = TlsAcceptor::from(Arc::clone(ctx.tls_config().server_config()));
+        let semaphore = Arc::new(Semaphore::new(max_connections));
+        let mut tasks: JoinSet<()> = JoinSet::new();
+
+        loop {
+            while tasks.try_join_next().is_some() {}
+
+            let stream = tokio::select! {
+                biased;
+
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {
+                        let drain_timeout = Duration::from_secs(30);
+                        let _ = tokio::time::timeout(drain_timeout, async {
+                            while tasks.join_next().await.is_some() {}
+                        })
+                        .await;
+                        return Ok(());
+                    }
+                    continue;
+                }
+
+                result = self.inner.accept() => {
+                    match result {
+                        Ok((stream, _addr)) => stream,
+                        Err(e) => {
+                            tracing::warn!("accept error: {e}");
+                            continue;
+                        }
+                    }
+                }
+            };
+
+            let Ok(permit) = Arc::clone(&semaphore).try_acquire_owned() else {
+                Self::send_capacity_error(stream).await;
+                continue;
+            };
+
+            let tls_acceptor = tls_acceptor.clone();
+            let ctx = Arc::clone(&ctx);
+            let graph = Arc::clone(&graph);
+            let shutdown_rx = shutdown.clone();
+
+            tasks.spawn(async move {
+                let _permit = permit;
+                match tls_acceptor.accept(stream).await {
+                    Ok(tls_stream) => {
+                        let mut handler = ConnectionHandler::new(
+                            tls_stream,
+                            ctx,
+                            graph,
+                            idle_timeout,
+                            shutdown_rx,
+                        );
+                        let _ = handler.run().await;
+                    }
+                    Err(e) => {
+                        tracing::warn!("TLS handshake failed: {e}");
+                    }
+                }
+            });
+        }
+    }
+
+    /// Write a capacity error to a stream and close it.
+    async fn send_capacity_error(stream: tokio::net::TcpStream) {
+        let (_, write_half) = tokio::io::split(stream);
+        let mut writer = FramedWriter::new(write_half);
+        let msg = ServerMessage::CapacityError {
+            reason: "server at capacity".into(),
+        };
+        if let Ok(json) = serde_json::to_vec(&msg) {
+            let _ = writer.write_frame(&json).await;
         }
     }
 }

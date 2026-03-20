@@ -1,57 +1,22 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+mod common;
+
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use tessera_audit::AuditLog;
-use tessera_auth::credentials::{Password, PasswordPolicy};
-use tessera_auth::policy::AuthPolicy;
-use tessera_auth::rbac::{RoleStore, RoleStoreHandle};
-use tessera_auth::session::SessionManager;
-use tessera_auth::user::UserStoreHandle;
 use tessera_graph::Graph;
 use tessera_protocol::frame::{FramedReader, FramedWriter};
 use tessera_protocol::message::{ClientMessage, ServerMessage};
 use tessera_server::TesseraListener;
-use tessera_server::context::ServerContext;
 
-fn test_context() -> Arc<ServerContext> {
-    let admin_pw = Password::new("Admin@Init1!").unwrap();
-    let user_store =
-        Arc::new(UserStoreHandle::new("admin", &admin_pw, &PasswordPolicy::default()).unwrap());
-    user_store
-        .assign_role("admin", RoleStore::ADMIN_ROLE_ID)
-        .unwrap();
-    let sessions = Arc::new(SessionManager::new(3600));
-    let policy = Arc::new(AuthPolicy::new(
-        Arc::clone(&user_store),
-        RoleStoreHandle::with_defaults(),
-    ));
-
-    let dir = tempfile::tempdir().unwrap();
-    let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
-
-    let key_pair = rcgen::KeyPair::generate().unwrap();
-    let params = rcgen::CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
-    let cert = params.self_signed(&key_pair).unwrap();
-    let cert_path = dir.path().join("cert.pem");
-    let key_path = dir.path().join("key.pem");
-    std::fs::write(&cert_path, cert.pem()).unwrap();
-    std::fs::write(&key_path, key_pair.serialize_pem()).unwrap();
-
-    let tls = tessera_protocol::tls::TlsConfigBuilder::new()
-        .cert_file(cert_path)
-        .key_file(key_path)
-        .build()
-        .unwrap();
-
-    Arc::new(ServerContext::new(policy, sessions, audit, tls, user_store))
-}
+use common::test_context;
 
 #[tokio::test]
 async fn ping_pong_throughput_guard() {
     let ctx = test_context();
     let graph = Arc::new(RwLock::new(Graph::new()));
+    // Plain TCP throughput test — TLS throughput is a separate benchmark concern.
     let listener = TesseraListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 

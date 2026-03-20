@@ -20,6 +20,8 @@ use tessera_server::listener::TesseraListener;
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt::init();
+
     let bind_addr = std::env::var("TESSERA_BIND").unwrap_or_else(|_| "127.0.0.1:7687".into());
     let cert_path = std::env::var("TESSERA_TLS_CERT").unwrap_or_else(|_| "certs/server.pem".into());
     let key_path = std::env::var("TESSERA_TLS_KEY").unwrap_or_else(|_| "certs/server.key".into());
@@ -75,7 +77,7 @@ async fn main() {
         tokio::signal::ctrl_c()
             .await
             .expect("failed to install Ctrl+C handler");
-        eprintln!("\nShutting down...");
+        tracing::info!("shutting down");
         let _ = shutdown_tx.send(true);
     });
 
@@ -84,10 +86,10 @@ async fn main() {
         .await
         .expect("failed to bind");
     let addr = listener.local_addr().expect("local addr");
-    eprintln!("TesseraGraph listening on {addr} (TLS)");
+    tracing::info!("TesseraGraph listening on {addr} (TLS)");
 
     if let Err(e) = listener
-        .serve(
+        .serve_tls(
             ctx,
             graph,
             shutdown_rx,
@@ -96,6 +98,6 @@ async fn main() {
         )
         .await
     {
-        eprintln!("Server error: {e}");
+        tracing::error!("server error: {e}");
     }
 }
