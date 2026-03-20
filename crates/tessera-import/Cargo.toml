@@ -8,8 +8,11 @@ license.workspace     = true
 rust-version.workspace = true
 
 [dependencies]
-tessera-graph = { workspace = true }
-thiserror     = { workspace = true }
+tessera-graph              = { workspace = true }
+tessera-storage-enterprise = { workspace = true }
+thiserror                  = { workspace = true }
+serde                      = { workspace = true }
+serde_json                 = { workspace = true }
 
 [lints]
 workspace = true
