@@ -1,7 +1,10 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use std::collections::HashMap;
+
 use tessera_graph::{Graph, Property};
 use tessera_import::csv::{export_edges_csv, export_nodes_csv};
+use tessera_import::error::ExportError;
 
 fn empty_graph() -> Graph {
     Graph::new()
@@ -104,6 +107,37 @@ fn export_edges_contains_rel_label() {
         .unwrap();
     let csv = export_edges_csv(&g).unwrap();
     assert!(csv.contains("KNOWS"), "got: {csv}");
+}
+
+#[test]
+fn export_nodes_csv_bytes_property_returns_error() {
+    let mut g = Graph::new();
+    let props: tessera_graph::Properties =
+        std::iter::once(("data".to_owned(), Property::Bytes(vec![0xDE, 0xAD]))).collect();
+    g.add_node("Thing", props).unwrap();
+    let result = export_nodes_csv(&g);
+    assert!(
+        matches!(result, Err(ExportError::UnsupportedType { .. })),
+        "expected UnsupportedType error, got: {result:?}"
+    );
+}
+
+#[test]
+fn export_edges_csv_bytes_property_returns_error() {
+    let mut g = Graph::new();
+    let props_a: tessera_graph::Properties = HashMap::new();
+    let props_b: tessera_graph::Properties = HashMap::new();
+    g.add_node("A", props_a).unwrap();
+    g.add_node("B", props_b).unwrap();
+    let ids = g.node_ids();
+    let edge_props: tessera_graph::Properties =
+        std::iter::once(("payload".to_owned(), Property::Bytes(vec![1, 2, 3]))).collect();
+    g.add_edge("LINK", ids[0], ids[1], edge_props).unwrap();
+    let result = export_edges_csv(&g);
+    assert!(
+        matches!(result, Err(ExportError::UnsupportedType { .. })),
+        "expected UnsupportedType error, got: {result:?}"
+    );
 }
 
 #[test]

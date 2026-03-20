@@ -2,7 +2,7 @@
 
 use tessera_graph::{Graph, Property};
 use tessera_import::error::ImportError;
-use tessera_import::gql_import::import_gql;
+use tessera_import::gql_import::{GqlImportSummary, import_gql};
 
 fn empty_graph() -> Graph {
     Graph::new()
@@ -85,6 +85,14 @@ fn import_gql_accumulates_edge_count() {
     assert_eq!(summary.nodes_created, 2);
     assert_eq!(summary.edges_created, 1);
     assert_eq!(g.edge_count(), 1);
+}
+
+#[test]
+fn gql_import_summary_types_are_usize() {
+    let s = GqlImportSummary::default();
+    // If this compiles, the types are usize. If u64, the assignment below fails.
+    let _: usize = s.nodes_created;
+    let _: usize = s.edges_created;
 }
 
 #[test]

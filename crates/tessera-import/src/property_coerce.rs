@@ -2,14 +2,20 @@
 
 use tessera_graph::Property;
 
+use crate::error::{ExportError, ExportResult};
+
 /// Coerce a raw string to the most specific Property type.
 /// Priority: i64 → f64 → bool → String.
+/// NaN and infinity are rejected as f64 — they fall through to String.
 pub fn coerce_str_value(raw: &str) -> Property {
     if let Ok(i) = raw.parse::<i64>() {
         return Property::I64(i);
     }
     if let Ok(f) = raw.parse::<f64>() {
-        return Property::F64(f);
+        if f.is_finite() {
+            return Property::F64(f);
+        }
+        // NaN / infinity: fall through to String
     }
     match raw {
         "true" => Property::Bool(true),
@@ -35,23 +41,59 @@ pub fn json_value_to_property(v: &serde_json::Value) -> Property {
 }
 
 /// Convert a `Property` to a `serde_json::Value`.
-pub fn property_to_json(p: &Property) -> serde_json::Value {
+///
+/// # Errors
+///
+/// Returns [`ExportError::UnsupportedType`] for [`Property::Bytes`], which has
+/// no meaningful JSON representation.
+pub fn property_to_json(p: &Property) -> ExportResult<serde_json::Value> {
     match p {
-        Property::String(s) => serde_json::Value::String(s.clone()),
-        Property::I64(i) => serde_json::json!(i),
-        Property::F64(f) => serde_json::json!(f),
-        Property::Bool(b) => serde_json::Value::Bool(*b),
-        Property::Bytes(bytes) => serde_json::Value::String(format!("[{} bytes]", bytes.len())),
+        Property::String(s) => Ok(serde_json::Value::String(s.clone())),
+        Property::I64(i) => Ok(serde_json::json!(i)),
+        Property::F64(f) => Ok(serde_json::json!(f)),
+        Property::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+        Property::Bytes(_) => Err(ExportError::UnsupportedType {
+            context: "json export".to_owned(),
+            type_name: "Bytes".to_owned(),
+        }),
     }
 }
 
 /// Convert a `Property` to a GQL literal string.
-pub fn property_to_gql_literal(p: &Property) -> String {
+///
+/// # Errors
+///
+/// Returns [`ExportError::UnsupportedType`] for [`Property::Bytes`], which has
+/// no meaningful GQL literal representation.
+pub fn property_to_gql_literal(p: &Property) -> ExportResult<String> {
     match p {
-        Property::String(s) => format!("'{}'", s.replace('\'', "\\'")),
-        Property::I64(i) => i.to_string(),
-        Property::F64(f) => f.to_string(),
-        Property::Bool(b) => b.to_string(),
-        Property::Bytes(_) => "'[bytes]'".to_owned(),
+        Property::String(s) => Ok(format!("'{}'", s.replace('\'', "\\'"))),
+        Property::I64(i) => Ok(i.to_string()),
+        Property::F64(f) => Ok(f.to_string()),
+        Property::Bool(b) => Ok(b.to_string()),
+        Property::Bytes(_) => Err(ExportError::UnsupportedType {
+            context: "gql export".to_owned(),
+            type_name: "Bytes".to_owned(),
+        }),
     }
+}
+
+/// Validate that a property key matches `[a-zA-Z_][a-zA-Z0-9_]*`.
+///
+/// # Errors
+///
+/// Returns [`ExportError::InvalidPropertyKey`] if the key is empty or contains
+/// characters outside the allowed set.
+pub fn validate_property_key(key: &str) -> Result<(), ExportError> {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return Err(ExportError::InvalidPropertyKey(key.to_owned())),
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            return Err(ExportError::InvalidPropertyKey(key.to_owned()));
+        }
+    }
+    Ok(())
 }

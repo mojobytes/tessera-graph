@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use tessera_graph::Graph;
 
 use crate::error::{ExportResult, ImportError, ImportResult};
-use crate::node_lookup::find_node_by_label_and_prop;
+use crate::node_lookup::{NodeLookupIndex, build_lookup_index, find_node_in_index};
 use crate::property_coerce::{json_value_to_property, property_to_json};
 
 /// Summary returned after a successful JSON import.
@@ -40,9 +40,12 @@ pub struct ImportJsonSummary {
 /// }
 /// ```
 ///
+/// The `match` object in each edge endpoint must contain exactly one key.
+///
 /// # Errors
 ///
-/// Returns [`ImportError::JsonInvalid`] if the JSON cannot be parsed.
+/// Returns [`ImportError::JsonInvalid`] if the JSON cannot be parsed or if a
+/// `match` object has more than one key.
 /// Returns [`ImportError::JsonMissingField`] if required fields are absent.
 /// Returns [`ImportError::NodeNotFoundForEdge`] if an endpoint cannot be found.
 /// Returns [`ImportError::GraphWrite`] if a graph insertion fails.
@@ -87,40 +90,45 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
         nodes_imported += 1;
     }
 
-    // Import edges.
+    // Import edges — build index once after all nodes are inserted.
     let edges_arr = obj
         .get("edges")
         .and_then(|v| v.as_array())
         .ok_or_else(|| ImportError::JsonMissingField("edges".to_owned()))?;
 
     let mut edges_imported = 0_usize;
-    for edge_val in edges_arr {
-        let edge_obj = edge_val.as_object().ok_or_else(|| {
-            ImportError::JsonInvalid("each edge entry must be a JSON object".to_owned())
-        })?;
 
-        let rel_label = edge_obj
-            .get("label")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ImportError::JsonMissingField("edges[].label".to_owned()))?
-            .to_owned();
+    if !edges_arr.is_empty() {
+        let index = build_lookup_index(graph);
 
-        let source_id = resolve_endpoint(graph, edge_obj, "source")?;
-        let target_id = resolve_endpoint(graph, edge_obj, "target")?;
+        for edge_val in edges_arr {
+            let edge_obj = edge_val.as_object().ok_or_else(|| {
+                ImportError::JsonInvalid("each edge entry must be a JSON object".to_owned())
+            })?;
 
-        let mut edge_props: tessera_graph::Properties = HashMap::new();
-        if let Some(props_val) = edge_obj.get("properties") {
-            if let Some(props_obj) = props_val.as_object() {
-                for (k, v) in props_obj {
-                    edge_props.insert(k.clone(), json_value_to_property(v));
+            let rel_label = edge_obj
+                .get("label")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ImportError::JsonMissingField("edges[].label".to_owned()))?
+                .to_owned();
+
+            let source_id = resolve_endpoint(&index, edge_obj, "source")?;
+            let target_id = resolve_endpoint(&index, edge_obj, "target")?;
+
+            let mut edge_props: tessera_graph::Properties = HashMap::new();
+            if let Some(props_val) = edge_obj.get("properties") {
+                if let Some(props_obj) = props_val.as_object() {
+                    for (k, v) in props_obj {
+                        edge_props.insert(k.clone(), json_value_to_property(v));
+                    }
                 }
             }
-        }
 
-        graph
-            .add_edge(rel_label, source_id, target_id, edge_props)
-            .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
-        edges_imported += 1;
+            graph
+                .add_edge(rel_label, source_id, target_id, edge_props)
+                .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
+            edges_imported += 1;
+        }
     }
 
     Ok(ImportJsonSummary {
@@ -131,7 +139,7 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
 
 /// Resolve a node endpoint (source or target) from an edge JSON object.
 fn resolve_endpoint(
-    graph: &Graph,
+    index: &NodeLookupIndex,
     edge_obj: &serde_json::Map<String, serde_json::Value>,
     endpoint_key: &str,
 ) -> ImportResult<tessera_graph::NodeId> {
@@ -150,7 +158,14 @@ fn resolve_endpoint(
         .and_then(|v| v.as_object())
         .ok_or_else(|| ImportError::JsonMissingField(format!("edges[].{endpoint_key}.match")))?;
 
-    // Use the first key in the match object.
+    if match_obj.len() > 1 {
+        return Err(ImportError::JsonInvalid(format!(
+            "edges[].{endpoint_key}.match must have exactly 1 key, found {}",
+            match_obj.len()
+        )));
+    }
+
+    // Use the first (and only) key in the match object.
     let (prop_key, prop_val) = match_obj.iter().next().ok_or_else(|| {
         ImportError::JsonMissingField(format!("edges[].{endpoint_key}.match (empty)"))
     })?;
@@ -159,7 +174,7 @@ fn resolve_endpoint(
     // JSON strings are serialized with quotes; strip them for string values.
     let prop_value_clean = prop_val.as_str().map_or(prop_value_str, str::to_owned);
 
-    find_node_by_label_and_prop(graph, label, prop_key, &prop_value_clean).ok_or_else(|| {
+    find_node_in_index(index, label, prop_key, &prop_value_clean).ok_or_else(|| {
         ImportError::NodeNotFoundForEdge {
             label: label.to_owned(),
             prop: prop_key.clone(),
@@ -187,6 +202,8 @@ fn resolve_endpoint(
 /// # Errors
 ///
 /// Returns [`crate::error::ExportError::GraphRead`] if graph data cannot be read.
+/// Returns [`crate::error::ExportError::UnsupportedType`] if a property has
+/// type `Bytes`.
 /// Returns [`crate::error::ExportError::Serialize`] if JSON serialization fails.
 pub fn export_json(graph: &Graph) -> ExportResult<String> {
     use crate::error::ExportError;
@@ -206,7 +223,7 @@ pub fn export_json(graph: &Graph) -> ExportResult<String> {
             node.properties().iter().collect();
         sorted_props.sort_by_key(|(k, _)| k.as_str());
         for (k, v) in sorted_props {
-            props_obj.insert(k.clone(), property_to_json(v));
+            props_obj.insert(k.clone(), property_to_json(v)?);
         }
 
         nodes_arr.push(serde_json::json!({
@@ -229,7 +246,7 @@ pub fn export_json(graph: &Graph) -> ExportResult<String> {
                 edge.properties().iter().collect();
             sorted_props.sort_by_key(|(k, _)| k.as_str());
             for (k, v) in sorted_props {
-                props_obj.insert(k.clone(), property_to_json(v));
+                props_obj.insert(k.clone(), property_to_json(v)?);
             }
             edges_arr.push(serde_json::json!({
                 "source_id": edge.source().as_u64(),

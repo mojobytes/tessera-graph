@@ -1,6 +1,7 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
 use tessera_graph::{Graph, Property};
+use tessera_import::error::ExportError;
 use tessera_import::json::export_json;
 
 fn empty_graph() -> Graph {
@@ -101,6 +102,19 @@ fn export_json_bool_property_serialized_correctly() {
         parsed["nodes"][0]["properties"]["active"]
             .as_bool()
             .unwrap()
+    );
+}
+
+#[test]
+fn export_json_bytes_property_returns_error() {
+    let mut g = Graph::new();
+    let props: tessera_graph::Properties =
+        std::iter::once(("blob".to_owned(), Property::Bytes(vec![0xFF, 0x00]))).collect();
+    g.add_node("Blob", props).unwrap();
+    let result = export_json(&g);
+    assert!(
+        matches!(result, Err(ExportError::UnsupportedType { .. })),
+        "expected UnsupportedType error, got: {result:?}"
     );
 }
 

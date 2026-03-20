@@ -12,9 +12,9 @@ pub struct GqlImportSummary {
     /// Total number of GQL statements executed.
     pub statements_executed: usize,
     /// Total nodes created across all statements.
-    pub nodes_created: u64,
+    pub nodes_created: usize,
     /// Total edges created across all statements.
-    pub edges_created: u64,
+    pub edges_created: usize,
 }
 
 /// Import GQL statements from a text string.
@@ -58,8 +58,10 @@ pub fn import_gql(graph: &mut Graph, gql_text: &str) -> ImportResult<GqlImportSu
                         }
                     })?;
                 summary.statements_executed += 1;
-                summary.nodes_created += result.nodes_created;
-                summary.edges_created += result.edges_created;
+                summary.nodes_created +=
+                    usize::try_from(result.nodes_created).unwrap_or(usize::MAX);
+                summary.edges_created +=
+                    usize::try_from(result.edges_created).unwrap_or(usize::MAX);
             }
             GqlStatement::Query(_) => {
                 // Read-only queries are silently skipped.

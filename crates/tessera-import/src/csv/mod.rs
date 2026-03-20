@@ -3,13 +3,24 @@
 //! CSV import and export for `TesseraGraph`.
 //!
 //! Uses a manual CSV parser — no external crate required.
+//!
+//! ## Edge CSV Format Note
+//!
+//! Edge export and import use different formats by design:
+//! - **Export** (`export_edges_csv`): `source_id,target_id,rel_label,...` — uses internal IDs
+//!   for compactness; suitable for inspection and backup.
+//! - **Import** (`import_edges_csv`): `source_label,source_prop,source_value,...` — uses
+//!   property-based node matching; suitable for loading data from external sources.
+//!
+//! Round-trip (export then re-import) is not supported for edges. If you need round-trip
+//! capability, use JSON format which uses the same property-match convention for both.
 
 use std::collections::HashMap;
 
 use tessera_graph::{Graph, Property};
 
 use crate::error::{ExportResult, ImportError, ImportResult};
-use crate::node_lookup::find_node_by_label_and_prop;
+use crate::node_lookup::{build_lookup_index, find_node_in_index};
 use crate::property_coerce::{coerce_str_value, property_to_json};
 
 // ── CSV parsing helpers ──────────────────────────────────────────────────────
@@ -70,8 +81,10 @@ fn quote_csv_field(value: &str) -> String {
 /// # Errors
 ///
 /// Returns [`ImportError::CsvParse`] if the header is missing, the `label`
-/// column is absent, or a data row has fewer columns than the header.
-/// Returns [`ImportError::GraphWrite`] if inserting a node into the graph fails.
+/// column is absent, a data row has fewer columns than the header, or the label
+/// column is empty or whitespace-only.
+/// Returns [`ImportError::CsvParse`] (with row context) if inserting a node
+/// into the graph fails.
 pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
     let mut lines = csv.lines();
 
@@ -103,6 +116,13 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
         }
 
         let label = fields[0].trim().to_owned();
+        if label.is_empty() {
+            return Err(ImportError::CsvParse {
+                row: row_num,
+                reason: "label column must not be empty".to_owned(),
+            });
+        }
+
         let mut properties: tessera_graph::Properties = HashMap::new();
 
         for (i, key) in prop_keys.iter().enumerate() {
@@ -114,9 +134,11 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 
         graph
             .add_node(label, properties)
-            .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
+            .map_err(|e| ImportError::CsvParse {
+                row: row_num,
+                reason: format!("graph write failed: {e}"),
+            })?;
         count += 1;
-        let _ = row_num; // used implicitly via row_idx
     }
 
     Ok(count)
@@ -137,8 +159,8 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 ///
 /// Returns [`ImportError::CsvParse`] if the header has fewer than 7 columns or
 /// a data row cannot be parsed. Returns [`ImportError::NodeNotFoundForEdge`] if
-/// an endpoint node cannot be located. Returns [`ImportError::GraphWrite`] if
-/// inserting an edge fails.
+/// an endpoint node cannot be located. Returns [`ImportError::CsvParse`] (with
+/// row context) if inserting an edge fails.
 pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
     let mut lines = csv.lines();
 
@@ -160,6 +182,9 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
     // Property keys start at column index 7.
     let edge_prop_keys: Vec<&str> = headers[7..].iter().map(|s| s.trim()).collect();
     let mut count = 0_usize;
+
+    // Build lookup index once before the loop — O(N) build, O(1) lookups per edge.
+    let index = build_lookup_index(graph);
 
     for (row_idx, line) in lines.enumerate() {
         let row_num = row_idx + 2;
@@ -183,14 +208,14 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
         let target_value = fields[5].trim();
         let rel_label = fields[6].trim().to_owned();
 
-        let source_id = find_node_by_label_and_prop(graph, source_label, source_prop, source_value)
+        let source_id = find_node_in_index(&index, source_label, source_prop, source_value)
             .ok_or_else(|| ImportError::NodeNotFoundForEdge {
                 label: source_label.to_owned(),
                 prop: source_prop.to_owned(),
                 value: source_value.to_owned(),
             })?;
 
-        let target_id = find_node_by_label_and_prop(graph, target_label, target_prop, target_value)
+        let target_id = find_node_in_index(&index, target_label, target_prop, target_value)
             .ok_or_else(|| ImportError::NodeNotFoundForEdge {
                 label: target_label.to_owned(),
                 prop: target_prop.to_owned(),
@@ -207,7 +232,10 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 
         graph
             .add_edge(rel_label, source_id, target_id, edge_props)
-            .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
+            .map_err(|e| ImportError::CsvParse {
+                row: row_num,
+                reason: format!("graph write: {e}"),
+            })?;
         count += 1;
     }
 
@@ -225,11 +253,13 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 /// # Errors
 ///
 /// Returns [`crate::error::ExportError::GraphRead`] if a node cannot be read.
+/// Returns [`crate::error::ExportError::UnsupportedType`] if a node property
+/// has type `Bytes`.
 pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
     use crate::error::ExportError;
 
     // Collect all property keys — union across all nodes, sorted.
-    let mut all_keys: Vec<String> = {
+    let all_keys: Vec<String> = {
         let mut key_set = std::collections::BTreeSet::new();
         for id in graph.node_ids() {
             let node = graph
@@ -241,9 +271,9 @@ pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
         }
         key_set.into_iter().collect()
     };
-    all_keys.sort();
 
-    let mut out = String::new();
+    let node_count = graph.node_ids().len();
+    let mut out = String::with_capacity(30 * (node_count + 1));
 
     // Header row.
     out.push_str("label");
@@ -265,11 +295,17 @@ pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
         for k in &all_keys {
             out.push(',');
             if let Some(prop) = node.properties().get(k) {
-                // Use serde_json Value::to_string for primitives → then strip quotes for strings.
+                // Bytes is not supported in CSV export.
+                if matches!(prop, Property::Bytes(_)) {
+                    return Err(ExportError::UnsupportedType {
+                        context: "csv export".to_owned(),
+                        type_name: "Bytes".to_owned(),
+                    });
+                }
                 let v = match prop {
                     Property::String(s) => quote_csv_field(s),
                     other => {
-                        let jv = property_to_json(other);
+                        let jv = property_to_json(other)?;
                         quote_csv_field(&jv.to_string())
                     }
                 };
@@ -292,6 +328,8 @@ pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
 /// # Errors
 ///
 /// Returns [`crate::error::ExportError::GraphRead`] if an edge cannot be read.
+/// Returns [`crate::error::ExportError::UnsupportedType`] if an edge property
+/// has type `Bytes`.
 pub fn export_edges_csv(graph: &Graph) -> ExportResult<String> {
     use crate::error::ExportError;
 
@@ -307,7 +345,7 @@ pub fn export_edges_csv(graph: &Graph) -> ExportResult<String> {
         all_edges.extend(edges);
     }
 
-    let mut all_keys: Vec<String> = {
+    let all_keys: Vec<String> = {
         let mut key_set = std::collections::BTreeSet::new();
         for edge in &all_edges {
             for k in edge.properties().keys() {
@@ -316,9 +354,8 @@ pub fn export_edges_csv(graph: &Graph) -> ExportResult<String> {
         }
         key_set.into_iter().collect()
     };
-    all_keys.sort();
 
-    let mut out = String::new();
+    let mut out = String::with_capacity(40 * (all_edges.len() + 1));
 
     // Header row.
     out.push_str("source_id,target_id,rel_label");
@@ -337,10 +374,17 @@ pub fn export_edges_csv(graph: &Graph) -> ExportResult<String> {
         for k in &all_keys {
             out.push(',');
             if let Some(prop) = edge.properties().get(k) {
+                // Bytes is not supported in CSV export.
+                if matches!(prop, Property::Bytes(_)) {
+                    return Err(ExportError::UnsupportedType {
+                        context: "csv export".to_owned(),
+                        type_name: "Bytes".to_owned(),
+                    });
+                }
                 let v = match prop {
                     Property::String(s) => quote_csv_field(s),
                     other => {
-                        let jv = property_to_json(other);
+                        let jv = property_to_json(other)?;
                         quote_csv_field(&jv.to_string())
                     }
                 };

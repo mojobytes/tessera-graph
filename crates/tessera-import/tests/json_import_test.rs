@@ -117,6 +117,30 @@ fn import_json_error_missing_nodes_field() {
 }
 
 #[test]
+fn import_json_edge_multi_key_match_returns_error() {
+    let mut g = empty_graph();
+    let json = r#"{
+        "nodes":[
+            {"label":"Person","properties":{"name":"Alice","id":1}},
+            {"label":"Person","properties":{"name":"Bob","id":2}}
+        ],
+        "edges":[
+            {
+                "source":{"label":"Person","match":{"name":"Alice","id":1}},
+                "target":{"label":"Person","match":{"name":"Bob"}},
+                "label":"KNOWS",
+                "properties":{}
+            }
+        ]
+    }"#;
+    let result = import_json(&mut g, json);
+    assert!(
+        matches!(result, Err(ImportError::JsonInvalid(_))),
+        "expected error for multi-key match, got: {result:?}"
+    );
+}
+
+#[test]
 fn import_json_error_node_not_found_for_edge() {
     let mut g = empty_graph();
     let json = r#"{

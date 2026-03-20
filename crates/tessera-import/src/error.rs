@@ -25,6 +25,9 @@ pub enum ImportError {
     #[error("graph write error: {0}")]
     GraphWrite(String),
 
+    #[error("invalid property key '{0}': keys must match [a-zA-Z_][a-zA-Z0-9_]*")]
+    InvalidPropertyKey(String),
+
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -37,6 +40,12 @@ pub enum ExportError {
 
     #[error("serialization error: {0}")]
     Serialize(String),
+
+    #[error("{context}: property type '{type_name}' is not supported for this format")]
+    UnsupportedType { context: String, type_name: String },
+
+    #[error("invalid property key '{0}': must match [a-zA-Z_][a-zA-Z0-9_]*")]
+    InvalidPropertyKey(String),
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

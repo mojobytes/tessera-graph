@@ -153,3 +153,55 @@ fn import_edge_error_too_few_header_columns() {
     let result = import_edges_csv(&mut g, csv);
     assert!(matches!(result, Err(ImportError::CsvParse { .. })));
 }
+
+#[test]
+fn import_nodes_csv_empty_label_returns_error() {
+    let mut g = empty_graph();
+    let csv = "label,name\n,Alice\n";
+    let result = import_nodes_csv(&mut g, csv);
+    assert!(
+        matches!(result, Err(ImportError::CsvParse { row: 2, .. })),
+        "expected CsvParse error for empty label, got: {result:?}"
+    );
+}
+
+#[test]
+fn import_nodes_csv_whitespace_only_label_returns_error() {
+    let mut g = empty_graph();
+    let csv = "label,name\n   ,Bob\n";
+    let result = import_nodes_csv(&mut g, csv);
+    assert!(
+        matches!(result, Err(ImportError::CsvParse { row: 2, .. })),
+        "expected CsvParse error for whitespace-only label, got: {result:?}"
+    );
+}
+
+#[test]
+fn coerce_str_value_nan_is_string_not_float() {
+    // "NaN" parses as f64::NAN via str::parse — we must NOT silently store it
+    // as Property::F64(NaN). After the fix it should become Property::String("NaN").
+    let g = {
+        let mut g = tessera_graph::Graph::new();
+        tessera_import::csv::import_nodes_csv(&mut g, "label,val\nThing,NaN\n").unwrap();
+        g
+    };
+    let id = g.nodes_by_label("Thing")[0];
+    let node = g.node(id).unwrap();
+    assert_eq!(
+        node.properties().get("val"),
+        Some(&Property::String("NaN".to_owned())),
+        "NaN must not be silently stored as f64"
+    );
+}
+
+#[test]
+fn coerce_str_value_inf_is_string_not_float() {
+    let mut g = tessera_graph::Graph::new();
+    tessera_import::csv::import_nodes_csv(&mut g, "label,val\nThing,inf\n").unwrap();
+    let id = g.nodes_by_label("Thing")[0];
+    let node = g.node(id).unwrap();
+    assert_eq!(
+        node.properties().get("val"),
+        Some(&Property::String("inf".to_owned())),
+    );
+}

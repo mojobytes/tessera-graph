@@ -1,6 +1,7 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
 use tessera_graph::{Graph, Property};
+use tessera_import::error::ExportError;
 use tessera_import::gql_export::export_gql;
 
 fn empty_graph() -> Graph {
@@ -92,4 +93,59 @@ fn export_gql_string_with_single_quote_escaped() {
     let out = export_gql(&g).unwrap();
     // The apostrophe should be escaped as \'
     assert!(out.contains("\\'"), "apostrophe not escaped; got: {out}");
+}
+
+#[test]
+fn export_gql_bytes_property_returns_error() {
+    let mut g = empty_graph();
+    let props: tessera_graph::Properties =
+        std::iter::once(("bin".to_owned(), Property::Bytes(vec![1, 2]))).collect();
+    g.add_node("Node", props).unwrap();
+    let result = export_gql(&g);
+    assert!(
+        matches!(result, Err(ExportError::UnsupportedType { .. })),
+        "expected UnsupportedType error, got: {result:?}"
+    );
+}
+
+#[test]
+fn export_gql_malicious_property_key_returns_error() {
+    let mut g = empty_graph();
+    let props: tessera_graph::Properties = std::iter::once((
+        "x}: 1}) DELETE (:Node) CREATE (:X {y".to_owned(),
+        Property::I64(1),
+    ))
+    .collect();
+    g.add_node("Node", props).unwrap();
+    let result = export_gql(&g);
+    assert!(
+        matches!(result, Err(ExportError::InvalidPropertyKey(_))),
+        "expected InvalidPropertyKey error, got: {result:?}"
+    );
+}
+
+#[test]
+fn export_gql_empty_property_key_returns_error() {
+    let mut g = empty_graph();
+    let props: tessera_graph::Properties =
+        std::iter::once((String::new(), Property::I64(42))).collect();
+    g.add_node("Node", props).unwrap();
+    let result = export_gql(&g);
+    assert!(
+        matches!(result, Err(ExportError::InvalidPropertyKey(_))),
+        "got: {result:?}"
+    );
+}
+
+#[test]
+fn export_gql_valid_property_key_underscore_prefix() {
+    let mut g = empty_graph();
+    let props: tessera_graph::Properties =
+        std::iter::once(("_internal_id".to_owned(), Property::I64(1))).collect();
+    g.add_node("Node", props).unwrap();
+    let result = export_gql(&g);
+    assert!(
+        result.is_ok(),
+        "underscore-prefixed key must be accepted; got: {result:?}"
+    );
 }

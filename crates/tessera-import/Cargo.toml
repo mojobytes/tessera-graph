@@ -1,6 +1,6 @@
 [package]
 name        = "tessera-import"
-description = "CSV, JSON, GQL import/export and SQL migration for tessera-graph-enterprise"
+description = "CSV, JSON, and GQL import/export for tessera-graph-enterprise"
 version.workspace     = true
 edition.workspace     = true
 authors.workspace     = true

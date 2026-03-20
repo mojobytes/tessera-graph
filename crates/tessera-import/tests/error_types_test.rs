@@ -87,3 +87,30 @@ fn export_error_io_from_std() {
     let msg = e.to_string();
     assert!(msg.contains("I/O"), "got: {msg}");
 }
+
+#[test]
+fn export_error_unsupported_type_display() {
+    let e = ExportError::UnsupportedType {
+        context: "csv export".to_owned(),
+        type_name: "Bytes".to_owned(),
+    };
+    let msg = e.to_string();
+    assert!(msg.contains("Bytes"), "got: {msg}");
+    assert!(msg.contains("not supported"), "got: {msg}");
+}
+
+#[test]
+fn export_error_invalid_property_key_display() {
+    let e = ExportError::InvalidPropertyKey("x}: DELETE".to_owned());
+    let msg = e.to_string();
+    assert!(msg.contains("x}: DELETE"), "got: {msg}");
+    assert!(msg.contains("invalid property key"), "got: {msg}");
+}
+
+#[test]
+fn import_error_invalid_property_key_display() {
+    let e = ImportError::InvalidPropertyKey("x}: DELETE".to_owned());
+    let msg = e.to_string();
+    assert!(msg.contains("x}: DELETE"), "got: {msg}");
+    assert!(msg.contains("invalid property key"), "got: {msg}");
+}
