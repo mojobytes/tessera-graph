@@ -52,13 +52,23 @@ mod tests {
 
     #[test]
     fn backup_failed_formats_reason() {
-        let msg = format!("{}", EnterpriseError::BackupFailed { reason: "disk full".into() });
+        let msg = format!(
+            "{}",
+            EnterpriseError::BackupFailed {
+                reason: "disk full".into()
+            }
+        );
         assert!(msg.contains("disk full"));
     }
 
     #[test]
     fn restore_failed_formats_reason() {
-        let msg = format!("{}", EnterpriseError::RestoreFailed { reason: "corrupt".into() });
+        let msg = format!(
+            "{}",
+            EnterpriseError::RestoreFailed {
+                reason: "corrupt".into()
+            }
+        );
         assert!(msg.contains("corrupt"));
     }
 
@@ -71,7 +81,10 @@ mod tests {
     #[test]
     fn backup_already_exists_formats_path() {
         use std::path::PathBuf;
-        let msg = format!("{}", EnterpriseError::BackupAlreadyExists(PathBuf::from("/tmp/bk")));
+        let msg = format!(
+            "{}",
+            EnterpriseError::BackupAlreadyExists(PathBuf::from("/tmp/bk"))
+        );
         assert!(msg.contains("/tmp/bk"));
     }
 }

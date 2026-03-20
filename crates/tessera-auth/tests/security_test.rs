@@ -69,17 +69,21 @@ fn token_reuse_after_logout_is_rejected() {
     let token = sessions.create_session(admin_id).unwrap();
 
     // Valid before revocation
-    assert!(policy
-        .check_session(&token, Permission::NodeRead, &sessions)
-        .is_ok());
+    assert!(
+        policy
+            .check_session(&token, Permission::NodeRead, &sessions)
+            .is_ok()
+    );
 
     // Revoke (logout)
     sessions.revoke(&token).unwrap();
 
     // Rejected after revocation
-    assert!(policy
-        .check_session(&token, Permission::NodeRead, &sessions)
-        .is_err());
+    assert!(
+        policy
+            .check_session(&token, Permission::NodeRead, &sessions)
+            .is_err()
+    );
 }
 
 #[test]
@@ -100,11 +104,7 @@ fn concurrent_session_creation_all_tokens_unique() {
         .collect();
 
     let unique: std::collections::HashSet<_> = tokens.iter().collect();
-    assert_eq!(
-        unique.len(),
-        100,
-        "all 100 tokens must be unique"
-    );
+    assert_eq!(unique.len(), 100, "all 100 tokens must be unique");
 }
 
 #[test]

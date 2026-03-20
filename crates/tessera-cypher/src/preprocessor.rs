@@ -259,8 +259,7 @@ fn find_word(upper_input: &str, word: &str) -> Option<usize> {
     let mut search_from = 0;
     while let Some(idx) = upper_input[search_from..].find(word) {
         let abs = search_from + idx;
-        let before_ok =
-            abs == 0 || !upper_input.as_bytes()[abs - 1].is_ascii_alphanumeric();
+        let before_ok = abs == 0 || !upper_input.as_bytes()[abs - 1].is_ascii_alphanumeric();
         let after_ok = abs + word.len() >= upper_input.len()
             || !upper_input.as_bytes()[abs + word.len()].is_ascii_alphanumeric();
         if before_ok && after_ok {
@@ -282,8 +281,7 @@ fn find_in_list_operator(upper_input: &str) -> Option<usize> {
         // Word-boundary check.
         let before_ok = abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric();
         let after_in = abs + 2;
-        let after_ok =
-            after_in >= bytes.len() || !bytes[after_in].is_ascii_alphanumeric();
+        let after_ok = after_in >= bytes.len() || !bytes[after_in].is_ascii_alphanumeric();
         if before_ok && after_ok {
             // Skip whitespace to see if `[` follows.
             let mut cursor = after_in;

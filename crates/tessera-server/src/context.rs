@@ -56,11 +56,9 @@ impl ServerContext {
             .check_session(token, required, &self.sessions)
         {
             Ok(user_id) => {
-                let _ = self.audit.record_success(
-                    Some(user_id.raw()),
-                    &required.to_string(),
-                    None,
-                );
+                let _ = self
+                    .audit
+                    .record_success(Some(user_id.raw()), &required.to_string(), None);
                 Ok(user_id)
             }
             Err(e) => {
@@ -71,19 +69,13 @@ impl ServerContext {
                         | tessera_auth::AuthError::TokenExpired
                 );
                 if is_authz_error {
-                    let _ = self.audit.record_denied(
-                        None,
-                        &required.to_string(),
-                        None,
-                        &e.to_string(),
-                    );
+                    let _ =
+                        self.audit
+                            .record_denied(None, &required.to_string(), None, &e.to_string());
                 } else {
-                    let _ = self.audit.record_error(
-                        None,
-                        &required.to_string(),
-                        None,
-                        &e.to_string(),
-                    );
+                    let _ =
+                        self.audit
+                            .record_error(None, &required.to_string(), None, &e.to_string());
                 }
                 Err(e)
             }

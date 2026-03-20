@@ -1,9 +1,9 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use tessera_auth::AuthError;
 use tessera_auth::credentials::{Password, PasswordPolicy};
 use tessera_auth::rate_limit::{LoginAttemptTracker, LoginPolicy};
 use tessera_auth::user::UserStoreHandle;
-use tessera_auth::AuthError;
 
 #[test]
 fn five_failed_attempts_trigger_lockout() {

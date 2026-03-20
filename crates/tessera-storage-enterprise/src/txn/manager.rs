@@ -58,8 +58,11 @@ impl TransactionManager {
                 .wal
                 .lock()
                 .map_err(|_| EnterpriseError::LockPoisoned("wal"))?;
-            wal.append(WalRecord::Begin { lsn: LSN_PLACEHOLDER, txn_id })
-                .map_err(EnterpriseError::Graph)?;
+            wal.append(WalRecord::Begin {
+                lsn: LSN_PLACEHOLDER,
+                txn_id,
+            })
+            .map_err(EnterpriseError::Graph)?;
         }
 
         let snapshot = match isolation {
@@ -75,7 +78,12 @@ impl TransactionManager {
             IsolationLevel::ReadCommitted => None,
         };
 
-        Ok(TransactionHandle::new(txn_id, isolation, TxnState::Active, snapshot))
+        Ok(TransactionHandle::new(
+            txn_id,
+            isolation,
+            TxnState::Active,
+            snapshot,
+        ))
     }
 
     /// Commits the transaction: writes a `Commit` record to the WAL
@@ -88,7 +96,10 @@ impl TransactionManager {
     /// if a lock was poisoned. Returns I/O errors from WAL writes.
     pub fn commit(&self, handle: &mut TransactionHandle) -> Result<()> {
         if handle.state() != TxnState::Active {
-            return Err(EnterpriseError::TransactionNotActive(handle.txn_id(), handle.state()));
+            return Err(EnterpriseError::TransactionNotActive(
+                handle.txn_id(),
+                handle.state(),
+            ));
         }
 
         let mut wal = self
@@ -134,7 +145,10 @@ impl TransactionManager {
     /// if a lock was poisoned. Returns I/O errors from WAL writes.
     pub fn rollback(&self, handle: &mut TransactionHandle) -> Result<()> {
         if handle.state() != TxnState::Active {
-            return Err(EnterpriseError::TransactionNotActive(handle.txn_id(), handle.state()));
+            return Err(EnterpriseError::TransactionNotActive(
+                handle.txn_id(),
+                handle.state(),
+            ));
         }
 
         let mut wal = self
@@ -406,9 +420,9 @@ mod tests {
         let reader = WalReader::open(tmp.path()).unwrap();
         let records: Vec<_> = reader.records().collect();
 
-        let found = records.iter().any(|r| {
-            matches!(r, WalRecord::Begin { txn_id: id, .. } if *id == txn_id)
-        });
+        let found = records
+            .iter()
+            .any(|r| matches!(r, WalRecord::Begin { txn_id: id, .. } if *id == txn_id));
         assert!(found, "WAL must contain a Begin record for txn {txn_id}");
     }
 }

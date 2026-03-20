@@ -138,8 +138,16 @@ mod tests {
             created_at_unix_secs: 1_700_000_000,
             snapshot_lsn: 42,
             files: vec![
-                FileEntry { name: "nodes.db".to_owned(), size_bytes: 4096, crc32: 0xDEAD_BEEF },
-                FileEntry { name: "graph.meta".to_owned(), size_bytes: 4096, crc32: 0xCAFE_BABE },
+                FileEntry {
+                    name: "nodes.db".to_owned(),
+                    size_bytes: 4096,
+                    crc32: 0xDEAD_BEEF,
+                },
+                FileEntry {
+                    name: "graph.meta".to_owned(),
+                    size_bytes: 4096,
+                    crc32: 0xCAFE_BABE,
+                },
             ],
         };
 
@@ -178,9 +186,21 @@ mod tests {
             created_at_unix_secs: 0,
             snapshot_lsn: 0,
             files: vec![
-                FileEntry { name: "a".to_owned(), size_bytes: 1, crc32: 0 },
-                FileEntry { name: "b".to_owned(), size_bytes: 2, crc32: 1 },
-                FileEntry { name: "c".to_owned(), size_bytes: 3, crc32: 2 },
+                FileEntry {
+                    name: "a".to_owned(),
+                    size_bytes: 1,
+                    crc32: 0,
+                },
+                FileEntry {
+                    name: "b".to_owned(),
+                    size_bytes: 2,
+                    crc32: 1,
+                },
+                FileEntry {
+                    name: "c".to_owned(),
+                    size_bytes: 3,
+                    crc32: 2,
+                },
             ],
         };
         assert_eq!(m.file_count(), 3);

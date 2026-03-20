@@ -49,7 +49,9 @@ fn user_with_multiple_roles_union_of_permissions() {
 
     // Create a custom role with just GraphBackup
     let backup_perms = std::iter::once(Permission::GraphBackup).collect();
-    let backup_role_id = role_store.create_custom_role("backup", backup_perms).unwrap();
+    let backup_role_id = role_store
+        .create_custom_role("backup", backup_perms)
+        .unwrap();
 
     // Create user with readonly + backup roles
     let pw = Password::new("TestPass1!!!").unwrap();
@@ -85,7 +87,9 @@ fn unknown_user_id_is_denied() {
 #[test]
 fn permission_denied_error_contains_required_permission() {
     let (policy, readonly_id) = setup_with_readonly_user();
-    let err = policy.check(readonly_id, Permission::NodeCreate).unwrap_err();
+    let err = policy
+        .check(readonly_id, Permission::NodeCreate)
+        .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("node:create"),

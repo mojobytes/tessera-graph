@@ -3,9 +3,7 @@
 use tessera_protocol::tls::{ClientAuth, TlsConfigBuilder};
 
 /// Generate a self-signed cert+key pair and write to temp files.
-fn generate_test_cert(
-    dir: &std::path::Path,
-) -> (std::path::PathBuf, std::path::PathBuf) {
+fn generate_test_cert(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
     let key_pair = rcgen::KeyPair::generate().unwrap();
     let params = rcgen::CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
     let cert = params.self_signed(&key_pair).unwrap();
@@ -20,9 +18,7 @@ fn generate_test_cert(
 }
 
 /// Generate a mismatched cert and key (cert signed by one key, file has a different key).
-fn generate_mismatched_cert_key(
-    dir: &std::path::Path,
-) -> (std::path::PathBuf, std::path::PathBuf) {
+fn generate_mismatched_cert_key(dir: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
     let kp1 = rcgen::KeyPair::generate().unwrap();
     let params1 = rcgen::CertificateParams::new(vec!["localhost".to_owned()]).unwrap();
     let cert1 = params1.self_signed(&kp1).unwrap();

@@ -116,9 +116,7 @@ impl Default for TlsConfigBuilder {
     }
 }
 
-fn load_certs(
-    path: &Path,
-) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
+fn load_certs(path: &Path) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
     let file = std::fs::File::open(path)
         .map_err(|e| ProtocolError::CertificateLoad(format!("{}: {e}", path.display())))?;
     let mut reader = std::io::BufReader::new(file);
@@ -136,9 +134,7 @@ fn load_certs(
     Ok(certs)
 }
 
-fn load_private_key(
-    path: &Path,
-) -> Result<rustls::pki_types::PrivateKeyDer<'static>> {
+fn load_private_key(path: &Path) -> Result<rustls::pki_types::PrivateKeyDer<'static>> {
     let file = std::fs::File::open(path)
         .map_err(|e| ProtocolError::KeyLoad(format!("{}: {e}", path.display())))?;
     let mut reader = std::io::BufReader::new(file);

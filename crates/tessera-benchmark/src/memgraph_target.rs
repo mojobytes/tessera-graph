@@ -32,19 +32,20 @@ impl MemgraphTarget {
     ///
     /// Returns [`BenchmarkError::External`] if the connection cannot be established.
     pub fn connect(uri: &str, user: &str, pass: &str) -> Result<Self> {
-        let rt = Runtime::new()
-            .map_err(|e| BenchmarkError::external(format!("failed to create tokio runtime: {e}")))?;
+        let rt = Runtime::new().map_err(|e| {
+            BenchmarkError::external(format!("failed to create tokio runtime: {e}"))
+        })?;
 
         let graph = rt.block_on(async {
-            let mut config = ConfigBuilder::default()
-                .uri(uri)
-                .fetch_size(500);
+            let mut config = ConfigBuilder::default().uri(uri).fetch_size(500);
             if !user.is_empty() {
                 config = config.user(user).password(pass);
             }
-            Graph::connect(config.build().map_err(|e| {
-                BenchmarkError::external(format!("invalid config: {e}"))
-            })?)
+            Graph::connect(
+                config
+                    .build()
+                    .map_err(|e| BenchmarkError::external(format!("invalid config: {e}")))?,
+            )
             .await
             .map_err(|e| BenchmarkError::external(format!("bolt connect failed: {e}")))
         })?;
@@ -68,8 +69,7 @@ impl MemgraphTarget {
     ///
     /// Returns [`BenchmarkError::External`] if the connection fails.
     pub fn from_env() -> Result<Self> {
-        let uri = std::env::var("MEMGRAPH_URI")
-            .unwrap_or_else(|_| "bolt://localhost:7687".into());
+        let uri = std::env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".into());
         let user = std::env::var("MEMGRAPH_USER").unwrap_or_default();
         let pass = std::env::var("MEMGRAPH_PASS").unwrap_or_default();
         Self::connect(&uri, &user, &pass)
@@ -94,7 +94,11 @@ impl BenchmarkTarget for MemgraphTarget {
         let handle_id = self.next_handle();
 
         let eid: String = self.rt.block_on(async {
-            let mut result = self.graph.execute(q).await.map_err(|e| Self::bolt_err(&e))?;
+            let mut result = self
+                .graph
+                .execute(q)
+                .await
+                .map_err(|e| Self::bolt_err(&e))?;
             let row = result
                 .next()
                 .await
@@ -138,7 +142,11 @@ impl BenchmarkTarget for MemgraphTarget {
         let handle_id = self.next_handle();
 
         let eid: String = self.rt.block_on(async {
-            let mut result = self.graph.execute(q).await.map_err(|e| Self::bolt_err(&e))?;
+            let mut result = self
+                .graph
+                .execute(q)
+                .await
+                .map_err(|e| Self::bolt_err(&e))?;
             let row = result
                 .next()
                 .await
@@ -159,11 +167,15 @@ impl BenchmarkTarget for MemgraphTarget {
             .ok_or_else(|| BenchmarkError::external("unknown node handle"))?
             .clone();
 
-        let q = query("MATCH (n) WHERE elementId(n) = $eid RETURN labels(n) AS lbls")
-            .param("eid", eid);
+        let q =
+            query("MATCH (n) WHERE elementId(n) = $eid RETURN labels(n) AS lbls").param("eid", eid);
 
         self.rt.block_on(async {
-            let mut result = self.graph.execute(q).await.map_err(|e| Self::bolt_err(&e))?;
+            let mut result = self
+                .graph
+                .execute(q)
+                .await
+                .map_err(|e| Self::bolt_err(&e))?;
             let row = result
                 .next()
                 .await
@@ -190,7 +202,11 @@ impl BenchmarkTarget for MemgraphTarget {
             .param("eid", eid);
 
         self.rt.block_on(async {
-            let mut result = self.graph.execute(q).await.map_err(|e| Self::bolt_err(&e))?;
+            let mut result = self
+                .graph
+                .execute(q)
+                .await
+                .map_err(|e| Self::bolt_err(&e))?;
             let row = result
                 .next()
                 .await
@@ -221,7 +237,11 @@ impl BenchmarkTarget for MemgraphTarget {
         .param("eid", start_eid.clone());
 
         let eids: Vec<String> = self.rt.block_on(async {
-            let mut result = self.graph.execute(q).await.map_err(|e| Self::bolt_err(&e))?;
+            let mut result = self
+                .graph
+                .execute(q)
+                .await
+                .map_err(|e| Self::bolt_err(&e))?;
             let mut eids = vec![start_eid];
             while let Some(row) = result.next().await.map_err(|e| Self::bolt_err(&e))? {
                 let eid: String = row
@@ -249,11 +269,7 @@ impl BenchmarkTarget for MemgraphTarget {
         self.traverse_bfs(start, max_depth)
     }
 
-    fn shortest_path(
-        &self,
-        from: NodeHandle,
-        to: NodeHandle,
-    ) -> Result<Option<Vec<NodeHandle>>> {
+    fn shortest_path(&self, from: NodeHandle, to: NodeHandle) -> Result<Option<Vec<NodeHandle>>> {
         let from_eid = self
             .node_ids
             .get(&from.0)
@@ -275,12 +291,16 @@ impl BenchmarkTarget for MemgraphTarget {
         .param("to", to_eid);
 
         self.rt.block_on(async {
-            let mut result = self.graph.execute(q).await.map_err(|e| Self::bolt_err(&e))?;
+            let mut result = self
+                .graph
+                .execute(q)
+                .await
+                .map_err(|e| Self::bolt_err(&e))?;
             match result.next().await.map_err(|e| Self::bolt_err(&e))? {
                 Some(row) => {
-                    let path_eids: Vec<String> = row.get("path_eids").map_err(|e| {
-                        BenchmarkError::external(format!("path eids: {e}"))
-                    })?;
+                    let path_eids: Vec<String> = row
+                        .get("path_eids")
+                        .map_err(|e| BenchmarkError::external(format!("path eids: {e}")))?;
                     let handles: Vec<NodeHandle> = path_eids
                         .iter()
                         .enumerate()
@@ -295,9 +315,7 @@ impl BenchmarkTarget for MemgraphTarget {
 
     fn clear(&mut self) {
         let q = query("MATCH (n) DETACH DELETE n");
-        let _ = self.rt.block_on(async {
-            self.graph.execute(q).await
-        });
+        let _ = self.rt.block_on(async { self.graph.execute(q).await });
         self.node_ids.clear();
         self.edge_ids.clear();
     }

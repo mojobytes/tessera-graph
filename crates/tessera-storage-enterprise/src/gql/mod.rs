@@ -7,8 +7,8 @@
 use std::collections::HashMap;
 
 use tessera_graph::gql::{
-    compile_match_for_mutation, eval_set_value, literal_to_property, literal_vec_to_properties,
     CreatePattern, DeleteClause, MergeClause, MutationClause, MutationStatement, SetClause,
+    compile_match_for_mutation, eval_set_value, literal_to_property, literal_vec_to_properties,
 };
 use tessera_graph::{Error, GqlMutationResult, Graph, NodeId, Property};
 
@@ -163,7 +163,9 @@ fn execute_delete(
         let edges_removed = edges_before.saturating_sub(graph.edge_count());
         result.nodes_deleted += 1;
         #[allow(clippy::cast_possible_truncation)] // usize→u64: lossless on all supported platforms
-        { result.edges_deleted += edges_removed as u64; }
+        {
+            result.edges_deleted += edges_removed as u64;
+        }
     }
 
     Ok(())
@@ -182,10 +184,7 @@ fn execute_set(
 
     for assignment in &clause.assignments {
         let ids = node_var_multi.get(assignment.var.as_str()).ok_or_else(|| {
-            Error::GqlMutationError(format!(
-                "unbound variable '{}' in SET",
-                assignment.var
-            ))
+            Error::GqlMutationError(format!("unbound variable '{}' in SET", assignment.var))
         })?;
         let value = eval_set_value(&assignment.value)?;
         for &id in ids {

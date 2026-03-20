@@ -58,10 +58,7 @@ impl AuditLog {
     ///
     /// Returns `AuditError::Io` if the file cannot be opened.
     pub fn open(path: &Path) -> Result<Self> {
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
 
         Ok(Self {
             writer: Mutex::new(BufWriter::new(file)),

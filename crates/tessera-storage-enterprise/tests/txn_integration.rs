@@ -1,4 +1,4 @@
-use tessera_graph::{props, Graph, SharedGraph};
+use tessera_graph::{Graph, SharedGraph, props};
 use tessera_storage_enterprise::txn::{
     IsolationLevel, TransactionHandle, TransactionManager, TxnState,
 };
@@ -49,10 +49,7 @@ fn snapshot_isolation_captures_committed_state() {
 
     // T1: add node and commit
     let mut t1 = mgr.begin(IsolationLevel::SnapshotIsolation).unwrap();
-    graph
-        .write()
-        .add_node("N1", props! {})
-        .unwrap();
+    graph.write().add_node("N1", props! {}).unwrap();
     mgr.commit(&mut t1).unwrap();
 
     // T2: begins with SI — sees T1 committed
@@ -115,10 +112,7 @@ fn sixteen_threads_concurrent_begin_commit() {
 
     // All must be committed.
     for id in &ids {
-        assert!(
-            mgr.is_committed(*id).unwrap(),
-            "txn {id} not in commit log"
-        );
+        assert!(mgr.is_committed(*id).unwrap(), "txn {id} not in commit log");
     }
 
     // Committed set count must match exactly.

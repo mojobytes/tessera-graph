@@ -162,7 +162,10 @@ fn concurrent_change_password_toctou_protected() {
         .iter()
         .filter(|&&ok| ok)
         .count();
-    assert_eq!(successes, 1, "exactly one concurrent change_password must win");
+    assert_eq!(
+        successes, 1,
+        "exactly one concurrent change_password must win"
+    );
 
     // The user must still be authenticatable with one of the two new passwords.
     let new_a = Password::new("NewSecureA1!").unwrap();

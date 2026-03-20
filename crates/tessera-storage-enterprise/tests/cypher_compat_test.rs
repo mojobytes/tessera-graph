@@ -2,7 +2,7 @@
 
 use tessera_config::QueryLanguage;
 use tessera_cypher::parse_with_mode;
-use tessera_graph::{gql, props, Graph, GqlStatement, GqlValue};
+use tessera_graph::{GqlStatement, GqlValue, Graph, gql, props};
 
 // ── Config tests ─────────────────────────────────────────────────────
 
@@ -19,8 +19,7 @@ fn gql_mode_passes_standard_queries() {
 
 #[test]
 fn gql_mode_passes_mutation_queries() {
-    let stmt =
-        parse_with_mode("CREATE (n:Person {name: 'Alice'})", QueryLanguage::Gql).unwrap();
+    let stmt = parse_with_mode("CREATE (n:Person {name: 'Alice'})", QueryLanguage::Gql).unwrap();
     assert!(matches!(stmt, GqlStatement::Mutation(_)));
 }
 
@@ -48,11 +47,7 @@ fn strict_gql_rejects_block_comment() {
 
 #[test]
 fn strict_gql_passes_standard_gql() {
-    let stmt = parse_with_mode(
-        "MATCH (n:Person) RETURN n.name",
-        QueryLanguage::StrictGql,
-    )
-    .unwrap();
+    let stmt = parse_with_mode("MATCH (n:Person) RETURN n.name", QueryLanguage::StrictGql).unwrap();
     assert!(matches!(stmt, GqlStatement::Query(_)));
 }
 
@@ -163,11 +158,12 @@ fn cypher_compat_starts_with_filters_correctly() {
         GqlStatement::Query(q) => {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 2, "Alice and Albert start with 'Al'");
-            let names: Vec<_> = rows
-                .iter()
-                .filter_map(|r| r.get("n.name"))
-                .collect();
-            assert!(names.iter().all(|v| matches!(v, GqlValue::Str(s) if s.starts_with("Al"))));
+            let names: Vec<_> = rows.iter().filter_map(|r| r.get("n.name")).collect();
+            assert!(
+                names
+                    .iter()
+                    .all(|v| matches!(v, GqlValue::Str(s) if s.starts_with("Al")))
+            );
         }
         GqlStatement::Mutation(_) => panic!("expected Query"),
     }
@@ -224,7 +220,8 @@ fn cypher_compat_contains_filters_correctly() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     g.add_node("Person", props! { "name" => "Bob" }).unwrap();
-    g.add_node("Person", props! { "name" => "Malcolm" }).unwrap();
+    g.add_node("Person", props! { "name" => "Malcolm" })
+        .unwrap();
 
     let stmt = parse_with_mode(
         "MATCH (n:Person) WHERE n.name CONTAINS 'al' RETURN n.name",
@@ -235,7 +232,10 @@ fn cypher_compat_contains_filters_correctly() {
         GqlStatement::Query(q) => {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1, "Only Malcolm contains 'al' (case-sensitive)");
-            assert_eq!(rows[0].get("n.name"), Some(&GqlValue::Str("Malcolm".into())));
+            assert_eq!(
+                rows[0].get("n.name"),
+                Some(&GqlValue::Str("Malcolm".into()))
+            );
         }
         GqlStatement::Mutation(_) => panic!("expected Query"),
     }
@@ -248,7 +248,8 @@ fn cypher_compat_in_operator_with_string_list() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     g.add_node("Person", props! { "name" => "Bob" }).unwrap();
-    g.add_node("Person", props! { "name" => "Charlie" }).unwrap();
+    g.add_node("Person", props! { "name" => "Charlie" })
+        .unwrap();
 
     let stmt = parse_with_mode(
         "MATCH (n:Person) WHERE n.name IN ['Alice', 'Charlie'] RETURN n.name",
@@ -311,11 +312,8 @@ fn cypher_compat_id_function_returns_int() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = parse_with_mode(
-        "MATCH (n:Person) RETURN id(n)",
-        QueryLanguage::CypherCompat,
-    )
-    .unwrap();
+    let stmt =
+        parse_with_mode("MATCH (n:Person) RETURN id(n)", QueryLanguage::CypherCompat).unwrap();
     match stmt {
         GqlStatement::Query(q) => {
             let rows = gql::execute(&g, &q).unwrap();
@@ -371,10 +369,7 @@ fn cypher_compat_type_function_returns_edge_label() {
         GqlStatement::Query(q) => {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1);
-            assert_eq!(
-                rows[0].get("type(r)"),
-                Some(&GqlValue::Str("KNOWS".into()))
-            );
+            assert_eq!(rows[0].get("type(r)"), Some(&GqlValue::Str("KNOWS".into())));
         }
         GqlStatement::Mutation(_) => panic!("expected Query"),
     }
@@ -424,11 +419,8 @@ fn strict_gql_rejects_in_list() {
 
 #[test]
 fn strict_gql_rejects_id_function() {
-    let err = parse_with_mode(
-        "MATCH (n:Person) RETURN id(n)",
-        QueryLanguage::StrictGql,
-    )
-    .unwrap_err();
+    let err =
+        parse_with_mode("MATCH (n:Person) RETURN id(n)", QueryLanguage::StrictGql).unwrap_err();
     assert!(err.to_string().contains("id()"), "got: {err}");
 }
 
@@ -519,8 +511,7 @@ fn cypher_compat_backtick_conversion_skips_string_literal_content() {
 #[test]
 fn cypher_compat_block_comment_with_unicode_preserves_byte_length() {
     let input = "/* café */ MATCH (n) RETURN n";
-    let output = tessera_cypher::preprocessor::cypher_to_gql(input)
-        .expect("strip should succeed");
+    let output = tessera_cypher::preprocessor::cypher_to_gql(input).expect("strip should succeed");
     assert_eq!(
         output.len(),
         input.len(),
@@ -541,7 +532,8 @@ fn cypher_compat_in_variable_gives_clear_error_message() {
     .unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("IN") && (msg.contains("literal") || msg.contains("list") || msg.contains('[')),
+        msg.contains("IN")
+            && (msg.contains("literal") || msg.contains("list") || msg.contains('[')),
         "error should explain IN limitation, got: {msg}"
     );
 }
@@ -563,8 +555,10 @@ fn strict_gql_rejects_starts_with_tab_separated() {
 #[test]
 fn cypher_compat_string_ops_combined_with_and() {
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alexander" }).unwrap();
-    g.add_node("Person", props! { "name" => "Alexandra" }).unwrap();
+    g.add_node("Person", props! { "name" => "Alexander" })
+        .unwrap();
+    g.add_node("Person", props! { "name" => "Alexandra" })
+        .unwrap();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
     let stmt = parse_with_mode(
@@ -576,7 +570,10 @@ fn cypher_compat_string_ops_combined_with_and() {
         GqlStatement::Query(q) => {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].get("n.name"), Some(&GqlValue::Str("Alexander".into())));
+            assert_eq!(
+                rows[0].get("n.name"),
+                Some(&GqlValue::Str("Alexander".into()))
+            );
         }
         GqlStatement::Mutation(_) => panic!("expected Query"),
     }
@@ -631,9 +628,7 @@ fn cypher_compat_id_used_in_where_clause() {
     // Filter by node ID using id() in WHERE.
     #[allow(clippy::cast_possible_wrap)]
     let id_val = node_id.as_u64() as i64;
-    let query = format!(
-        "MATCH (n:Person) WHERE id(n) = {id_val} RETURN n.name"
-    );
+    let query = format!("MATCH (n:Person) WHERE id(n) = {id_val} RETURN n.name");
     let stmt = parse_with_mode(&query, QueryLanguage::CypherCompat).unwrap();
     match stmt {
         GqlStatement::Query(q) => {

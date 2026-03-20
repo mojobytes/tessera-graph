@@ -119,7 +119,7 @@ fn audit_entry_serializes_to_json_lines_format() {
     let contents = std::fs::read_to_string(&path).unwrap();
     // Each entry is a single line of valid JSON (NDJSON format)
     for line in contents.trim().lines() {
-        let _: serde_json::Value = serde_json::from_str(line)
-            .unwrap_or_else(|_| panic!("not valid JSON: {line}"));
+        let _: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|_| panic!("not valid JSON: {line}"));
     }
 }

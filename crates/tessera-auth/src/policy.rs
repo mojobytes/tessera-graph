@@ -34,10 +34,7 @@ impl AuthPolicy {
     /// Returns `AuthError::PermissionDenied` if the user lacks the permission.
     pub fn check(&self, user_id: UserId, required: Permission) -> Result<()> {
         // Look up the user's roles — if user is unknown, deny.
-        let role_ids = self
-            .user_store
-            .get_user_roles(user_id)
-            .unwrap_or_default();
+        let role_ids = self.user_store.get_user_roles(user_id).unwrap_or_default();
 
         // Collect the union of all permissions from all roles — fail-safe on lock poison.
         let permissions = self.role_store.collect_permissions(&role_ids);

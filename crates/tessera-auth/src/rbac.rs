@@ -203,8 +203,9 @@ impl RoleStore {
         );
 
         // Readonly — read nodes and edges
-        let readonly_perms: HashSet<Permission> =
-            [Permission::NodeRead, Permission::EdgeRead].into_iter().collect();
+        let readonly_perms: HashSet<Permission> = [Permission::NodeRead, Permission::EdgeRead]
+            .into_iter()
+            .collect();
         roles.insert(
             Self::READONLY_ROLE_ID,
             Role {
@@ -216,8 +217,9 @@ impl RoleStore {
         );
 
         // Monitor — monitoring only
-        let mon_perms: HashSet<Permission> =
-            [Permission::Monitor, Permission::AdminAudit].into_iter().collect();
+        let mon_perms: HashSet<Permission> = [Permission::Monitor, Permission::AdminAudit]
+            .into_iter()
+            .collect();
         roles.insert(
             Self::MONITOR_ROLE_ID,
             Role {

@@ -21,10 +21,7 @@ pub mod preprocessor;
 /// the preprocessor when Cypher constructs are detected in `StrictGql` mode,
 /// or when the input contains malformed Cypher syntax (unclosed comments, etc.)
 /// in `CypherCompat` mode.
-pub fn parse_with_mode(
-    input: &str,
-    mode: QueryLanguage,
-) -> tessera_graph::Result<GqlStatement> {
+pub fn parse_with_mode(input: &str, mode: QueryLanguage) -> tessera_graph::Result<GqlStatement> {
     match mode {
         QueryLanguage::Gql => tessera_graph::gql::parse_statement(input),
         QueryLanguage::CypherCompat => {

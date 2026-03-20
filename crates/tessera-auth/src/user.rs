@@ -432,4 +432,3 @@ mod tests {
         assert_zeroize::<UserRecord>();
     }
 }
-

@@ -7,8 +7,8 @@ use tessera_benchmark::dataset::{ChainDataset, Dataset};
 use tessera_benchmark::error::{BenchmarkError, Result};
 use tessera_benchmark::report::{Report, ReportEntry};
 use tessera_benchmark::scenario::{
-    ConcurrentScenario, MixedScenario, PathfindingScenario, ReadScenario, Scenario,
-    ScenarioResult, TraversalScenario, WriteScenario,
+    ConcurrentScenario, MixedScenario, PathfindingScenario, ReadScenario, Scenario, ScenarioResult,
+    TraversalScenario, WriteScenario,
 };
 use tessera_benchmark::target::BenchmarkTarget;
 use tessera_benchmark::tessera_target::TesseraTarget;
@@ -226,9 +226,7 @@ fn run_scenarios(args: &CliArgs, target: &mut dyn BenchmarkTarget) -> Result<Rep
     }
 
     if run_read {
-        let ds = ChainDataset {
-            length: args.nodes,
-        };
+        let ds = ChainDataset { length: args.nodes };
         let dataset = ds.build(target)?;
         let s = ReadScenario {
             node_handles: dataset.nodes,
@@ -240,9 +238,7 @@ fn run_scenarios(args: &CliArgs, target: &mut dyn BenchmarkTarget) -> Result<Rep
     }
 
     if run_traversal {
-        let ds = ChainDataset {
-            length: args.nodes,
-        };
+        let ds = ChainDataset { length: args.nodes };
         let dataset = ds.build(target)?;
         let s = TraversalScenario {
             start: dataset.nodes[0],
@@ -255,15 +251,14 @@ fn run_scenarios(args: &CliArgs, target: &mut dyn BenchmarkTarget) -> Result<Rep
     }
 
     if run_pathfinding {
-        let ds = ChainDataset {
-            length: args.nodes,
-        };
+        let ds = ChainDataset { length: args.nodes };
         let dataset = ds.build(target)?;
         let s = PathfindingScenario {
             from: dataset.nodes[0],
-            to: *dataset.nodes.last().ok_or_else(|| {
-                BenchmarkError::scenario("empty dataset for pathfinding")
-            })?,
+            to: *dataset
+                .nodes
+                .last()
+                .ok_or_else(|| BenchmarkError::scenario("empty dataset for pathfinding"))?,
             iterations: args.iterations,
         };
         let r = s.run(target)?;
