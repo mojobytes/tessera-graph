@@ -1708,7 +1708,10 @@ dependencies = [
 name = "tessera-import"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "tessera-graph",
+ "tessera-storage-enterprise",
  "thiserror 2.0.18",
 ]
 

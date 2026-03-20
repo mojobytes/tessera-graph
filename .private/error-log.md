@@ -54,6 +54,18 @@
 - **Cómo lo solucioné:** Generé el salt manualmente: 16 bytes random con `rand::rng().fill_bytes()`, encode a base64 con `Base64Unpadded`, y parseo con `SaltString::from_b64()`.
 - **Regla para evitarlo:** Cuando se usa `argon2`/`password-hash`, NUNCA pasar `OsRng` de `rand` 0.9 a `SaltString::generate()`. Generar el salt con `rand` y convertir a `SaltString` vía base64. Verificar siempre con `cargo tree` que las versiones de `rand_core` sean compatibles.
 
+### [2026-03-20] Lancé implementaciones sin autorización explícita del usuario
+- **Qué hice mal:** Después de generar planes TDD y recibir "si" como respuesta, interpreté eso como autorización para implementar TODO el plan de golpe. Lancé agentes de implementación que escribieron miles de líneas sin pasar por la revisión del usuario primero.
+- **Causa raíz:** Confundí "sí, arrancamos" con "sí, implementa todo autónomamente". El usuario espera participar en las decisiones de implementación, no recibir un fait accompli.
+- **Cómo lo solucioné:** El usuario lo señaló directamente.
+- **Regla para evitarlo:** NUNCA empezar implementación sin autorización explícita del usuario. "Arrancamos" significa "empecemos a trabajar juntos", no "hazlo todo solo". Antes de implementar: (1) presentar el plan, (2) esperar confirmación del plan, (3) implementar ciclo por ciclo mostrando progreso, no todo de golpe. El usuario quiere control sobre lo que se implementa y cuándo.
+
+### [2026-03-20] No leí error-log.md al inicio de la sesión
+- **Qué hice mal:** La instrucción de CLAUDE.md dice "Al inicio de cada sesión, leer `.private/error-log.md` si existe para no repetir errores ya documentados". No lo hice — el usuario tuvo que recordármelo.
+- **Causa raíz:** Omisión de la prioridad máxima del CLAUDE.md. Me enfoqué en responder al estado del proyecto sin revisar primero las lecciones aprendidas.
+- **Cómo lo solucioné:** Lo leí cuando el usuario lo señaló. Ningún error previo se repitió en esta sesión por coincidencia, pero podría haberlo hecho.
+- **Regla para evitarlo:** El error-log es lo PRIMERO que se lee al iniciar cualquier sesión de trabajo, antes de responder cualquier pregunta del usuario. Es la prioridad máxima según CLAUDE.md.
+
 ### [2026-03-18] cross-repo-write-guard.sh: prefix match false positive (tessera-graph vs tessera-graph-enterprise)
 - **Qué hice mal:** El guard usaba `[[ "$RESOLVED_PATH" == "$MIT_ROOT"* ]]` para detectar paths del repo MIT. Como `tessera-graph` es prefijo de `tessera-graph-enterprise`, TODOS los paths del enterprise eran bloqueados como si fueran del MIT.
 - **Causa raíz:** Comparación de string prefix sin delimitador. `/path/tessera-graph-enterprise/...` empieza con `/path/tessera-graph`, lo que produce un falso positivo.
