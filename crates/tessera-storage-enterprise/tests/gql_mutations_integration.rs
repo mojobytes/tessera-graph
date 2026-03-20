@@ -3,7 +3,7 @@
 //! Each test runs the full pipeline:
 //! `gql::parse_statement(query_string) → execute_mut(&mut graph, &stmt) → assert graph state`
 
-use tessera_graph::{gql, props, Graph, GqlMutationResult, GqlStatement};
+use tessera_graph::{GqlMutationResult, GqlStatement, Graph, gql, props};
 use tessera_storage_enterprise::gql::execute_mut;
 
 // ── Helper ───────────────────────────────────────────────────────────────────
@@ -24,7 +24,10 @@ fn create_node_persists_label_and_properties() {
     assert_eq!(ids.len(), 1);
     let node = g.node(ids[0]).unwrap();
     assert_eq!(node.label(), "Person");
-    assert_eq!(node.properties().get("name").unwrap().as_str(), Some("Alice"));
+    assert_eq!(
+        node.properties().get("name").unwrap().as_str(),
+        Some("Alice")
+    );
     assert_eq!(node.properties().get("age").unwrap().as_i64(), Some(30));
 }
 
@@ -55,8 +58,14 @@ fn create_inline_edge_produces_two_nodes_and_one_edge() {
     let edge = g.edge(edge_ids[0]).unwrap();
     let source = g.node(edge.source()).unwrap();
     let target = g.node(edge.target()).unwrap();
-    assert_eq!(source.properties().get("name").unwrap().as_str(), Some("Alice"));
-    assert_eq!(target.properties().get("name").unwrap().as_str(), Some("Bob"));
+    assert_eq!(
+        source.properties().get("name").unwrap().as_str(),
+        Some("Alice")
+    );
+    assert_eq!(
+        target.properties().get("name").unwrap().as_str(),
+        Some("Bob")
+    );
 }
 
 #[test]
@@ -127,7 +136,10 @@ fn set_updates_property_on_matched_node() {
     run_mutation(&mut g, "MATCH (n:Person {name: 'Alice'}) SET n.age = 26").unwrap();
     let node = g.node(id).unwrap();
     assert_eq!(node.properties().get("age").unwrap().as_i64(), Some(26));
-    assert_eq!(node.properties().get("name").unwrap().as_str(), Some("Alice"));
+    assert_eq!(
+        node.properties().get("name").unwrap().as_str(),
+        Some("Alice")
+    );
 }
 
 #[test]
@@ -136,7 +148,10 @@ fn set_adds_new_property_to_node() {
     let id = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
     run_mutation(&mut g, "MATCH (n:Person {name: 'Bob'}) SET n.active = true").unwrap();
     let node = g.node(id).unwrap();
-    assert_eq!(node.properties().get("active").unwrap().as_bool(), Some(true));
+    assert_eq!(
+        node.properties().get("active").unwrap().as_bool(),
+        Some(true)
+    );
 }
 
 #[test]
@@ -147,7 +162,10 @@ fn set_applies_to_all_matched_nodes() {
     run_mutation(&mut g, "MATCH (n:Person) SET n.active = false").unwrap();
     for id in g.nodes_by_label("Person") {
         let node = g.node(id).unwrap();
-        assert_eq!(node.properties().get("active").unwrap().as_bool(), Some(false));
+        assert_eq!(
+            node.properties().get("active").unwrap().as_bool(),
+            Some(false)
+        );
     }
 }
 
@@ -164,7 +182,8 @@ fn merge_creates_when_not_found() {
 #[test]
 fn merge_finds_existing_node() {
     let mut g = Graph::new();
-    g.add_node("Config", props! { "key" => "theme", "value" => "dark" }).unwrap();
+    g.add_node("Config", props! { "key" => "theme", "value" => "dark" })
+        .unwrap();
     let r = run_mutation(&mut g, "MERGE (n:Config {key: 'theme', value: 'dark'})").unwrap();
     assert_eq!(r.nodes_created, 0);
     assert_eq!(g.node_count(), 1);
@@ -238,10 +257,7 @@ fn delete_with_edges_error_includes_relationship_counts() {
     let err = run_mutation(&mut g, "MATCH (n:Person {name: 'Alice'}) DELETE n").unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("DETACH"), "must mention DETACH: {msg}");
-    assert!(
-        msg.contains("outgoing"),
-        "must mention edge counts: {msg}"
-    );
+    assert!(msg.contains("outgoing"), "must mention edge counts: {msg}");
 }
 
 // ── Phase 2.2: SET multiple properties counts each assignment ─────────────────
@@ -249,16 +265,21 @@ fn delete_with_edges_error_includes_relationship_counts() {
 #[test]
 fn set_multiple_properties_counts_each_assignment() {
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alice", "age" => 25_i64 }).unwrap();
+    g.add_node("Person", props! { "name" => "Alice", "age" => 25_i64 })
+        .unwrap();
     let r = run_mutation(
         &mut g,
         "MATCH (n:Person {name: 'Alice'}) SET n.age = 30, n.city = 'Berlin'",
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(r.properties_set, 2, "two property assignments");
     let ids = g.nodes_by_label("Person");
     let node = g.node(ids[0]).unwrap();
     assert_eq!(node.properties().get("age").unwrap().as_i64(), Some(30));
-    assert_eq!(node.properties().get("city").unwrap().as_str(), Some("Berlin"));
+    assert_eq!(
+        node.properties().get("city").unwrap().as_str(),
+        Some("Berlin")
+    );
 }
 
 // ── Phase 3.1: Unbound variable error paths ───────────────────────────────────

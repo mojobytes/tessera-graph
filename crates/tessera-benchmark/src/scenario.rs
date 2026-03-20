@@ -93,7 +93,11 @@ impl Scenario for WriteScenario {
         }
 
         let measurement = Measurement::from_nanos(&samples);
-        Ok(ScenarioResult::from_measurement(&measurement, "write", &name))
+        Ok(ScenarioResult::from_measurement(
+            &measurement,
+            "write",
+            &name,
+        ))
     }
 }
 

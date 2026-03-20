@@ -13,25 +13,29 @@ fn bench_point_lookups(c: &mut Criterion) {
     group.sample_size(10);
 
     for lookups in [100usize, 1_000, 10_000] {
-        group.bench_with_input(BenchmarkId::from_parameter(lookups), &lookups, |b, &lookups| {
-            b.iter_batched(
-                || {
-                    let mut t = TesseraTarget::new();
-                    let ds = ChainDataset { length: 1_000 };
-                    let result = ds.build(&mut t).unwrap();
-                    (t, result.nodes)
-                },
-                |(mut t, handles)| {
-                    ReadScenario {
-                        node_handles: handles,
-                        lookup_iterations: lookups,
-                    }
-                    .run(&mut t)
-                    .unwrap()
-                },
-                BatchSize::LargeInput,
-            );
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(lookups),
+            &lookups,
+            |b, &lookups| {
+                b.iter_batched(
+                    || {
+                        let mut t = TesseraTarget::new();
+                        let ds = ChainDataset { length: 1_000 };
+                        let result = ds.build(&mut t).unwrap();
+                        (t, result.nodes)
+                    },
+                    |(mut t, handles)| {
+                        ReadScenario {
+                            node_handles: handles,
+                            lookup_iterations: lookups,
+                        }
+                        .run(&mut t)
+                        .unwrap()
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
     }
 
     group.finish();

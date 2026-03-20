@@ -174,9 +174,8 @@ impl BackupEngine {
     /// unparseable, or any file's checksum does not match.
     pub fn verify_backup(backup_dir: &Path) -> Result<()> {
         let manifest_path = backup_dir.join(MANIFEST_NAME);
-        let manifest_txt = fs::read_to_string(&manifest_path).map_err(|e| {
-            EnterpriseError::ManifestCorrupt(format!("cannot read manifest: {e}"))
-        })?;
+        let manifest_txt = fs::read_to_string(&manifest_path)
+            .map_err(|e| EnterpriseError::ManifestCorrupt(format!("cannot read manifest: {e}")))?;
         let manifest = BackupManifest::parse(&manifest_txt)?;
 
         for entry in &manifest.files {
@@ -212,37 +211,29 @@ impl BackupEngine {
         // 1. Validate backup source.
         if !backup_dir.exists() {
             return Err(EnterpriseError::RestoreFailed {
-                reason: format!(
-                    "backup directory does not exist: {}",
-                    backup_dir.display()
-                ),
+                reason: format!("backup directory does not exist: {}", backup_dir.display()),
             });
         }
 
         // 2. Safety: refuse to overwrite an existing directory.
         if restore_dir.exists() {
             return Err(EnterpriseError::RestoreFailed {
-                reason: format!(
-                    "restore target already exists: {}",
-                    restore_dir.display()
-                ),
+                reason: format!("restore target already exists: {}", restore_dir.display()),
             });
         }
 
         // 3. Read and validate the manifest.
         Self::verify_backup(backup_dir)?;
 
-        let manifest_txt =
-            fs::read_to_string(backup_dir.join(MANIFEST_NAME)).map_err(|e| {
-                EnterpriseError::RestoreFailed {
-                    reason: format!("cannot read manifest: {e}"),
-                }
-            })?;
-        let manifest = BackupManifest::parse(&manifest_txt).map_err(|e| {
+        let manifest_txt = fs::read_to_string(backup_dir.join(MANIFEST_NAME)).map_err(|e| {
             EnterpriseError::RestoreFailed {
-                reason: format!("manifest parse failed: {e}"),
+                reason: format!("cannot read manifest: {e}"),
             }
         })?;
+        let manifest =
+            BackupManifest::parse(&manifest_txt).map_err(|e| EnterpriseError::RestoreFailed {
+                reason: format!("manifest parse failed: {e}"),
+            })?;
 
         // 4. Create restore directory and copy files.
         fs::create_dir_all(restore_dir)?;
@@ -341,7 +332,10 @@ mod tests {
         fs::create_dir_all(&backup_dir).unwrap();
 
         let result = engine.create_snapshot(&backup_dir);
-        assert!(matches!(result, Err(EnterpriseError::BackupAlreadyExists(_))));
+        assert!(matches!(
+            result,
+            Err(EnterpriseError::BackupAlreadyExists(_))
+        ));
     }
 
     #[test]
@@ -366,7 +360,10 @@ mod tests {
         engine.create_snapshot(&backup_dir).unwrap();
 
         let nodes_size = fs::metadata(backup_dir.join("nodes.db")).unwrap().len();
-        assert!(nodes_size > 0, "nodes.db must not be empty after writing data");
+        assert!(
+            nodes_size > 0,
+            "nodes.db must not be empty after writing data"
+        );
     }
 
     // --- verify_backup tests ---

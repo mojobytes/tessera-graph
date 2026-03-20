@@ -191,8 +191,7 @@ pub struct SocialDataset {
 impl Dataset for SocialDataset {
     fn build(&self, target: &mut dyn BenchmarkTarget) -> Result<DatasetResult> {
         let total_nodes = self.persons + self.persons * self.posts_per_person;
-        let total_edges =
-            self.persons * self.knows_degree + self.persons * self.posts_per_person;
+        let total_edges = self.persons * self.knows_degree + self.persons * self.posts_per_person;
         let mut nodes = Vec::with_capacity(total_nodes);
         let mut edges = Vec::with_capacity(total_edges);
 
@@ -222,12 +221,7 @@ impl Dataset for SocialDataset {
             for _ in 0..self.posts_per_person {
                 let post = target.create_node("Post", Properties::new())?;
                 nodes.push(post);
-                edges.push(target.create_edge(
-                    "AUTHORED",
-                    person,
-                    post,
-                    Properties::new(),
-                )?);
+                edges.push(target.create_edge("AUTHORED", person, post, Properties::new())?);
             }
         }
 

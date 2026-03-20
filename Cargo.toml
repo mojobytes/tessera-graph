@@ -38,6 +38,8 @@ tessera-replication        = { path = "crates/tessera-replication" }
 tessera-tenant             = { path = "crates/tessera-tenant" }
 thiserror  = "2"
 crc32fast  = "1"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

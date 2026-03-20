@@ -131,12 +131,8 @@ mod tests {
 
     #[test]
     fn set_state_transitions_correctly() {
-        let mut h = TransactionHandle::new(
-            10,
-            IsolationLevel::ReadCommitted,
-            TxnState::Active,
-            None,
-        );
+        let mut h =
+            TransactionHandle::new(10, IsolationLevel::ReadCommitted, TxnState::Active, None);
         assert_eq!(h.state(), TxnState::Active);
         h.set_state(TxnState::Committed);
         assert_eq!(h.state(), TxnState::Committed);

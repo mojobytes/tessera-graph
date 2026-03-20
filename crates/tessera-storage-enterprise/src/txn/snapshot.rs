@@ -28,8 +28,7 @@ impl Snapshot {
     /// to this snapshot.
     #[must_use]
     pub fn is_visible(&self, writer_txn_id: u64) -> bool {
-        writer_txn_id == self.owner_txn_id
-            || self.committed_at_begin.contains(&writer_txn_id)
+        writer_txn_id == self.owner_txn_id || self.committed_at_begin.contains(&writer_txn_id)
     }
 
     /// Returns the number of committed transactions visible to this snapshot.

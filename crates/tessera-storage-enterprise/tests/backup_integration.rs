@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::Arc;
 
-use tessera_graph::{props, Graph, GraphConfig, SharedGraph};
+use tessera_graph::{Graph, GraphConfig, SharedGraph, props};
 use tessera_storage_enterprise::backup::{BackupEngine, BackupManifest};
 use tessera_storage_enterprise::txn::{IsolationLevel, TransactionManager};
 
@@ -117,8 +117,16 @@ fn restore_preserves_edges_and_edge_properties() {
     BackupEngine::restore(&backup_dir, &restore_dir).unwrap();
 
     let restored = Graph::open(&restore_dir, &GraphConfig::new()).unwrap();
-    assert_eq!(restored.node_count(), 2, "both city nodes must survive restore");
-    assert_eq!(restored.edge_count(), 1, "the ROUTE edge must survive restore");
+    assert_eq!(
+        restored.node_count(),
+        2,
+        "both city nodes must survive restore"
+    );
+    assert_eq!(
+        restored.edge_count(),
+        1,
+        "the ROUTE edge must survive restore"
+    );
 
     let edge_ids = restored.edges_by_label("ROUTE");
     assert_eq!(edge_ids.len(), 1);

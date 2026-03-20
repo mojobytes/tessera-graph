@@ -68,12 +68,9 @@ impl BenchmarkTarget for TesseraTarget {
         to: NodeHandle,
         props: Properties,
     ) -> Result<EdgeHandle> {
-        let id = self.graph.add_edge(
-            label,
-            Self::to_node_id(from),
-            Self::to_node_id(to),
-            props,
-        )?;
+        let id = self
+            .graph
+            .add_edge(label, Self::to_node_id(from), Self::to_node_id(to), props)?;
         Ok(EdgeHandle(id.as_u64()))
     }
 
@@ -115,11 +112,7 @@ impl BenchmarkTarget for TesseraTarget {
         Ok(Self::collect_node_handles(&ids))
     }
 
-    fn shortest_path(
-        &self,
-        from: NodeHandle,
-        to: NodeHandle,
-    ) -> Result<Option<Vec<NodeHandle>>> {
+    fn shortest_path(&self, from: NodeHandle, to: NodeHandle) -> Result<Option<Vec<NodeHandle>>> {
         let result = self
             .graph
             .shortest_path(Self::to_node_id(from), Self::to_node_id(to))
@@ -234,7 +227,11 @@ mod tests {
             t.create_node("N", Properties::new()).unwrap();
         }
         let elapsed = start.elapsed();
-        #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
         let ops_per_sec = (n as f64 / elapsed.as_secs_f64()) as u64;
         let threshold: u64 = if cfg!(debug_assertions) {
             10_000

@@ -63,11 +63,7 @@ pub trait BenchmarkTarget {
 
     /// Finds the shortest path between two nodes.
     /// Returns `None` if the nodes are not connected.
-    fn shortest_path(
-        &self,
-        from: NodeHandle,
-        to: NodeHandle,
-    ) -> Result<Option<Vec<NodeHandle>>>;
+    fn shortest_path(&self, from: NodeHandle, to: NodeHandle) -> Result<Option<Vec<NodeHandle>>>;
 
     /// Resets all state so the next benchmark run starts fresh.
     fn clear(&mut self);
@@ -113,11 +109,7 @@ mod tests {
         fn traverse_dfs(&self, _s: NodeHandle, _d: u32) -> Result<Vec<NodeHandle>> {
             Ok(vec![])
         }
-        fn shortest_path(
-            &self,
-            _f: NodeHandle,
-            _t: NodeHandle,
-        ) -> Result<Option<Vec<NodeHandle>>> {
+        fn shortest_path(&self, _f: NodeHandle, _t: NodeHandle) -> Result<Option<Vec<NodeHandle>>> {
             Ok(None)
         }
         fn clear(&mut self) {}
