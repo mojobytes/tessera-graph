@@ -1,9 +1,11 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tessera_audit::AuditLog;
 use tessera_auth::policy::AuthPolicy;
+use tessera_auth::providers::ExternalAuthProvider;
 use tessera_auth::rbac::Permission;
 use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::{UserId, UserStoreHandle};
@@ -19,13 +21,17 @@ pub struct ServerContext {
     audit: Arc<AuditLog>,
     tls: TlsConfig,
     user_store: Arc<UserStoreHandle>,
+    external_provider: Option<Arc<dyn ExternalAuthProvider>>,
+    group_mapping: Arc<HashMap<String, String>>,
 }
 
 impl ServerContext {
-    /// Create a new server context. All parameters are mandatory — there is
-    /// no way to construct a context without authentication and TLS.
+    /// Create a new server context with local authentication only.
+    ///
+    /// All parameters are mandatory — there is no way to construct a context
+    /// without authentication and TLS.
     #[must_use]
-    pub const fn new(
+    pub fn new(
         auth_policy: Arc<AuthPolicy>,
         sessions: Arc<SessionManager>,
         audit: Arc<AuditLog>,
@@ -38,7 +44,23 @@ impl ServerContext {
             audit,
             tls,
             user_store,
+            external_provider: None,
+            group_mapping: Arc::new(HashMap::new()),
         }
+    }
+
+    /// Set an external authentication provider (LDAP or OIDC).
+    ///
+    /// When set, the server will use this provider instead of local auth.
+    #[must_use]
+    pub fn with_external_provider(
+        mut self,
+        provider: Arc<dyn ExternalAuthProvider>,
+        group_mapping: Arc<HashMap<String, String>>,
+    ) -> Self {
+        self.external_provider = Some(provider);
+        self.group_mapping = group_mapping;
+        self
     }
 
     /// Access the TLS configuration.
@@ -69,6 +91,18 @@ impl ServerContext {
     #[must_use]
     pub const fn user_store(&self) -> &Arc<UserStoreHandle> {
         &self.user_store
+    }
+
+    /// Access the external authentication provider, if configured.
+    #[must_use]
+    pub fn external_provider(&self) -> Option<&Arc<dyn ExternalAuthProvider>> {
+        self.external_provider.as_ref()
+    }
+
+    /// Access the external group-to-role mapping.
+    #[must_use]
+    pub const fn group_mapping(&self) -> &Arc<HashMap<String, String>> {
+        &self.group_mapping
     }
 
     /// Validate a session token and check the required permission.
