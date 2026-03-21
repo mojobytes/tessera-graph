@@ -153,6 +153,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                         self.session_token = Some(token);
                         self.send_message(&ServerMessage::AuthOk { token: token_str })
                             .await?;
+                        self.ctx.metrics().auth_success.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                     Err(e) => {
                         return self
@@ -192,6 +193,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                 self.session_token = Some(token);
                 self.send_message(&ServerMessage::AuthOk { token: token_str })
                     .await?;
+                self.ctx.metrics().auth_success.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             Err(e) => {
                 return self
@@ -206,6 +208,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
 
     /// Send a generic auth failure response and log the internal detail to the audit log.
     async fn send_auth_failure(&mut self, audit_detail: &str) -> Result<()> {
+        self.ctx.metrics().auth_failure.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _ = self
             .ctx
             .audit()
@@ -226,6 +229,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
     }
 
     async fn handle_query(&mut self, query_str: &str, language: &str) -> Result<()> {
+        let query_start = std::time::Instant::now();
         let lang = match language {
             "gql" | "GQL" => tessera_config::QueryLanguage::Gql,
             "cypher" | "cypher_compat" => tessera_config::QueryLanguage::CypherCompat,
@@ -295,6 +299,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                 }
             }
         };
+
+        // Record metrics
+        let duration = query_start.elapsed().as_secs_f64();
+        self.ctx.metrics().record_query_duration(duration);
+        let is_error = matches!(response, ServerMessage::QueryError { .. });
+        if is_error {
+            self.ctx.metrics().query_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            let is_gql = matches!(lang, tessera_config::QueryLanguage::Gql);
+            let is_mutation = matches!(stmt, GqlStatement::Mutation(_));
+            match (is_gql, is_mutation) {
+                (true, false) => self.ctx.metrics().queries_gql_read.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                (true, true) => self.ctx.metrics().queries_gql_mutation.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                (false, false) => self.ctx.metrics().queries_cypher_read.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+                (false, true) => self.ctx.metrics().queries_cypher_mutation.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            };
+        }
 
         self.send_message(&response).await?;
         Ok(())

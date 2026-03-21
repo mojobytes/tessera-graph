@@ -9,6 +9,7 @@ use tessera_auth::providers::ExternalAuthProvider;
 use tessera_auth::rbac::Permission;
 use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::{UserId, UserStoreHandle};
+use tessera_monitor::MetricsRegistry;
 use tessera_protocol::tls::TlsConfig;
 
 /// Server context that holds all security components.
@@ -23,6 +24,7 @@ pub struct ServerContext {
     user_store: Arc<UserStoreHandle>,
     external_provider: Option<Arc<dyn ExternalAuthProvider>>,
     group_mapping: Arc<HashMap<String, String>>,
+    metrics: Arc<MetricsRegistry>,
 }
 
 impl ServerContext {
@@ -37,6 +39,7 @@ impl ServerContext {
         audit: Arc<AuditLog>,
         tls: TlsConfig,
         user_store: Arc<UserStoreHandle>,
+        metrics: Arc<MetricsRegistry>,
     ) -> Self {
         Self {
             auth_policy,
@@ -46,6 +49,7 @@ impl ServerContext {
             user_store,
             external_provider: None,
             group_mapping: Arc::new(HashMap::new()),
+            metrics,
         }
     }
 
@@ -103,6 +107,12 @@ impl ServerContext {
     #[must_use]
     pub const fn group_mapping(&self) -> &Arc<HashMap<String, String>> {
         &self.group_mapping
+    }
+
+    /// Access the metrics registry.
+    #[must_use]
+    pub const fn metrics(&self) -> &Arc<MetricsRegistry> {
+        &self.metrics
     }
 
     /// Validate a session token and check the required permission.
