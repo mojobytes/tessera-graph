@@ -61,6 +61,20 @@ async fn main() {
     // --- Graph ---
     let graph = Arc::new(RwLock::new(Graph::new()));
 
+    // --- Metrics ---
+    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(max_connections as u64));
+
+    // --- Metrics HTTP server (optional) ---
+    if let Ok(metrics_bind) = std::env::var("TESSERA_METRICS_BIND") {
+        tracing::info!("Prometheus metrics on {metrics_bind}");
+        let m = Arc::clone(&metrics);
+        tokio::spawn(async move {
+            if let Err(e) = tessera_monitor::serve_metrics(&metrics_bind, m).await {
+                tracing::error!("metrics server failed: {e}");
+            }
+        });
+    }
+
     // --- Server context ---
     let ctx = Arc::new(ServerContext::new(
         auth_policy,
@@ -68,6 +82,7 @@ async fn main() {
         audit,
         tls,
         user_store,
+        metrics,
     ));
 
     // --- Shutdown signal ---

@@ -1,6 +1,8 @@
+# Copyright 2026 BelowZero Security OU. All rights reserved.
+
 [package]
 name        = "tessera-monitor"
-description = "WebSocket monitoring server for tessera-graph-enterprise"
+description = "Prometheus metrics and monitoring for tessera-graph-enterprise"
 version.workspace     = true
 edition.workspace     = true
 authors.workspace     = true
@@ -9,6 +11,10 @@ rust-version.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+tokio     = { version = "1", features = ["net", "rt", "macros", "io-util", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "time"] }
 
 [lints]
 workspace = true

@@ -53,7 +53,8 @@ pub fn test_context() -> Arc<ServerContext> {
     let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
     let tls = test_tls_config();
 
-    Arc::new(ServerContext::new(policy, sessions, audit, tls, user_store))
+    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
+    Arc::new(ServerContext::new(policy, sessions, audit, tls, user_store, metrics))
 }
 
 /// Send a `ClientMessage` over a framed writer and read back a `ServerMessage`.

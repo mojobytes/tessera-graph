@@ -46,7 +46,8 @@ fn permission_check_propagates_through_context() {
     let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
     let tls = test_tls_config();
 
-    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store);
+    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
+    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store, metrics);
     assert!(
         ctx2.check_permission(&token, Permission::NodeCreate)
             .is_ok()
