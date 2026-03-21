@@ -126,6 +126,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
     }
 
     async fn handle_login(&mut self, username: &str, password: &str) -> Result<()> {
+        // External auth path (LDAP or OIDC)
+        if let Some(provider) = self.ctx.external_provider() {
+            return self
+                .handle_external_login(username, password, provider.clone())
+                .await;
+        }
+
+        // Local auth path (Argon2id)
         let password = match Password::new(password) {
             Ok(p) => p,
             Err(e) => {
@@ -158,6 +166,38 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
             Err(e) => {
                 return self
                     .send_auth_failure(&format!("auth failure for user {username:?}: {e}"))
+                    .await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_external_login(
+        &mut self,
+        username: &str,
+        credential: &str,
+        provider: std::sync::Arc<dyn tessera_auth::providers::ExternalAuthProvider>,
+    ) -> Result<()> {
+        match crate::auth_dispatch::authenticate_external(
+            username,
+            credential,
+            &provider,
+            self.ctx.group_mapping(),
+            self.ctx.sessions(),
+        )
+        .await
+        {
+            Ok((_user_id, token)) => {
+                let token_str = token.as_str().to_owned();
+                self.session_token = Some(token);
+                self.send_message(&ServerMessage::AuthOk { token: token_str })
+                    .await?;
+            }
+            Err(e) => {
+                return self
+                    .send_auth_failure(&format!(
+                        "external auth failure for user {username:?}: {e}"
+                    ))
                     .await;
             }
         }

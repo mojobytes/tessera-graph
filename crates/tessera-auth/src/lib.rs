@@ -4,7 +4,9 @@
 
 pub mod credentials;
 pub mod error;
+pub mod external_config;
 pub mod policy;
+pub mod providers;
 pub mod rate_limit;
 pub mod rbac;
 pub mod session;

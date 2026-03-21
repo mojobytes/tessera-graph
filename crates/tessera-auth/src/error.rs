@@ -34,6 +34,12 @@ pub enum AuthError {
 
     #[error("account locked: too many failed attempts")]
     AccountLocked,
+
+    #[error("configuration error: {0}")]
+    ConfigError(String),
+
+    #[error("provider unavailable: {0}")]
+    ProviderUnavailable(String),
 }
 
 /// Convenience result type for auth operations.

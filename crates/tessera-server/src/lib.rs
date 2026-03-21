@@ -2,6 +2,7 @@
 
 //! Library surface for tessera-server integration tests and internal modules.
 
+pub mod auth_dispatch;
 pub mod connection;
 pub mod context;
 pub mod error;
