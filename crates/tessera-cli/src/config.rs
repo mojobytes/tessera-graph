@@ -66,67 +66,29 @@ impl EnvSource for TestEnv {
 }
 
 impl ConnectionConfig {
-    /// Resolve configuration with precedence: CLI flags > env vars > defaults.
+    /// Resolve configuration with full precedence: CLI flags > env vars > config file > defaults.
     ///
-    /// Returns `(config, password)`. Password is returned separately and never persisted
-    /// in the config struct.
+    /// Searches for config file at: `./tessera.toml`, `~/.config/tessera/tessera.toml`,
+    /// `~/.tessera.toml`.
     #[must_use]
-    pub fn resolve(cli: &Cli) -> (Self, Option<String>) {
+    pub fn resolve_full(cli: &Cli) -> (Self, Option<String>) {
+        Self::resolve_full_with_env(cli, &RealEnv)
+    }
+
+    /// Resolve configuration without reading any config file.
+    ///
+    /// Precedence: CLI flags > env vars > defaults.
+    /// For most use cases, prefer [`ConnectionConfig::resolve_full`] which also
+    /// consults `tessera.toml`.
+    #[must_use]
+    pub fn resolve_without_file(cli: &Cli) -> (Self, Option<String>) {
         Self::resolve_with_env(cli, &RealEnv)
     }
 
-    /// Resolve configuration using a custom env source (for testability).
+    /// Resolve without file, using a custom env source (for testability).
     #[must_use]
     pub fn resolve_with_env(cli: &Cli, env: &dyn EnvSource) -> (Self, Option<String>) {
-        let defaults = Self::default();
-
-        let host = cli
-            .host
-            .clone()
-            .or_else(|| env.get("TESSERA_HOST"))
-            .unwrap_or(defaults.host);
-
-        let port = cli
-            .port
-            .or_else(|| env.get("TESSERA_PORT").and_then(|v| v.parse().ok()))
-            .unwrap_or(defaults.port);
-
-        let username = cli
-            .username
-            .clone()
-            .or_else(|| env.get("TESSERA_USER"))
-            .unwrap_or(defaults.username);
-
-        let ca_cert = cli
-            .ca_cert
-            .clone()
-            .or_else(|| env.get("TESSERA_CA_CERT"))
-            .or(defaults.ca_cert);
-
-        let connect_timeout_secs = cli
-            .connect_timeout
-            .or_else(|| env.get("TESSERA_CONNECT_TIMEOUT").and_then(|v| v.parse().ok()))
-            .unwrap_or(defaults.connect_timeout_secs);
-
-        let format = cli.format.clone().unwrap_or(defaults.format);
-
-        let password = cli
-            .password
-            .clone()
-            .or_else(|| env.get("TESSERA_PASSWORD"));
-
-        let cfg = Self {
-            host,
-            port,
-            username,
-            connect_timeout_secs,
-            ca_cert,
-            tls_skip_verify: cli.tls_skip_verify,
-            format,
-            language: defaults.language,
-        };
-
-        (cfg, password)
+        merge_options(cli, env, None)
     }
 
     /// Load configuration from a TOML file.
@@ -164,81 +126,11 @@ impl ConnectionConfig {
         Ok(Some(file_cfg))
     }
 
-    /// Resolve configuration with full precedence: CLI flags > env vars > config file > defaults.
-    ///
-    /// Searches for config file at: `./tessera.toml`, `~/.config/tessera/tessera.toml`, `~/.tessera.toml`.
-    #[must_use]
-    pub fn resolve_full(cli: &Cli) -> (Self, Option<String>) {
-        Self::resolve_full_with_env(cli, &RealEnv)
-    }
-
     /// Full resolve with injectable env source (for testability).
+    #[must_use]
     pub fn resolve_full_with_env(cli: &Cli, env: &dyn EnvSource) -> (Self, Option<String>) {
-        // Try to find and load a config file
         let file_cfg = Self::find_and_load_config_file();
-
-        let defaults = Self::default();
-
-        let host = cli
-            .host
-            .clone()
-            .or_else(|| env.get("TESSERA_HOST"))
-            .or_else(|| file_cfg.as_ref().and_then(|f| f.connection.as_ref()?.host.clone()))
-            .unwrap_or(defaults.host);
-
-        let port = cli
-            .port
-            .or_else(|| env.get("TESSERA_PORT").and_then(|v| v.parse().ok()))
-            .or_else(|| file_cfg.as_ref().and_then(|f| f.connection.as_ref()?.port))
-            .unwrap_or(defaults.port);
-
-        let username = cli
-            .username
-            .clone()
-            .or_else(|| env.get("TESSERA_USER"))
-            .or_else(|| file_cfg.as_ref().and_then(|f| f.connection.as_ref()?.username.clone()))
-            .unwrap_or(defaults.username);
-
-        let ca_cert = cli
-            .ca_cert
-            .clone()
-            .or_else(|| env.get("TESSERA_CA_CERT"))
-            .or_else(|| file_cfg.as_ref().and_then(|f| f.connection.as_ref()?.ca_cert.clone()))
-            .or(defaults.ca_cert);
-
-        let connect_timeout_secs = cli
-            .connect_timeout
-            .or_else(|| env.get("TESSERA_CONNECT_TIMEOUT").and_then(|v| v.parse().ok()))
-            .unwrap_or(defaults.connect_timeout_secs);
-
-        let format = cli
-            .format
-            .clone()
-            .or_else(|| file_cfg.as_ref().and_then(|f| f.defaults.as_ref()?.format.clone()))
-            .unwrap_or(defaults.format);
-
-        let language = file_cfg
-            .as_ref()
-            .and_then(|f| f.defaults.as_ref()?.language.clone())
-            .unwrap_or(defaults.language);
-
-        let password = cli
-            .password
-            .clone()
-            .or_else(|| env.get("TESSERA_PASSWORD"));
-
-        let cfg = Self {
-            host,
-            port,
-            username,
-            connect_timeout_secs,
-            ca_cert,
-            tls_skip_verify: cli.tls_skip_verify,
-            format,
-            language,
-        };
-
-        (cfg, password)
+        merge_options(cli, env, file_cfg.as_ref())
     }
 
     /// Search for a config file in standard locations.
@@ -268,7 +160,8 @@ fn config_file_candidates() -> Vec<std::path::PathBuf> {
 }
 
 /// Cross-platform home directory.
-fn home_dir() -> Option<std::path::PathBuf> {
+#[must_use]
+pub fn home_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(std::path::PathBuf::from)
@@ -288,6 +181,7 @@ pub struct TomlConnection {
     pub port: Option<u16>,
     pub username: Option<String>,
     pub ca_cert: Option<String>,
+    pub connect_timeout_secs: Option<u64>,
 }
 
 /// `[defaults]` section in the TOML config file.
@@ -295,6 +189,76 @@ pub struct TomlConnection {
 pub struct TomlDefaults {
     pub language: Option<String>,
     pub format: Option<String>,
+}
+
+/// Single source of truth for configuration precedence: CLI flags > env > file > defaults.
+fn merge_options(
+    cli: &Cli,
+    env: &dyn EnvSource,
+    file_cfg: Option<&TomlFileConfig>,
+) -> (ConnectionConfig, Option<String>) {
+    let defaults = ConnectionConfig::default();
+
+    let host = cli
+        .host
+        .clone()
+        .or_else(|| env.get("TESSERA_HOST"))
+        .or_else(|| file_cfg.and_then(|f| f.connection.as_ref()?.host.clone()))
+        .unwrap_or(defaults.host);
+
+    let port = cli
+        .port
+        .or_else(|| env.get("TESSERA_PORT").and_then(|v| v.parse().ok()))
+        .or_else(|| file_cfg.and_then(|f| f.connection.as_ref()?.port))
+        .unwrap_or(defaults.port);
+
+    let username = cli
+        .username
+        .clone()
+        .or_else(|| env.get("TESSERA_USER"))
+        .or_else(|| file_cfg.and_then(|f| f.connection.as_ref()?.username.clone()))
+        .unwrap_or(defaults.username);
+
+    let ca_cert = cli
+        .ca_cert
+        .clone()
+        .or_else(|| env.get("TESSERA_CA_CERT"))
+        .or_else(|| file_cfg.and_then(|f| f.connection.as_ref()?.ca_cert.clone()))
+        .or(defaults.ca_cert);
+
+    let connect_timeout_secs = cli
+        .connect_timeout
+        .or_else(|| env.get("TESSERA_CONNECT_TIMEOUT").and_then(|v| v.parse().ok()))
+        .or_else(|| file_cfg.and_then(|f| f.connection.as_ref()?.connect_timeout_secs))
+        .unwrap_or(defaults.connect_timeout_secs);
+
+    let format = cli
+        .format
+        .clone()
+        .or_else(|| file_cfg.and_then(|f| f.defaults.as_ref()?.format.clone()))
+        .unwrap_or(defaults.format);
+
+    let language = file_cfg
+        .and_then(|f| f.defaults.as_ref()?.language.clone())
+        .unwrap_or(defaults.language);
+
+    let password = cli
+        .password
+        .clone()
+        .or_else(|| env.get("TESSERA_PASSWORD"));
+
+    let cfg = ConnectionConfig {
+        host,
+        port,
+        username,
+        connect_timeout_secs,
+        ca_cert,
+        tls_skip_verify: cli.tls_skip_verify,
+        format,
+        language,
+    };
+
+    (cfg, password)
 }
 
 #[cfg(test)]
@@ -526,5 +490,66 @@ mod tests {
             .expect("some"); // OK: test
         assert!(file_cfg.connection.is_none());
         assert!(file_cfg.defaults.is_none());
+    }
+
+    #[test]
+    fn resolve_and_resolve_full_agree_when_no_file_config() {
+        let cli = cli_from(&["tessera-cli", "-H", "shared-host", "--connect-timeout", "42"]);
+        let env = empty_env();
+        let (cfg_basic, pwd_basic) = ConnectionConfig::resolve_with_env(&cli, &env);
+        let (cfg_full, pwd_full) = ConnectionConfig::resolve_full_with_env(&cli, &env);
+        assert_eq!(cfg_basic.host, cfg_full.host);
+        assert_eq!(cfg_basic.port, cfg_full.port);
+        assert_eq!(cfg_basic.username, cfg_full.username);
+        assert_eq!(cfg_basic.connect_timeout_secs, cfg_full.connect_timeout_secs);
+        assert_eq!(cfg_basic.format, cfg_full.format);
+        assert_eq!(pwd_basic, pwd_full);
+    }
+
+    #[test]
+    fn toml_file_sets_connect_timeout() {
+        let dir = tempfile::tempdir().expect("tempdir"); // OK: test
+        let path = dir.path().join("tessera.toml");
+        std::fs::write(&path, "[connection]\nconnect_timeout_secs = 42\n")
+            .expect("write"); // OK: test
+        let file_cfg = ConnectionConfig::from_toml_file(&path)
+            .expect("parse") // OK: test
+            .expect("some"); // OK: test
+        let conn = file_cfg.connection.expect("connection"); // OK: test
+        assert_eq!(conn.connect_timeout_secs, Some(42));
+    }
+
+    #[test]
+    fn merge_options_reads_connect_timeout_from_file() {
+        let file_cfg = TomlFileConfig {
+            connection: Some(TomlConnection {
+                host: None,
+                port: None,
+                username: None,
+                ca_cert: None,
+                connect_timeout_secs: Some(99),
+            }),
+            defaults: None,
+        };
+        let cli = cli_from(&["tessera-cli"]);
+        let (cfg, _) = merge_options(&cli, &empty_env(), Some(&file_cfg));
+        assert_eq!(cfg.connect_timeout_secs, 99);
+    }
+
+    #[test]
+    fn merge_options_file_host_used_when_no_flag_or_env() {
+        let file_cfg = TomlFileConfig {
+            connection: Some(TomlConnection {
+                host: Some("file-host.example".to_owned()),
+                port: None,
+                username: None,
+                ca_cert: None,
+                connect_timeout_secs: None,
+            }),
+            defaults: None,
+        };
+        let cli = cli_from(&["tessera-cli"]);
+        let (cfg, _) = merge_options(&cli, &empty_env(), Some(&file_cfg));
+        assert_eq!(cfg.host, "file-host.example");
     }
 }

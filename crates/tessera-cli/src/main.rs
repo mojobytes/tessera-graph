@@ -37,7 +37,10 @@ async fn main() {
 
 async fn run() -> Result<(), CliError> {
     let cli = Cli::parse();
-    let (config, password) = ConnectionConfig::resolve(&cli);
+    let (config, password) = ConnectionConfig::resolve_full(&cli);
+
+    // Validate output format early (fail-fast before connecting)
+    let _: OutputFormat = config.format.parse()?;
 
     // Version subcommand — no connection needed
     if matches!(cli.command, Some(Command::Version)) {
@@ -138,18 +141,16 @@ where
     let content = std::fs::read_to_string(&args.file)
         .map_err(|e| CliError::ImportExport(format!("cannot read {}: {e}", args.file)))?;
     let plan = ImportPlan::from_gql_content(&content, 100)?;
-    for batch_idx in 0..plan.batch_count() {
-        for stmt in plan.batch(batch_idx) {
-            let output = query::execute_query(session, stmt, &args.language).await?;
-            let rendered = tessera_cli_lib::output::render(
-                OutputFormat::Table,
-                &output.columns,
-                &output.rows,
-                None,
-                true,
-            )?;
-            println!("{rendered}");
-        }
+    for stmt in plan.statements() {
+        let output = query::execute_query(session, stmt, &args.language).await?;
+        let rendered = tessera_cli_lib::output::render(
+            OutputFormat::Table,
+            &output.columns,
+            &output.rows,
+            None,
+            true,
+        )?;
+        println!("{rendered}");
     }
     Ok(())
 }
@@ -190,10 +191,7 @@ where
     };
 
     if args.dry_run {
-        let plan = ImportPlan {
-            statements,
-            batch_size: 100,
-        };
+        let plan = ImportPlan::new(statements, 100);
         print!("{}", plan.dry_run_summary());
     } else {
         let total = statements.len();
@@ -250,7 +248,7 @@ where
     W: tokio::io::AsyncWrite + Unpin,
 {
     let mut rl = rustyline::DefaultEditor::new()
-        .map_err(|e| CliError::Connection(format!("cannot initialize readline: {e}")))?;
+        .map_err(|e| CliError::Config(format!("cannot initialize readline: {e}")))?;
 
     // Load history
     let history_path = dirs_history_path();
@@ -380,6 +378,9 @@ fn build_tls_config(config: &ConnectionConfig) -> Result<rustls::ClientConfig, C
         }
     } else {
         let native_certs = rustls_native_certs::load_native_certs();
+        for err in &native_certs.errors {
+            eprintln!("Warning: failed to load native certificate: {err}");
+        }
         for cert in native_certs.certs {
             let _ = root_store.add(cert);
         }
@@ -435,9 +436,7 @@ impl rustls::client::danger::ServerCertVerifier for NoCertVerifier {
 
 /// Path to the history file: `~/.tessera_history`.
 fn dirs_history_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(|h| std::path::PathBuf::from(h).join(".tessera_history"))
+    tessera_cli_lib::config::home_dir().map(|h| h.join(".tessera_history"))
 }
 
 /// Infer import format from file extension.
@@ -446,7 +445,40 @@ fn infer_import_format(file: &str) -> &str {
     match path.extension().and_then(|e| e.to_str()) {
         Some(ext) if ext.eq_ignore_ascii_case("gql") || ext.eq_ignore_ascii_case("cypher") => "gql",
         Some(ext) if ext.eq_ignore_ascii_case("csv") => "csv-nodes",
-        Some(ext) if ext.eq_ignore_ascii_case("json") => "json",
         _ => "gql",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infer_format_gql_extension() {
+        assert_eq!(infer_import_format("schema.gql"), "gql");
+        assert_eq!(infer_import_format("schema.GQL"), "gql");
+    }
+
+    #[test]
+    fn infer_format_cypher_extension() {
+        assert_eq!(infer_import_format("data.cypher"), "gql");
+    }
+
+    #[test]
+    fn infer_format_csv_extension() {
+        assert_eq!(infer_import_format("nodes.csv"), "csv-nodes");
+    }
+
+    #[test]
+    fn infer_format_json_falls_back_to_gql() {
+        // JSON import not implemented — .json files default to "gql"
+        assert_ne!(infer_import_format("data.json"), "json");
+        assert_eq!(infer_import_format("data.json"), "gql");
+    }
+
+    #[test]
+    fn infer_format_unknown_defaults_to_gql() {
+        assert_eq!(infer_import_format("data.txt"), "gql");
+        assert_eq!(infer_import_format("data"), "gql");
     }
 }
