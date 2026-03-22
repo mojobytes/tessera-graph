@@ -2268,6 +2268,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tessera-graph",
  "thiserror 2.0.18",
  "tokio",
  "zeroize",
@@ -2400,6 +2401,7 @@ version = "0.1.0"
 dependencies = [
  "crc32fast",
  "tempfile",
+ "tessera-auth",
  "tessera-config",
  "tessera-cypher",
  "tessera-graph",

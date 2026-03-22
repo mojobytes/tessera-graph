@@ -263,7 +263,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                     let graph = self.graph.read().map_err(|_| {
                         ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
                     })?;
-                    tessera_graph::gql::execute(&graph, q).map(|rows| gql_result_to_json(&rows))
+                    tessera_graph::gql::execute(&*graph, q).map(|rows| gql_result_to_json(&rows))
                 };
                 match result {
                     Ok((columns, json_rows)) => ServerMessage::QueryResult {
@@ -280,7 +280,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                     let mut graph = self.graph.write().map_err(|_| {
                         ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
                     })?;
-                    tessera_storage_enterprise::gql::execute_mut(&mut graph, m)
+                    tessera_storage_enterprise::gql::execute_mut(&mut *graph, m)
                 };
                 match result {
                     Ok(r) => ServerMessage::QueryResult {

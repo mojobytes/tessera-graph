@@ -5,4 +5,5 @@
 pub mod backup;
 pub mod error;
 pub mod gql;
+pub mod lbac;
 pub mod txn;

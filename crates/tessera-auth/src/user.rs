@@ -8,6 +8,7 @@ use zeroize::Zeroize;
 
 use crate::credentials::{Password, PasswordHash, PasswordHasher, PasswordPolicy};
 use crate::error::{AuthError, Result};
+use crate::lbac::Clearance;
 use crate::rate_limit::{LoginAttemptTracker, LoginPolicy};
 use crate::rbac::RoleId;
 use crate::utils::unix_timestamp;
@@ -40,6 +41,8 @@ pub(crate) struct UserRecord {
     pub username: String,
     pub password_hash: String,
     pub roles: Vec<RoleId>,
+    #[serde(default)]
+    pub clearance: Clearance,
     pub created_at: u64,
     pub password_changed_at: u64,
 }
@@ -95,6 +98,7 @@ impl UserStoreHandle {
             username: admin_username.to_owned(),
             password_hash: hash.as_str().to_owned(),
             roles: vec![],
+            clearance: Clearance::default(),
             created_at: now,
             password_changed_at: now,
         };
@@ -151,6 +155,7 @@ impl UserStoreHandle {
             username: username.to_owned(),
             password_hash: hash.as_str().to_owned(),
             roles,
+            clearance: Clearance::default(),
             created_at: now,
             password_changed_at: now,
         };
@@ -329,6 +334,96 @@ impl UserStoreHandle {
         drop(store);
 
         Ok(())
+    }
+
+    /// Get the LBAC clearance for a user.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError::UserNotFound` if the user does not exist.
+    pub fn get_clearance(&self, user_id: UserId) -> Result<Clearance> {
+        let store = self
+            .inner
+            .read()
+            .map_err(|_| AuthError::LockPoisoned("user store"))?;
+
+        let username = store
+            .id_to_username
+            .get(&user_id)
+            .ok_or_else(|| AuthError::UserNotFound(format!("id={}", user_id.raw())))?;
+
+        store
+            .users
+            .get(username)
+            .map(|r| r.clearance.clone())
+            .ok_or_else(|| AuthError::UserNotFound(format!("id={}", user_id.raw())))
+    }
+
+    /// Set the LBAC clearance for a user.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError::UserNotFound` if the user does not exist.
+    pub fn set_clearance(&self, username: &str, clearance: Clearance) -> Result<()> {
+        let mut store = self
+            .inner
+            .write()
+            .map_err(|_| AuthError::LockPoisoned("user store"))?;
+
+        let record = store
+            .users
+            .get_mut(username)
+            .ok_or_else(|| AuthError::UserNotFound(username.to_owned()))?;
+
+        record.clearance = clearance;
+        drop(store);
+        Ok(())
+    }
+
+    /// Create a new user with an explicit LBAC clearance.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError::UserAlreadyExists` if the username is taken,
+    /// or a hashing error on failure.
+    pub fn create_user_with_clearance(
+        &self,
+        username: &str,
+        password: &Password,
+        roles: Vec<RoleId>,
+        policy: &PasswordPolicy,
+        clearance: Clearance,
+    ) -> Result<UserId> {
+        policy.validate_raw_str(password.as_str())?;
+        let hash = self.hasher.hash(password)?;
+        let now = unix_timestamp();
+
+        let mut store = self
+            .inner
+            .write()
+            .map_err(|_| AuthError::LockPoisoned("user store"))?;
+
+        if store.users.contains_key(username) {
+            return Err(AuthError::UserAlreadyExists(username.to_owned()));
+        }
+
+        let id = UserId(store.next_id);
+        store.next_id += 1;
+
+        let record = UserRecord {
+            id,
+            username: username.to_owned(),
+            password_hash: hash.as_str().to_owned(),
+            roles,
+            clearance,
+            created_at: now,
+            password_changed_at: now,
+        };
+
+        store.users.insert(username.to_owned(), record);
+        store.id_to_username.insert(id, username.to_owned());
+        drop(store);
+        Ok(id)
     }
 
     /// Authenticate with brute-force protection.

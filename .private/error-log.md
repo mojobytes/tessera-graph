@@ -1,5 +1,11 @@
 # Error Log — TesseraGraph Enterprise
 
+### [2026-03-22] Lanzar Criterion benchmarks sin evaluar alternativas — 3h perdidas
+- **Qué hice mal:** Lancé `cargo bench` con Criterion (100 muestras, 3s warmup) en 6 suites en paralelo para medir el impacto del refactor GraphAccess. Tardó 3+ horas sin producir resultados fiables.
+- **Causa raíz:** No evalué las herramientas disponibles antes de actuar. El proyecto enterprise tiene `tessera-bench` diseñado exactamente para benchmarking controlado con JSON output. Además, lanzar benchmarks en paralelo contamina las mediciones por contención de CPU/disco.
+- **Cómo lo solucioné:** Pendiente — relanzar con `tessera-bench`.
+- **Regla para evitarlo:** (1) SIEMPRE evaluar qué herramienta de benchmarking usar ANTES de lanzar. Si existe un harness custom (`tessera-bench`), usarlo primero. (2) NUNCA lanzar benchmarks CPU-intensivos en paralelo — siempre secuencial. (3) Para validar impacto de un refactor, lo que importa es un A/B rápido, no una suite exhaustiva.
+
 ### [2026-03-18] `significant_drop_tightening` on new read-lock scope in `validate()`
 - **Qué hice mal:** Implementé el read-lock happy path en `SessionManager::validate()` usando un bloque `{ let sessions = ...; ... }` para limitar el scope. Clippy `significant_drop_tightening` disparó en ambas variables (`sessions` read-lock y `sessions` write-lock) dentro de esa implementación.
 - **Causa raíz:** La lint `significant_drop_tightening` detecta RwLock/Mutex guards cuyo drop podría adelantarse. El bloque explícito no satisface a clippy — necesita que el guard se use directamente o que se suprima la lint explícitamente.
