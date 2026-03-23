@@ -13,6 +13,7 @@ use tessera_auth::session::SessionToken;
 use tessera_graph::{GqlStatement, GqlValue, Graph};
 use tessera_protocol::frame::{FramedReader, FramedWriter};
 use tessera_protocol::message::{ClientMessage, ServerMessage};
+use tessera_storage_enterprise::lbac::{SecureGraph, SecureGraphRef};
 
 use crate::context::ServerContext;
 use crate::error::{Result, ServerError};
@@ -228,6 +229,37 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
         Ok(())
     }
 
+    /// Extract the caller's LBAC `Clearance` from the current session token.
+    ///
+    /// On failure, writes an `AuthError` response, records a denied audit entry,
+    /// and returns `Ok(None)`. The caller must return `Ok(())` immediately on `None`.
+    async fn resolve_clearance_or_deny(
+        &mut self,
+        operation: &'static str,
+    ) -> Result<Option<tessera_auth::lbac::Clearance>> {
+        let token = self
+            .session_token
+            .as_ref()
+            .expect("session_token always set before handle_query");
+        match self.ctx.resolve_clearance(token) {
+            Ok(c) => Ok(Some(c)),
+            Err(e) => {
+                let _ = self.ctx.audit().record_denied(
+                    None,
+                    operation,
+                    None,
+                    &format!("clearance resolution failed: {e}"),
+                );
+                self.send_message(&ServerMessage::AuthError {
+                    reason: "access denied".into(),
+                })
+                .await?;
+                Ok(None)
+            }
+        }
+    }
+
+    #[allow(clippy::significant_drop_tightening)]
     async fn handle_query(&mut self, query_str: &str, language: &str) -> Result<()> {
         let query_start = std::time::Instant::now();
         let lang = match language {
@@ -254,6 +286,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
             }
         };
 
+        // Resolve the caller's LBAC clearance before executing any query.
+        let Some(clearance) = self.resolve_clearance_or_deny("gql_query").await? else {
+            return Ok(());
+        };
+
         // SAFETY: std::sync::RwLock is held only within the synchronous block below.
         // The guard is dropped at the closing `}`, before the `.await` in `send_message`.
         // If this invariant is violated, `clippy::await_holding_lock` will catch it.
@@ -263,7 +300,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                     let graph = self.graph.read().map_err(|_| {
                         ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
                     })?;
-                    tessera_graph::gql::execute(&*graph, q).map(|rows| gql_result_to_json(&rows))
+                    let secure = SecureGraphRef::new(&*graph, clearance);
+                    tessera_graph::gql::execute(&secure, q)
+                        .map(|rows| gql_result_to_json(&rows))
                 };
                 match result {
                     Ok((columns, json_rows)) => ServerMessage::QueryResult {
@@ -280,7 +319,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                     let mut graph = self.graph.write().map_err(|_| {
                         ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
                     })?;
-                    tessera_storage_enterprise::gql::execute_mut(&mut *graph, m)
+                    let mut secure = SecureGraph::new(&mut *graph, clearance);
+                    tessera_storage_enterprise::gql::execute_mut(&mut secure, m)
                 };
                 match result {
                     Ok(r) => ServerMessage::QueryResult {

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tessera_audit::AuditLog;
+use tessera_auth::lbac::Clearance;
 use tessera_auth::policy::AuthPolicy;
 use tessera_auth::providers::ExternalAuthProvider;
 use tessera_auth::rbac::Permission;
@@ -157,5 +158,18 @@ impl ServerContext {
                 Err(e)
             }
         }
+    }
+
+    /// Resolve the LBAC `Clearance` for the session identified by `token`.
+    ///
+    /// Steps: (1) validate token → `UserId`, (2) look up clearance for that user.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError` if the token is invalid, expired, or the user cannot
+    /// be found. **Fail-safe**: any error results in denial, never in granting access.
+    pub fn resolve_clearance(&self, token: &SessionToken) -> tessera_auth::Result<Clearance> {
+        let user_id = self.sessions.validate(token)?;
+        self.user_store.get_clearance(user_id)
     }
 }
