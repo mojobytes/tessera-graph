@@ -244,3 +244,48 @@ async fn mutation_through_secure_graph_is_visible_on_subsequent_read() {
         other => panic!("expected QueryResult, got {other:?}"),
     }
 }
+
+// --- Revoked session (#12) ---
+
+#[tokio::test]
+async fn query_after_session_revoked_returns_auth_error() {
+    let ctx = test_context_with_clearance(5, &[]);
+    let graph = Arc::new(RwLock::new(Graph::new()));
+    let (mut writer, mut reader, _shutdown) =
+        spawn_handler(Arc::clone(&ctx), Arc::clone(&graph));
+
+    // Login and capture the token
+    let login_response = send_recv(
+        &mut writer,
+        &mut reader,
+        &ClientMessage::Login {
+            username: "admin".into(),
+            password: "Admin@Init1!".into(),
+        },
+    )
+    .await;
+    let token_str = match login_response {
+        ServerMessage::AuthOk { token } => token,
+        other => panic!("expected AuthOk, got {other:?}"),
+    };
+
+    // Revoke the session externally via SessionManager
+    let token = tessera_auth::session::SessionToken::from_raw(token_str);
+    ctx.sessions().revoke(&token).expect("revoke must succeed");
+
+    // Send a query — must get AuthError, not QueryError or panic
+    let response = send_recv(
+        &mut writer,
+        &mut reader,
+        &ClientMessage::Query {
+            query: "MATCH (n) RETURN n".into(),
+            language: "gql".into(),
+        },
+    )
+    .await;
+
+    assert!(
+        matches!(response, ServerMessage::AuthError { .. }),
+        "revoked session must return AuthError, got {response:?}"
+    );
+}

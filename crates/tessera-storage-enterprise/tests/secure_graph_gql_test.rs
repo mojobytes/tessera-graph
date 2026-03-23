@@ -28,7 +28,7 @@ fn run_through_secure(
 }
 
 #[test]
-fn create_through_secure_graph_injects_default_label() {
+fn create_through_secure_graph_inherits_caller_clearance() {
     let mut g = Graph::new();
     run_through_secure(
         &mut g,

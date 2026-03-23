@@ -221,3 +221,50 @@ fn edge_count_counts_only_accessible_edges() {
     let sg = SecureGraph::new(&mut g, clearance(0, &[]));
     assert_eq!(sg.edge_count(), 1);
 }
+
+// --- edges_by_label (coverage gap #11) ---
+
+#[test]
+fn edges_by_label_filters_inaccessible_edges() {
+    let mut g = Graph::new();
+    let label_pub = SecurityLabel::default();
+    let label_fin = SecurityLabel::new(0, comps(&["FINANCE"]));
+    let mut np = props! {};
+    SecurityPolicy::inject_label(&mut np, &label_pub);
+    let src = g.add_node("N", np.clone()).unwrap();
+    let tgt = g.add_node("N", np).unwrap();
+    let mut ep_pub = props! {};
+    SecurityPolicy::inject_label(&mut ep_pub, &label_pub);
+    g.add_edge("REL", src, tgt, ep_pub).unwrap();
+    let mut ep_fin = props! {};
+    SecurityPolicy::inject_label(&mut ep_fin, &label_fin);
+    g.add_edge("REL", src, tgt, ep_fin).unwrap();
+    let sg = SecureGraph::new(&mut g, clearance(0, &[]));
+    assert_eq!(sg.edges_by_label("REL").len(), 1);
+}
+
+// --- incoming_edges (coverage gap #11) ---
+
+#[test]
+fn incoming_edges_filters_inaccessible_edges() {
+    let mut g = Graph::new();
+    let label_pub = SecurityLabel::default();
+    let mut np = props! {};
+    SecurityPolicy::inject_label(&mut np, &label_pub);
+    let src = g.add_node("N", np.clone()).unwrap();
+    let tgt = g.add_node("N", np).unwrap();
+    let mut ep_pub = props! {};
+    SecurityPolicy::inject_label(&mut ep_pub, &label_pub);
+    g.add_edge("E", src, tgt, ep_pub).unwrap();
+    let label_fin = SecurityLabel::new(0, comps(&["FINANCE"]));
+    let mut ep_fin = props! {};
+    SecurityPolicy::inject_label(&mut ep_fin, &label_fin);
+    g.add_edge("E", src, tgt, ep_fin).unwrap();
+    let sg = SecureGraph::new(&mut g, clearance(0, &[]));
+    let incoming = sg.incoming_edges(tgt).unwrap();
+    assert_eq!(
+        incoming.len(),
+        1,
+        "incoming_edges must filter compartmented edge"
+    );
+}

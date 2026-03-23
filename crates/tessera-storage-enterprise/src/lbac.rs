@@ -7,6 +7,14 @@ use tessera_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
 use tessera_graph::{Edge, EdgeId, Error, GraphAccess, Node, NodeId, Properties};
 
 /// Shared pure filtering helpers used by both `SecureGraph` and `SecureGraphRef`.
+///
+/// # Visibility note
+///
+/// This module is `pub` rather than `pub(crate)` only because the project
+/// convention places integration tests in `crates/<crate>/tests/`, which are
+/// external crates and cannot access `pub(crate)` items. These functions are
+/// internal implementation helpers and are **not part of the public API**.
+/// Do not depend on them from outside this crate.
 pub mod filter {
     use tessera_auth::lbac::{Clearance, SecurityPolicy};
     use tessera_graph::{Edge, GraphAccess, Node, Properties};
@@ -254,20 +262,22 @@ impl<G: GraphAccess> GraphAccess for SecureGraph<'_, G> {
         label: &str,
         mut properties: Properties,
     ) -> tessera_graph::Result<NodeId> {
-        // Strip any user-supplied security properties; inject default label (public)
+        // Bell-LaPadula no write-down: new resources inherit the caller's clearance.
         SecurityPolicy::strip_security_properties(&mut properties);
-        SecurityPolicy::inject_label(&mut properties, &SecurityLabel::default());
+        let caller_label =
+            SecurityLabel::new(self.clearance.level, self.clearance.compartments.clone());
+        SecurityPolicy::inject_label(&mut properties, &caller_label);
         self.inner.add_node(label, properties)
     }
 
     fn update_node(&mut self, id: NodeId, node: &Node) -> tessera_graph::Result<()> {
-        // Verify caller can see the existing node
+        // Explicit write-dominance: caller must dominate the resource's label.
         let existing = self.inner.node(id)?;
-        if !filter::can_read_props(&self.clearance, existing.properties()) {
+        let existing_label = SecurityPolicy::extract_label(existing.properties());
+        if !self.clearance.dominates(&existing_label) {
             return Err(Error::NodeNotFound(id));
         }
         // Preserve the existing security label (user cannot change it via update_node)
-        let existing_label = SecurityPolicy::extract_label(existing.properties());
         let mut updated = node.clone();
         SecurityPolicy::strip_security_properties(updated.properties_mut());
         SecurityPolicy::inject_label(updated.properties_mut(), &existing_label);
@@ -298,19 +308,26 @@ impl<G: GraphAccess> GraphAccess for SecureGraph<'_, G> {
         if !filter::can_read_props(&self.clearance, tgt_node.properties()) {
             return Err(Error::NodeNotFound(target));
         }
-        // Strip user-supplied security properties; inject default label (public)
+        // Bell-LaPadula no write-down: new edges inherit the caller's clearance.
         SecurityPolicy::strip_security_properties(&mut properties);
-        SecurityPolicy::inject_label(&mut properties, &SecurityLabel::default());
+        let caller_label =
+            SecurityLabel::new(self.clearance.level, self.clearance.compartments.clone());
+        SecurityPolicy::inject_label(&mut properties, &caller_label);
         self.inner.add_edge(label, source, target, properties)
     }
 
     fn update_edge(&mut self, id: EdgeId, edge: &Edge) -> tessera_graph::Result<()> {
         let existing = self.inner.edge(id)?;
+        // Explicit write-dominance on the edge's own label
+        let existing_label = SecurityPolicy::extract_label(existing.properties());
+        if !self.clearance.dominates(&existing_label) {
+            return Err(Error::EdgeNotFound(id));
+        }
+        // Both endpoints must also be visible (cannot reference nodes you cannot read)
         if !filter::edge_visible_for(self.inner, &self.clearance, &existing) {
             return Err(Error::EdgeNotFound(id));
         }
         // Preserve existing security label
-        let existing_label = SecurityPolicy::extract_label(existing.properties());
         let mut updated = edge.clone();
         SecurityPolicy::strip_security_properties(updated.properties_mut());
         SecurityPolicy::inject_label(updated.properties_mut(), &existing_label);

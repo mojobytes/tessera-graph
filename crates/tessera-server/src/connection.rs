@@ -237,10 +237,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
         &mut self,
         operation: &'static str,
     ) -> Result<Option<tessera_auth::lbac::Clearance>> {
-        let token = self
-            .session_token
-            .as_ref()
-            .expect("session_token always set before handle_query");
+        let Some(token) = self.session_token.as_ref() else {
+            self.send_message(&ServerMessage::AuthError {
+                reason: "not authenticated".into(),
+            })
+            .await?;
+            return Ok(None);
+        };
         match self.ctx.resolve_clearance(token) {
             Ok(c) => Ok(Some(c)),
             Err(e) => {

@@ -39,7 +39,7 @@ fn add_node_user_cannot_inject_security_level_directly() {
         .get(SecurityPolicy::LEVEL_KEY)
         .and_then(tessera_graph::Property::as_i64)
         .unwrap_or(0);
-    assert_eq!(stored_level, 0, "caller must not be able to set security level via add_node");
+    assert_eq!(stored_level, 5, "level must match caller clearance, not user-injected value");
 }
 
 #[test]
@@ -207,4 +207,80 @@ fn remove_edge_denied_if_not_visible() {
     let eid = g.add_edge("E", a, b, labeled_props(5, &[])).unwrap();
     let mut sg = SecureGraph::new(&mut g, clearance(0, &[]));
     assert!(sg.remove_edge(eid).is_err());
+}
+
+// --- write-dominance regression guards (#1) ---
+
+#[test]
+fn update_node_denied_when_label_has_compartment_caller_lacks() {
+    let mut g = Graph::new();
+    let label = SecurityLabel::new(3, comps(&["FINANCE", "LEGAL"]));
+    let mut p = props! { "data" => "sensitive" };
+    SecurityPolicy::inject_label(&mut p, &label);
+    let id = g.add_node("N", p).unwrap();
+    let node = g.node(id).unwrap();
+
+    // Clearance has FINANCE but not LEGAL — cannot dominate the label
+    let mut sg = SecureGraph::new(&mut g, clearance(5, &["FINANCE"]));
+    let result = sg.update_node(id, &node);
+    assert!(
+        result.is_err(),
+        "update_node must be denied when clearance does not dominate existing label"
+    );
+}
+
+#[test]
+fn update_edge_denied_when_label_has_compartment_caller_lacks() {
+    let mut g = Graph::new();
+    let label = SecurityLabel::new(2, comps(&["FINANCE", "LEGAL"]));
+    let mut np = props! {};
+    SecurityPolicy::inject_label(&mut np, &label);
+    let src = g.add_node("N", np.clone()).unwrap();
+    let tgt = g.add_node("N", np).unwrap();
+    let mut ep = props! {};
+    SecurityPolicy::inject_label(&mut ep, &label);
+    let eid = g.add_edge("E", src, tgt, ep).unwrap();
+    let edge = g.edge(eid).unwrap();
+
+    // Clearance has FINANCE but not LEGAL
+    let mut sg = SecureGraph::new(&mut g, clearance(5, &["FINANCE"]));
+    assert!(sg.update_edge(eid, &edge).is_err());
+}
+
+// --- Bell-LaPadula no write-down: add_node/add_edge inherit caller clearance (#3) ---
+
+#[test]
+fn add_node_inherits_caller_clearance_level() {
+    let mut g = Graph::new();
+    let mut sg = SecureGraph::new(&mut g, clearance(3, &["FINANCE"]));
+    let id = sg
+        .add_node("Person", props! { "name" => "Charlie" })
+        .unwrap();
+    drop(sg);
+    let raw = g.node(id).unwrap();
+    let stored = SecurityPolicy::extract_label(raw.properties());
+    assert_eq!(stored.level, 3, "node must inherit caller clearance level");
+    assert_eq!(
+        stored.compartments,
+        comps(&["FINANCE"]),
+        "node must inherit caller compartments"
+    );
+}
+
+#[test]
+fn add_edge_inherits_caller_clearance_level() {
+    let mut g = Graph::new();
+    let label = SecurityLabel::new(3, comps(&["FINANCE"]));
+    let mut np = props! {};
+    SecurityPolicy::inject_label(&mut np, &label);
+    let a = g.add_node("N", np.clone()).unwrap();
+    let b = g.add_node("N", np).unwrap();
+
+    let mut sg = SecureGraph::new(&mut g, clearance(3, &["FINANCE"]));
+    let eid = sg.add_edge("REL", a, b, props! {}).unwrap();
+    drop(sg);
+    let raw = g.edge(eid).unwrap();
+    let stored = SecurityPolicy::extract_label(raw.properties());
+    assert_eq!(stored.level, 3);
+    assert_eq!(stored.compartments, comps(&["FINANCE"]));
 }
