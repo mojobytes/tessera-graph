@@ -3,14 +3,14 @@
 //! Library surface for tessera-server integration tests and internal modules.
 
 pub mod auth_dispatch;
+pub mod bolt_handler;
 pub mod config;
-pub mod connection;
 pub mod context;
 pub mod error;
 pub mod listener;
 pub mod shutdown;
 
-pub use connection::ConnectionHandler;
+pub use bolt_handler::BoltConnectionHandler;
 pub use context::ServerContext;
 pub use error::{Result, ServerError};
 pub use listener::TesseraListener;

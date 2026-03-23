@@ -12,11 +12,17 @@ pub enum ServerError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Bolt I/O error: {0}")]
+    BoltIo(std::io::Error),
+
     #[error("auth error: {0}")]
     Auth(#[from] tessera_auth::AuthError),
 
     #[error("storage error: {0}")]
     Storage(#[from] tessera_graph::Error),
+
+    #[error("tenant error: {0}")]
+    Tenant(#[from] tessera_tenant::TenantError),
 }
 
 /// Convenience result type for server operations.

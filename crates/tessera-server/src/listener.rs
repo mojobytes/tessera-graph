@@ -3,18 +3,16 @@
 //! TCP listener and accept loop for the `TesseraGraph` server.
 
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
-use tessera_graph::Graph;
-use tessera_protocol::frame::FramedWriter;
-use tessera_protocol::message::ServerMessage;
+use tessera_tenant::TenantRegistry;
 
-use crate::connection::ConnectionHandler;
+use crate::bolt_handler::BoltConnectionHandler;
 use crate::context::ServerContext;
 use crate::error::Result;
 
@@ -63,10 +61,11 @@ impl TesseraListener {
     pub async fn serve(
         self,
         ctx: Arc<ServerContext>,
-        graph: Arc<RwLock<Graph>>,
+        registry: Arc<TenantRegistry>,
         mut shutdown: watch::Receiver<bool>,
         max_connections: usize,
         idle_timeout: Duration,
+        default_tenant: String,
     ) -> Result<()> {
         let semaphore = Arc::new(Semaphore::new(max_connections));
         let mut tasks: JoinSet<()> = JoinSet::new();
@@ -102,19 +101,35 @@ impl TesseraListener {
             };
 
             let Ok(permit) = Arc::clone(&semaphore).try_acquire_owned() else {
-                Self::send_capacity_error(stream).await;
+                // At capacity: close the TCP stream — client has not done the
+                // Bolt handshake yet so no Bolt message can be sent.
+                drop(stream);
                 continue;
             };
 
             let ctx = Arc::clone(&ctx);
-            let graph = Arc::clone(&graph);
+            let _registry = Arc::clone(&registry);
             let shutdown_rx = shutdown.clone();
+            let default_tenant = default_tenant.clone();
 
             tasks.spawn(async move {
                 let _permit = permit;
-                let mut handler =
-                    ConnectionHandler::new(stream, ctx, graph, idle_timeout, shutdown_rx);
-                let _ = handler.run().await;
+                match BoltConnectionHandler::new_with_handshake(
+                    stream,
+                    ctx,
+                    default_tenant,
+                    idle_timeout,
+                    shutdown_rx,
+                )
+                .await
+                {
+                    Ok(mut handler) => {
+                        let _ = handler.run().await;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Bolt handshake failed: {e}");
+                    }
+                }
             });
         }
     }
@@ -122,7 +137,7 @@ impl TesseraListener {
     /// TLS-enabled accept loop — mandatory for production.
     ///
     /// Each accepted `TcpStream` is wrapped with a TLS handshake before being
-    /// passed to `ConnectionHandler`. Connections that fail the TLS handshake
+    /// passed to `BoltConnectionHandler`. Connections that fail the TLS handshake
     /// are dropped without spawning a handler.
     ///
     /// # Errors
@@ -131,10 +146,11 @@ impl TesseraListener {
     pub async fn serve_tls(
         self,
         ctx: Arc<ServerContext>,
-        graph: Arc<RwLock<Graph>>,
+        registry: Arc<TenantRegistry>,
         mut shutdown: watch::Receiver<bool>,
         max_connections: usize,
         idle_timeout: Duration,
+        default_tenant: String,
     ) -> Result<()> {
         let tls_acceptor = TlsAcceptor::from(Arc::clone(ctx.tls_config().server_config()));
         let semaphore = Arc::new(Semaphore::new(max_connections));
@@ -170,45 +186,42 @@ impl TesseraListener {
             };
 
             let Ok(permit) = Arc::clone(&semaphore).try_acquire_owned() else {
-                Self::send_capacity_error(stream).await;
+                drop(stream);
                 continue;
             };
 
             let tls_acceptor = tls_acceptor.clone();
             let ctx = Arc::clone(&ctx);
-            let graph = Arc::clone(&graph);
+            let _registry = Arc::clone(&registry);
             let shutdown_rx = shutdown.clone();
+            let default_tenant = default_tenant.clone();
 
             tasks.spawn(async move {
                 let _permit = permit;
                 match tls_acceptor.accept(stream).await {
                     Ok(tls_stream) => {
-                        let mut handler = ConnectionHandler::new(
+                        match BoltConnectionHandler::new_with_handshake(
                             tls_stream,
                             ctx,
-                            graph,
+                            default_tenant,
                             idle_timeout,
                             shutdown_rx,
-                        );
-                        let _ = handler.run().await;
+                        )
+                        .await
+                        {
+                            Ok(mut handler) => {
+                                let _ = handler.run().await;
+                            }
+                            Err(e) => {
+                                tracing::warn!("Bolt handshake failed on TLS stream: {e}");
+                            }
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("TLS handshake failed: {e}");
                     }
                 }
             });
-        }
-    }
-
-    /// Write a capacity error to a stream and close it.
-    async fn send_capacity_error(stream: tokio::net::TcpStream) {
-        let (_, write_half) = tokio::io::split(stream);
-        let mut writer = FramedWriter::new(write_half);
-        let msg = ServerMessage::CapacityError {
-            reason: "server at capacity".into(),
-        };
-        if let Ok(json) = serde_json::to_vec(&msg) {
-            let _ = writer.write_frame(&json).await;
         }
     }
 }

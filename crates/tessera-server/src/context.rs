@@ -12,6 +12,7 @@ use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::{UserId, UserStoreHandle};
 use tessera_monitor::MetricsRegistry;
 use tessera_protocol::tls::TlsConfig;
+use tessera_tenant::TenantRegistry;
 
 /// Server context that holds all security components.
 ///
@@ -26,6 +27,7 @@ pub struct ServerContext {
     external_provider: Option<Arc<dyn ExternalAuthProvider>>,
     group_mapping: Arc<HashMap<String, String>>,
     metrics: Arc<MetricsRegistry>,
+    tenant_registry: Arc<TenantRegistry>,
 }
 
 impl ServerContext {
@@ -41,6 +43,7 @@ impl ServerContext {
         tls: TlsConfig,
         user_store: Arc<UserStoreHandle>,
         metrics: Arc<MetricsRegistry>,
+        tenant_registry: Arc<TenantRegistry>,
     ) -> Self {
         Self {
             auth_policy,
@@ -51,6 +54,7 @@ impl ServerContext {
             external_provider: None,
             group_mapping: Arc::new(HashMap::new()),
             metrics,
+            tenant_registry,
         }
     }
 
@@ -114,6 +118,12 @@ impl ServerContext {
     #[must_use]
     pub const fn metrics(&self) -> &Arc<MetricsRegistry> {
         &self.metrics
+    }
+
+    /// Access the tenant registry.
+    #[must_use]
+    pub const fn tenant_registry(&self) -> &Arc<TenantRegistry> {
+        &self.tenant_registry
     }
 
     /// Validate a session token and check the required permission.

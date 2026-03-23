@@ -12,7 +12,7 @@ use tessera_auth::session::SessionManager;
 use tessera_auth::user::UserStoreHandle;
 use tessera_server::context::ServerContext;
 
-use common::{test_context, test_tls_config};
+use common::{test_context, test_registry, test_tls_config};
 
 #[test]
 fn server_context_is_send_sync() {
@@ -24,7 +24,7 @@ fn server_context_is_send_sync() {
 fn permission_check_propagates_through_context() {
     let _ctx = test_context();
 
-    // Create a separate context with its own stores to test permission check
+    // Create a separate context with its own stores to test permission check.
     let admin_pw = Password::new("Admin@Init1!").unwrap();
     let user_store =
         Arc::new(UserStoreHandle::new("admin", &admin_pw, &PasswordPolicy::default()).unwrap());
@@ -45,9 +45,10 @@ fn permission_check_propagates_through_context() {
     let dir = tempfile::tempdir().unwrap();
     let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
     let tls = test_tls_config();
+    let registry = test_registry();
 
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
-    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store, metrics);
+    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store, metrics, registry);
     assert!(
         ctx2.check_permission(&token, Permission::NodeCreate)
             .is_ok()
