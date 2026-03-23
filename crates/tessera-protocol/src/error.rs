@@ -41,6 +41,18 @@ pub enum ProtocolError {
 
     #[error("packstream float value must be finite (NaN and Infinity are not allowed)")]
     PackStreamInvalidFloat,
+
+    #[error("bolt: unexpected struct tag (expected 0x{expected:02X}, got 0x{got:02X})")]
+    BoltUnexpectedTag { expected: u8, got: u8 },
+
+    #[error("bolt: missing field '{field}' in {message} message")]
+    BoltMissingField {
+        message: &'static str,
+        field: &'static str,
+    },
+
+    #[error("bolt: invalid handshake — {reason}")]
+    BoltInvalidHandshake { reason: &'static str },
 }
 
 /// Convenience result type for protocol operations.
