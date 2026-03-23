@@ -9,9 +9,9 @@ pub mod message;
 pub mod packstream;
 pub mod tls;
 
-pub use bolt_frame::{BoltChunkedReader, BoltChunkedWriter, MAX_CHUNK_SIZE};
+pub use bolt_frame::{BoltChunkedReader, BoltChunkedWriter, MAX_BOLT_MESSAGE_SIZE, MAX_CHUNK_SIZE};
 pub use error::{ProtocolError, Result};
 pub use frame::{FramedReader, FramedWriter, MAX_FRAME_SIZE};
 pub use message::{ClientMessage, ServerMessage};
-pub use packstream::PackStreamValue;
+pub use packstream::{decode, encode, PackStreamValue};
 pub use tls::{ClientAuth, TlsConfig, TlsConfigBuilder};

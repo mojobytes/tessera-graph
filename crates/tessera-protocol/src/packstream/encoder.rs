@@ -4,27 +4,37 @@
 
 use super::markers as m;
 use super::value::PackStreamValue;
+use crate::error::{ProtocolError, Result};
 
 /// Encode `value` into `buf` using the `PackStream` binary format.
 ///
 /// The encoding appends bytes to `buf`; callers may pre-allocate capacity as
 /// needed. All multi-byte integers are written in big-endian byte order.
-pub fn encode(value: &PackStreamValue, buf: &mut Vec<u8>) {
+///
+/// # Errors
+///
+/// Returns [`ProtocolError::PackStreamInvalidFloat`] if `value` (or any nested
+/// value) is a `Float` that is NaN or infinite.
+pub fn encode(value: &PackStreamValue, buf: &mut Vec<u8>) -> Result<()> {
     match value {
         PackStreamValue::Null => buf.push(m::NULL),
         PackStreamValue::Bool(true) => buf.push(m::BOOL_TRUE),
         PackStreamValue::Bool(false) => buf.push(m::BOOL_FALSE),
         PackStreamValue::Int(i) => encode_int(*i, buf),
         PackStreamValue::Float(f) => {
+            if f.is_nan() || f.is_infinite() {
+                return Err(ProtocolError::PackStreamInvalidFloat);
+            }
             buf.push(m::FLOAT64);
             buf.extend_from_slice(&f.to_bits().to_be_bytes());
         }
         PackStreamValue::String(s) => encode_string(s, buf),
         PackStreamValue::Bytes(b) => encode_bytes(b, buf),
-        PackStreamValue::List(items) => encode_list(items, buf),
-        PackStreamValue::Dict(pairs) => encode_dict(pairs, buf),
-        PackStreamValue::Struct { tag, fields } => encode_struct(*tag, fields, buf),
+        PackStreamValue::List(items) => encode_list(items, buf)?,
+        PackStreamValue::Dict(pairs) => encode_dict(pairs, buf)?,
+        PackStreamValue::Struct { tag, fields } => encode_struct(*tag, fields, buf)?,
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -34,9 +44,12 @@ pub fn encode(value: &PackStreamValue, buf: &mut Vec<u8>) {
 fn encode_int(i: i64, buf: &mut Vec<u8>) {
     // TinyInt range: -16..=127 — the marker byte IS the value.
     if (-16..=127).contains(&i) {
-        // Safe: the value fits in i8 and therefore in u8 for wire encoding.
-        // i64 in -16..=127 wraps to the correct bit pattern in u8.
-        buf.push(i.to_ne_bytes()[0]);
+        // Safe: i64 in -16..=127 has a well-defined two's-complement u8 bit
+        // pattern. Casting via `as u8` is equivalent to truncating to the low
+        // byte and is correct for both positive (0x00–0x7F) and negative
+        // TinyInt (-16..=-1 → 0xF0..=0xFF) values.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        buf.push(i as u8);
         return;
     }
     // Int8 range: -128..=-17
@@ -117,7 +130,7 @@ fn encode_bytes(data: &[u8], buf: &mut Vec<u8>) {
 // List encoding
 // ---------------------------------------------------------------------------
 
-fn encode_list(items: &[PackStreamValue], buf: &mut Vec<u8>) {
+fn encode_list(items: &[PackStreamValue], buf: &mut Vec<u8>) -> Result<()> {
     encode_sized_header(
         items.len(),
         m::TINY_LIST_BASE,
@@ -127,15 +140,26 @@ fn encode_list(items: &[PackStreamValue], buf: &mut Vec<u8>) {
         buf,
     );
     for item in items {
-        encode(item, buf);
+        encode(item, buf)?;
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Dict encoding
 // ---------------------------------------------------------------------------
 
-fn encode_dict(pairs: &[(String, PackStreamValue)], buf: &mut Vec<u8>) {
+fn encode_dict(pairs: &[(String, PackStreamValue)], buf: &mut Vec<u8>) -> Result<()> {
+    // Detect duplicate keys in debug builds — duplicate keys produce ambiguous
+    // wire data that decoders may interpret differently.
+    #[cfg(debug_assertions)]
+    {
+        let mut seen = std::collections::HashSet::new();
+        for (key, _) in pairs {
+            assert!(seen.insert(key.as_str()), "duplicate dict key: {key:?}");
+        }
+    }
+
     encode_sized_header(
         pairs.len(),
         m::TINY_DICT_BASE,
@@ -146,23 +170,32 @@ fn encode_dict(pairs: &[(String, PackStreamValue)], buf: &mut Vec<u8>) {
     );
     for (key, value) in pairs {
         encode_string(key, buf);
-        encode(value, buf);
+        encode(value, buf)?;
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
 // Struct encoding
 // ---------------------------------------------------------------------------
 
-fn encode_struct(tag: u8, fields: &[PackStreamValue], buf: &mut Vec<u8>) {
-    // Structs only have a Tiny form (0–15 fields).
-    // Safe: field count is masked to 4 bits.
+fn encode_struct(tag: u8, fields: &[PackStreamValue], buf: &mut Vec<u8>) -> Result<()> {
+    // The PackStream struct type only has a Tiny form (0–15 fields).
+    // Encoding more than 15 fields silently truncates the count in the wire
+    // header, producing a corrupt message. Catch this in debug builds.
+    debug_assert!(
+        fields.len() <= 15,
+        "PackStream structs support at most 15 fields, got {}",
+        fields.len()
+    );
+    // Safe: field count is masked to 4 bits (fail-safe for release builds).
     #[allow(clippy::cast_possible_truncation)]
-    buf.push(m::TINY_STRUCT_BASE | (fields.len() as u8 & 0x0F));
+    buf.push(m::TINY_STRUCT_BASE | (fields.len().min(15) as u8));
     buf.push(tag);
     for field in fields {
-        encode(field, buf);
+        encode(field, buf)?;
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

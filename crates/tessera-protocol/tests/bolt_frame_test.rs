@@ -119,6 +119,33 @@ async fn reader_returns_none_on_clean_eof() {
     assert_eq!(msg, None);
 }
 
+/// A reader configured with a 1 KiB limit must reject a message assembled
+/// from two 600-byte chunks (1200 bytes total > 1024 bytes limit).
+#[tokio::test]
+async fn reader_rejects_message_exceeding_size_limit() {
+    // Build wire bytes: chunk1 (600 bytes) + chunk2 (600 bytes) + terminator.
+    // Total payload = 1200 bytes, which exceeds the 1024-byte limit.
+    let chunk_payload = vec![0xAAu8; 600];
+    let mut wire = Vec::new();
+    // Chunk 1
+    wire.extend_from_slice(&600u16.to_be_bytes());
+    wire.extend_from_slice(&chunk_payload);
+    // Chunk 2
+    wire.extend_from_slice(&600u16.to_be_bytes());
+    wire.extend_from_slice(&chunk_payload);
+    // Terminator
+    wire.extend_from_slice(&[0x00, 0x00]);
+
+    let mut cursor: &[u8] = &wire;
+    let mut reader = BoltChunkedReader::new(&mut cursor).with_max_message_size(1024);
+    let err = reader.read_message().await.unwrap_err();
+    assert_eq!(
+        err.kind(),
+        std::io::ErrorKind::InvalidData,
+        "expected InvalidData for oversized message, got {err:?}"
+    );
+}
+
 // ── Round-trip tests ─────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -184,9 +211,9 @@ async fn packstream_value_survives_bolt_framing() {
         ),
     ]);
 
-    // encode appends to a buffer, returns ()
+    // encode returns Result<()> — unwrap is correct in test context.
     let mut encoded = Vec::new();
-    encode(&original, &mut encoded);
+    encode(&original, &mut encoded).unwrap();
 
     let (mut writer, mut reader) = make_pair(4096);
     writer.write_message(&encoded).await.unwrap();

@@ -18,6 +18,12 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 /// Maximum chunk payload size in bytes (`u16::MAX`).
 pub const MAX_CHUNK_SIZE: usize = 65_535;
 
+/// Default upper bound on a single reassembled Bolt message (64 MiB).
+///
+/// This prevents a malicious peer from causing unbounded memory growth by
+/// sending an endless stream of non-terminating chunks.
+pub const MAX_BOLT_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
+
 // ── Writer ───────────────────────────────────────────────────────────────────
 
 /// Writes Bolt-framed messages as chunks over an async writer.
@@ -32,13 +38,14 @@ impl<W: AsyncWrite + Unpin> BoltChunkedWriter<W> {
         Self { inner }
     }
 
-    /// Write a complete message as one or more chunks followed by a zero terminator.
+    /// Write a complete message as one or more chunks followed by a zero terminator,
+    /// then flush the underlying writer.
     ///
     /// An empty `data` slice writes only the zero terminator (`[0x00, 0x00]`).
     ///
     /// # Errors
     ///
-    /// Returns `io::Error` if any underlying write fails.
+    /// Returns `io::Error` if any underlying write or flush fails.
     pub async fn write_message(&mut self, data: &[u8]) -> io::Result<()> {
         // Split into at most MAX_CHUNK_SIZE-byte slices and write each as a chunk.
         // When data is empty this iterator yields no items, which is correct —
@@ -60,6 +67,9 @@ impl<W: AsyncWrite + Unpin> BoltChunkedWriter<W> {
 
         // Zero terminator — always present, even for empty messages.
         self.inner.write_all(&[0x00, 0x00]).await?;
+        // Flush ensures the entire message (including terminator) is pushed to
+        // the OS send buffer before returning to the caller.
+        self.inner.flush().await?;
         Ok(())
     }
 
@@ -78,23 +88,44 @@ impl<W: AsyncWrite + Unpin> BoltChunkedWriter<W> {
 /// Reads Bolt-framed messages by reassembling chunks from an async reader.
 pub struct BoltChunkedReader<R: AsyncRead + Unpin> {
     inner: R,
+    max_message_size: usize,
 }
 
 impl<R: AsyncRead + Unpin> BoltChunkedReader<R> {
     /// Create a new [`BoltChunkedReader`] wrapping `inner`.
+    ///
+    /// The reader enforces [`MAX_BOLT_MESSAGE_SIZE`] by default. Use
+    /// [`Self::with_max_message_size`] to override the limit.
     #[must_use]
     pub const fn new(inner: R) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            max_message_size: MAX_BOLT_MESSAGE_SIZE,
+        }
+    }
+
+    /// Override the maximum reassembled message size.
+    ///
+    /// If a message's total accumulated bytes would exceed `max`, reading is
+    /// aborted with `io::ErrorKind::InvalidData`. This prevents a malicious
+    /// peer from causing unbounded memory growth.
+    #[must_use]
+    pub const fn with_max_message_size(mut self, max: usize) -> Self {
+        self.max_message_size = max;
+        self
     }
 
     /// Read chunks until a zero-length terminator, then return the reassembled message.
     ///
     /// - Returns `Ok(None)` on clean EOF (connection closed before any chunk header).
     /// - Returns `Err(io::ErrorKind::UnexpectedEof)` if EOF occurs mid-message.
+    /// - Returns `Err(io::ErrorKind::InvalidData)` if the message exceeds
+    ///   the configured maximum size (see [`Self::with_max_message_size`]).
     ///
     /// # Errors
     ///
-    /// Returns `io::Error` on any read failure or unexpected EOF inside a message.
+    /// Returns `io::Error` on any read failure, unexpected EOF inside a message,
+    /// or when the assembled message would exceed the size limit.
     pub async fn read_message(&mut self) -> io::Result<Option<Vec<u8>>> {
         let mut buf: Vec<u8> = Vec::new();
         let mut first_chunk = true;
@@ -123,6 +154,18 @@ impl<R: AsyncRead + Unpin> BoltChunkedReader<R> {
             if chunk_size == 0 {
                 // Zero terminator — message is complete.
                 return Ok(Some(buf));
+            }
+
+            // Guard against unbounded memory growth: reject messages that
+            // exceed the configured limit before allocating more space.
+            if buf.len() + chunk_size > self.max_message_size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Bolt message exceeds maximum allowed size of {} bytes",
+                        self.max_message_size
+                    ),
+                ));
             }
 
             // Read exactly chunk_size bytes.

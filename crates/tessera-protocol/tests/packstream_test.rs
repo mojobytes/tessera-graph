@@ -11,7 +11,7 @@ use tessera_protocol::ProtocolError;
 
 fn roundtrip(value: &PackStreamValue) {
     let mut buf = Vec::new();
-    encode(value, &mut buf);
+    encode(value, &mut buf).unwrap();
     let (decoded, consumed) = decode(&buf).unwrap();
     assert_eq!(consumed, buf.len(), "round-trip did not consume entire buffer for {value:?}");
     assert_eq!(&decoded, value, "round-trip value mismatch for {value:?}");
@@ -24,21 +24,21 @@ fn roundtrip(value: &PackStreamValue) {
 #[test]
 fn encode_null() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Null, &mut buf);
+    encode(&PackStreamValue::Null, &mut buf).unwrap();
     assert_eq!(buf, [0xC0]);
 }
 
 #[test]
 fn encode_bool_true() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Bool(true), &mut buf);
+    encode(&PackStreamValue::Bool(true), &mut buf).unwrap();
     assert_eq!(buf, [0xC3]);
 }
 
 #[test]
 fn encode_bool_false() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Bool(false), &mut buf);
+    encode(&PackStreamValue::Bool(false), &mut buf).unwrap();
     assert_eq!(buf, [0xC2]);
 }
 
@@ -46,7 +46,7 @@ fn encode_bool_false() {
 
 fn encode_int_bytes(i: i64) -> Vec<u8> {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Int(i), &mut buf);
+    encode(&PackStreamValue::Int(i), &mut buf).unwrap();
     buf
 }
 
@@ -164,7 +164,7 @@ fn encode_int_i64_min() {
 #[test]
 fn encode_float_zero() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Float(0.0_f64), &mut buf);
+    encode(&PackStreamValue::Float(0.0_f64), &mut buf).unwrap();
     assert_eq!(&buf[0..1], [0xC1]);
     assert_eq!(&buf[1..], 0.0_f64.to_bits().to_be_bytes());
 }
@@ -172,7 +172,7 @@ fn encode_float_zero() {
 #[test]
 fn encode_float_one() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Float(1.0_f64), &mut buf);
+    encode(&PackStreamValue::Float(1.0_f64), &mut buf).unwrap();
     assert_eq!(&buf[0..1], [0xC1]);
     assert_eq!(&buf[1..], 1.0_f64.to_bits().to_be_bytes());
 }
@@ -180,9 +180,35 @@ fn encode_float_one() {
 #[test]
 fn encode_float_pi() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Float(PI), &mut buf);
+    encode(&PackStreamValue::Float(PI), &mut buf).unwrap();
     assert_eq!(&buf[0..1], [0xC1]);
     assert_eq!(&buf[1..], PI.to_bits().to_be_bytes());
+}
+
+#[test]
+fn encode_nan_returns_error() {
+    let mut buf = Vec::new();
+    let err = encode(&PackStreamValue::Float(f64::NAN), &mut buf).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::PackStreamInvalidFloat),
+        "expected PackStreamInvalidFloat, got {err:?}"
+    );
+}
+
+#[test]
+fn encode_infinity_returns_error() {
+    let mut buf = Vec::new();
+    let err = encode(&PackStreamValue::Float(f64::INFINITY), &mut buf).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::PackStreamInvalidFloat),
+        "expected PackStreamInvalidFloat for +Inf, got {err:?}"
+    );
+
+    let err = encode(&PackStreamValue::Float(f64::NEG_INFINITY), &mut buf).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::PackStreamInvalidFloat),
+        "expected PackStreamInvalidFloat for -Inf, got {err:?}"
+    );
 }
 
 // --- Strings ---
@@ -190,14 +216,14 @@ fn encode_float_pi() {
 #[test]
 fn encode_string_empty() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(String::new()), &mut buf);
+    encode(&PackStreamValue::String(String::new()), &mut buf).unwrap();
     assert_eq!(buf, [0x80]);
 }
 
 #[test]
 fn encode_string_hello() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String("hello".to_owned()), &mut buf);
+    encode(&PackStreamValue::String("hello".to_owned()), &mut buf).unwrap();
     // 0x85 = TINY_STRING_BASE | 5
     assert_eq!(buf, [0x85, b'h', b'e', b'l', b'l', b'o']);
 }
@@ -207,7 +233,7 @@ fn encode_string_16_chars_uses_string8() {
     // 16 characters → can't fit in TinyString (max 15).
     let s: String = "a".repeat(16);
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(s.clone()), &mut buf);
+    encode(&PackStreamValue::String(s.clone()), &mut buf).unwrap();
     assert_eq!(buf[0], 0xD0, "should use STRING8 marker");
     assert_eq!(buf[1], 16u8);
     assert_eq!(&buf[2..], s.as_bytes());
@@ -217,7 +243,7 @@ fn encode_string_16_chars_uses_string8() {
 fn encode_string_256_chars_uses_string16() {
     let s: String = "x".repeat(256);
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(s.clone()), &mut buf);
+    encode(&PackStreamValue::String(s.clone()), &mut buf).unwrap();
     assert_eq!(buf[0], 0xD1, "should use STRING16 marker");
     assert_eq!(u16::from_be_bytes([buf[1], buf[2]]), 256u16);
     assert_eq!(&buf[3..], s.as_bytes());
@@ -228,14 +254,14 @@ fn encode_string_256_chars_uses_string16() {
 #[test]
 fn encode_bytes_empty() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Bytes(vec![]), &mut buf);
+    encode(&PackStreamValue::Bytes(vec![]), &mut buf).unwrap();
     assert_eq!(buf, [0xCC, 0x00]);
 }
 
 #[test]
 fn encode_bytes_small() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Bytes(vec![1, 2, 3]), &mut buf);
+    encode(&PackStreamValue::Bytes(vec![1, 2, 3]), &mut buf).unwrap();
     assert_eq!(buf, [0xCC, 0x03, 0x01, 0x02, 0x03]);
 }
 
@@ -243,7 +269,7 @@ fn encode_bytes_small() {
 fn encode_bytes_256_uses_bytes16() {
     let data = vec![0xABu8; 256];
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Bytes(data.clone()), &mut buf);
+    encode(&PackStreamValue::Bytes(data.clone()), &mut buf).unwrap();
     assert_eq!(buf[0], 0xCD, "should use BYTES16 marker");
     assert_eq!(u16::from_be_bytes([buf[1], buf[2]]), 256u16);
     assert_eq!(&buf[3..], data.as_slice());
@@ -254,14 +280,14 @@ fn encode_bytes_256_uses_bytes16() {
 #[test]
 fn encode_list_empty() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::List(vec![]), &mut buf);
+    encode(&PackStreamValue::List(vec![]), &mut buf).unwrap();
     assert_eq!(buf, [0x90]);
 }
 
 #[test]
 fn encode_list_one_null() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::List(vec![PackStreamValue::Null]), &mut buf);
+    encode(&PackStreamValue::List(vec![PackStreamValue::Null]), &mut buf).unwrap();
     assert_eq!(buf, [0x91, 0xC0]);
 }
 
@@ -270,7 +296,7 @@ fn encode_list_nested() {
     let inner = PackStreamValue::List(vec![PackStreamValue::Null]);
     let outer = PackStreamValue::List(vec![inner]);
     let mut buf = Vec::new();
-    encode(&outer, &mut buf);
+    encode(&outer, &mut buf).unwrap();
     // outer TinyList(1) + inner TinyList(1) + Null
     assert_eq!(buf, [0x91, 0x91, 0xC0]);
 }
@@ -280,7 +306,7 @@ fn encode_list_nested() {
 #[test]
 fn encode_dict_empty() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Dict(vec![]), &mut buf);
+    encode(&PackStreamValue::Dict(vec![]), &mut buf).unwrap();
     assert_eq!(buf, [0xA0]);
 }
 
@@ -290,7 +316,8 @@ fn encode_dict_one_entry() {
     encode(
         &PackStreamValue::Dict(vec![("a".to_owned(), PackStreamValue::Null)]),
         &mut buf,
-    );
+    )
+    .unwrap();
     // TinyDict(1) + TinyString(1,"a") + Null
     assert_eq!(buf, [0xA1, 0x81, b'a', 0xC0]);
 }
@@ -304,7 +331,8 @@ fn encode_dict_two_entries() {
             ("y".to_owned(), PackStreamValue::Bool(false)),
         ]),
         &mut buf,
-    );
+    )
+    .unwrap();
     // TinyDict(2) + "x" + true + "y" + false
     assert_eq!(buf, [0xA2, 0x81, b'x', 0xC3, 0x81, b'y', 0xC2]);
 }
@@ -320,7 +348,8 @@ fn encode_struct_empty_fields() {
             fields: vec![],
         },
         &mut buf,
-    );
+    )
+    .unwrap();
     // TinyStruct(0) + tag 0x01
     assert_eq!(buf, [0xB0, 0x01]);
 }
@@ -334,9 +363,21 @@ fn encode_struct_with_dict_field() {
             fields: vec![PackStreamValue::Dict(vec![])],
         },
         &mut buf,
-    );
+    )
+    .unwrap();
     // TinyStruct(1) + tag + TinyDict(0)
     assert_eq!(buf, [0xB1, 0x71, 0xA0]);
+}
+
+/// Structs with more than 15 fields are not representable in `PackStream`'s
+/// Tiny form and will panic in debug builds.
+#[test]
+#[should_panic(expected = "PackStream structs support at most 15 fields")]
+#[cfg(debug_assertions)]
+fn encode_struct_with_16_fields_panics_in_debug() {
+    let mut buf = Vec::new();
+    let fields = vec![PackStreamValue::Null; 16];
+    encode(&PackStreamValue::Struct { tag: 0x01, fields }, &mut buf).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +518,50 @@ fn decode_tiny_struct() {
         }
     );
     assert_eq!(consumed, 3);
+}
+
+// --- Security: OOM protection ---
+
+/// A LIST32 header claiming ~4 billion elements with only 5 bytes available
+/// must return `PackStreamUnderflow`, not allocate 4 GiB of memory.
+#[test]
+fn decode_list32_with_huge_count_returns_underflow_not_oom() {
+    // 0xD6 = LIST32 marker, followed by 4 bytes = 0xFFFFFFFF (4,294,967,295 elements)
+    let buf = [0xD6u8, 0xFF, 0xFF, 0xFF, 0xFF];
+    let err = decode(&buf).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::PackStreamUnderflow { .. }),
+        "expected PackStreamUnderflow, got {err:?}"
+    );
+}
+
+/// A DICT32 header claiming ~4 billion entries with only 5 bytes available
+/// must return `PackStreamUnderflow`, not allocate 4 GiB of memory.
+#[test]
+fn decode_dict32_with_huge_count_returns_underflow_not_oom() {
+    // 0xDA = DICT32 marker, followed by 4 bytes = 0xFFFFFFFF
+    let buf = [0xDAu8, 0xFF, 0xFF, 0xFF, 0xFF];
+    let err = decode(&buf).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::PackStreamUnderflow { .. }),
+        "expected PackStreamUnderflow, got {err:?}"
+    );
+}
+
+/// A 100-deep nested list (100 × TinyList(1) then Null) must return
+/// `PackStreamDepthLimitExceeded` instead of overflowing the stack.
+#[test]
+fn decode_deeply_nested_list_returns_depth_error() {
+    // Construct: 0x91 × 100 followed by 0xC0 (Null)
+    // Each 0x91 = TinyList with 1 element, so nesting goes 100 levels deep.
+    let depth = 100;
+    let mut buf = vec![0x91u8; depth];
+    buf.push(0xC0); // innermost element: Null
+    let err = decode(&buf).unwrap_err();
+    assert!(
+        matches!(err, ProtocolError::PackStreamDepthLimitExceeded { .. }),
+        "expected PackStreamDepthLimitExceeded, got {err:?}"
+    );
 }
 
 // --- Error cases ---
@@ -621,9 +706,7 @@ fn roundtrip_struct_empty() {
 fn roundtrip_struct_complex() {
     roundtrip(&PackStreamValue::Struct {
         tag: 0x71,
-        fields: vec![PackStreamValue::Dict(vec![
-            ("x".to_owned(), PackStreamValue::Int(1)),
-        ])],
+        fields: vec![PackStreamValue::Dict(vec![("x".to_owned(), PackStreamValue::Int(1))])],
     });
 }
 
@@ -689,13 +772,13 @@ fn string_boundary_15_to_16() {
     // 15-char string → TinyString (1-byte header).
     let s15: String = "z".repeat(15);
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(s15), &mut buf);
+    encode(&PackStreamValue::String(s15), &mut buf).unwrap();
     assert_eq!(buf[0], 0x8F); // TINY_STRING_BASE | 15
 
     // 16-char string → String8 (2-byte header).
     let s16: String = "z".repeat(16);
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(s16), &mut buf);
+    encode(&PackStreamValue::String(s16), &mut buf).unwrap();
     assert_eq!(buf[0], 0xD0);
 }
 
@@ -703,12 +786,12 @@ fn string_boundary_15_to_16() {
 fn string_boundary_255_to_256() {
     let s255: String = "a".repeat(255);
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(s255), &mut buf);
+    encode(&PackStreamValue::String(s255), &mut buf).unwrap();
     assert_eq!(buf[0], 0xD0); // String8
 
     let s256: String = "a".repeat(256);
     let mut buf = Vec::new();
-    encode(&PackStreamValue::String(s256), &mut buf);
+    encode(&PackStreamValue::String(s256), &mut buf).unwrap();
     assert_eq!(buf[0], 0xD1); // String16
 }
 
@@ -716,12 +799,12 @@ fn string_boundary_255_to_256() {
 fn list_boundary_15_to_16() {
     let list15 = PackStreamValue::List(vec![PackStreamValue::Null; 15]);
     let mut buf = Vec::new();
-    encode(&list15, &mut buf);
+    encode(&list15, &mut buf).unwrap();
     assert_eq!(buf[0], 0x9F); // TINY_LIST_BASE | 15
 
     let list16 = PackStreamValue::List(vec![PackStreamValue::Null; 16]);
     let mut buf = Vec::new();
-    encode(&list16, &mut buf);
+    encode(&list16, &mut buf).unwrap();
     assert_eq!(buf[0], 0xD4); // LIST8
 }
 
@@ -731,13 +814,13 @@ fn dict_boundary_15_to_16() {
         .map(|i| (format!("k{i}"), PackStreamValue::Null))
         .collect();
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Dict(pairs15), &mut buf);
+    encode(&PackStreamValue::Dict(pairs15), &mut buf).unwrap();
     assert_eq!(buf[0], 0xAF); // TINY_DICT_BASE | 15
 
     let pairs16: Vec<(String, PackStreamValue)> = (0..16)
         .map(|i| (format!("k{i}"), PackStreamValue::Null))
         .collect();
     let mut buf = Vec::new();
-    encode(&PackStreamValue::Dict(pairs16), &mut buf);
+    encode(&PackStreamValue::Dict(pairs16), &mut buf).unwrap();
     assert_eq!(buf[0], 0xD8); // DICT8
 }

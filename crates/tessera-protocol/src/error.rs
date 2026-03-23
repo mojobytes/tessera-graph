@@ -35,6 +35,12 @@ pub enum ProtocolError {
 
     #[error("packstream dict key must be a string")]
     PackStreamDictKeyNotString,
+
+    #[error("packstream decode depth limit exceeded (max {max})")]
+    PackStreamDepthLimitExceeded { max: usize },
+
+    #[error("packstream float value must be finite (NaN and Infinity are not allowed)")]
+    PackStreamInvalidFloat,
 }
 
 /// Convenience result type for protocol operations.
