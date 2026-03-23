@@ -14,6 +14,9 @@ pub enum ServerError {
 
     #[error("auth error: {0}")]
     Auth(#[from] tessera_auth::AuthError),
+
+    #[error("storage error: {0}")]
+    Storage(#[from] tessera_graph::Error),
 }
 
 /// Convenience result type for server operations.

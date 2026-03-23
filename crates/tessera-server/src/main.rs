@@ -15,6 +15,7 @@ use tessera_auth::session::SessionManager;
 use tessera_auth::user::UserStoreHandle;
 use tessera_graph::Graph;
 use tessera_protocol::tls::TlsConfigBuilder;
+use tessera_server::config::PersistenceConfig;
 use tessera_server::context::ServerContext;
 use tessera_server::listener::TesseraListener;
 
@@ -58,8 +59,18 @@ async fn main() {
     let audit =
         Arc::new(AuditLog::open(std::path::Path::new(&audit_path)).expect("audit log init"));
 
-    // --- Graph ---
-    let graph = Arc::new(RwLock::new(Graph::new()));
+    // --- Graph (file-backed if TESSERA_DATA_DIR is set, in-memory otherwise) ---
+    let persistence = PersistenceConfig::from_env();
+    let graph = Arc::new(RwLock::new(
+        if let Some(ref path) = persistence.data_dir {
+            tracing::info!("opening file-backed graph at {}", path.display());
+            Graph::open(path, &persistence.graph_config)
+                .expect("failed to open graph data directory")
+        } else {
+            tracing::info!("no TESSERA_DATA_DIR set — starting with in-memory graph");
+            Graph::new()
+        },
+    ));
 
     // --- Metrics ---
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(max_connections as u64));
@@ -106,7 +117,7 @@ async fn main() {
     if let Err(e) = listener
         .serve_tls(
             ctx,
-            graph,
+            Arc::clone(&graph),
             shutdown_rx,
             max_connections,
             Duration::from_secs(idle_timeout_secs),
@@ -115,4 +126,7 @@ async fn main() {
     {
         tracing::error!("server error: {e}");
     }
+
+    // --- Graceful shutdown: flush graph to disk ---
+    tessera_server::shutdown::flush_on_shutdown(&graph);
 }

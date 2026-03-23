@@ -323,7 +323,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> ConnectionHandler<S> {
                         ServerError::Auth(tessera_auth::AuthError::LockPoisoned("graph"))
                     })?;
                     let mut secure = SecureGraph::new(&mut *graph, clearance);
-                    tessera_storage_enterprise::gql::execute_mut(&mut secure, m)
+                    let r = tessera_storage_enterprise::gql::execute_mut(&mut secure, m);
+                    if r.is_ok() {
+                        // Release SecureGraph borrow before flushing
+                        drop(secure);
+                        graph.flush()?;
+                    }
+                    r
                 };
                 match result {
                     Ok(r) => ServerMessage::QueryResult {

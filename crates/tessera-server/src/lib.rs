@@ -3,10 +3,12 @@
 //! Library surface for tessera-server integration tests and internal modules.
 
 pub mod auth_dispatch;
+pub mod config;
 pub mod connection;
 pub mod context;
 pub mod error;
 pub mod listener;
+pub mod shutdown;
 
 pub use connection::ConnectionHandler;
 pub use context::ServerContext;
