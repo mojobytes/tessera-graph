@@ -2420,6 +2420,7 @@ dependencies = [
 name = "tessera-tenant"
 version = "0.1.0"
 dependencies = [
+ "tempfile",
  "tessera-graph",
  "thiserror 2.0.18",
 ]
