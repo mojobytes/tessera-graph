@@ -23,6 +23,18 @@ pub enum ProtocolError {
 
     #[error("invalid message: {0}")]
     InvalidMessage(#[from] serde_json::Error),
+
+    #[error("packstream buffer underflow: need {needed} bytes, got {available}")]
+    PackStreamUnderflow { needed: usize, available: usize },
+
+    #[error("packstream unknown marker byte: 0x{marker:02X}")]
+    PackStreamUnknownMarker { marker: u8 },
+
+    #[error("packstream invalid UTF-8 in string field")]
+    PackStreamInvalidUtf8,
+
+    #[error("packstream dict key must be a string")]
+    PackStreamDictKeyNotString,
 }
 
 /// Convenience result type for protocol operations.
