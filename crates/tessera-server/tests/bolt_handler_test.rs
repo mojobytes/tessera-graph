@@ -16,7 +16,10 @@ use tessera_protocol::PackStreamValue;
 use tessera_protocol::bolt_message::{BoltRequest, BoltResponse};
 use tessera_tenant::{DatabaseAddress, DatabaseName, TenantId, TenantRegistry};
 
-use common::{bolt_recv, bolt_send, spawn_bolt_handler, test_context, test_context_with_registry};
+use common::{
+    bolt_recv, bolt_send, spawn_bolt_handler, test_context, test_context_with_rate_limit,
+    test_context_with_registry,
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,7 +92,7 @@ fn dict_str(resp: &BoltResponse, key: &str) -> Option<String> {
 
 #[tokio::test]
 async fn bolt_hello_valid_credentials_returns_success() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -103,7 +106,7 @@ async fn bolt_hello_valid_credentials_returns_success() {
 
 #[tokio::test]
 async fn bolt_hello_wrong_password_returns_failure() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "WrongPassword!")).await;
@@ -210,7 +213,7 @@ async fn bolt_run_pull_returns_records() {
 
 #[tokio::test]
 async fn bolt_run_pull_empty_result() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -234,7 +237,7 @@ async fn bolt_run_pull_empty_result() {
 
 #[tokio::test]
 async fn bolt_run_mutation_creates_node() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -321,7 +324,7 @@ fn ctx_with_clearance_and_node(
     compartments: &[&str],
     node_level: u16,
     node_compartments: &[&str],
-) -> (Arc<tessera_server::context::ServerContext>, Arc<TenantRegistry>) {
+) -> (tempfile::TempDir, Arc<tessera_server::context::ServerContext>, Arc<TenantRegistry>) {
     let dir = tempfile::tempdir().unwrap();
     let registry = Arc::new(TenantRegistry::new(dir.path(), GraphConfig::new()));
 
@@ -345,9 +348,6 @@ fn ctx_with_clearance_and_node(
     graph.add_node("Thing", p).unwrap();
     drop(graph);
 
-    // std::mem::forget prevents the TempDir guard from running cleanup.
-    std::mem::forget(dir);
-
     let ctx = test_context_with_registry(Arc::clone(&registry));
     let clearance = Clearance::new(
         level,
@@ -359,13 +359,13 @@ fn ctx_with_clearance_and_node(
     ctx.user_store()
         .set_clearance("admin", clearance)
         .unwrap();
-    (ctx, registry)
+    (dir, ctx, registry)
 }
 
 #[tokio::test]
 async fn bolt_lbac_hides_classified_node() {
     // User clearance level 0, node at level 5 → must be hidden.
-    let (ctx, _registry) = ctx_with_clearance_and_node(0, &[], 5, &[]);
+    let (_dir, ctx, _registry) = ctx_with_clearance_and_node(0, &[], 5, &[]);
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -390,7 +390,7 @@ async fn bolt_lbac_hides_classified_node() {
 #[tokio::test]
 async fn bolt_lbac_shows_node_to_cleared_user() {
     // User clearance level 10, node at level 5 → must be visible.
-    let (ctx, _registry) = ctx_with_clearance_and_node(10, &[], 5, &[]);
+    let (_dir, ctx, _registry) = ctx_with_clearance_and_node(10, &[], 5, &[]);
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -416,7 +416,7 @@ async fn bolt_lbac_shows_node_to_cleared_user() {
 
 #[tokio::test]
 async fn bolt_after_failure_returns_ignored() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     // Authenticate first.
@@ -442,7 +442,7 @@ async fn bolt_after_failure_returns_ignored() {
 
 #[tokio::test]
 async fn bolt_reset_clears_failure() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -467,7 +467,7 @@ async fn bolt_reset_clears_failure() {
 
 #[tokio::test]
 async fn bolt_goodbye_closes_connection() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
@@ -481,44 +481,192 @@ async fn bolt_goodbye_closes_connection() {
     assert!(eof.is_none(), "expected EOF after GOODBYE");
 }
 
-// ── Transaction stub tests ────────────────────────────────────────────────────
+// ── Transaction tests ─────────────────────────────────────────────────────────
+// Explicit transactions (BEGIN/COMMIT/ROLLBACK) are NOT implemented.
+// BEGIN must respond FAILURE so clients don't silently lose rollback semantics.
 
 #[tokio::test]
-async fn bolt_begin_commit_success() {
-    let ctx = test_context();
+async fn bolt_begin_responds_failure() {
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
     assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
 
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    let resp = bolt_recv(&mut reader).await;
     assert!(
-        matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }),
-        "BEGIN must return SUCCESS"
-    );
-
-    bolt_send(&mut writer, &BoltRequest::Commit).await;
-    assert!(
-        matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }),
-        "COMMIT must return SUCCESS"
+        matches!(resp, BoltResponse::Failure { .. }),
+        "BEGIN must respond FAILURE (explicit transactions not supported), got {resp:?}"
     );
 }
 
 #[tokio::test]
-async fn bolt_begin_rollback_success() {
-    let ctx = test_context();
+async fn bolt_after_begin_failure_run_is_ignored() {
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
     assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
 
+    // BEGIN enters FAILED state
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+
+    // RUN in FAILED state must be IGNORED
+    bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Ignored),
+        "RUN after BEGIN failure must be IGNORED, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn bolt_after_begin_failure_reset_recovers() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+
+    // BEGIN fails
+    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+
+    // RESET recovers
+    bolt_send(&mut writer, &BoltRequest::Reset).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+
+    // RUN should work again
+    bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "RUN after RESET should succeed, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn bolt_commit_without_begin_returns_ignored() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+
+    bolt_send(&mut writer, &BoltRequest::Commit).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Ignored),
+        "COMMIT without BEGIN must be IGNORED, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn bolt_rollback_without_begin_returns_ignored() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
     assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
 
     bolt_send(&mut writer, &BoltRequest::Rollback).await;
+    let resp = bolt_recv(&mut reader).await;
     assert!(
-        matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }),
-        "ROLLBACK must return SUCCESS"
+        matches!(resp, BoltResponse::Ignored),
+        "ROLLBACK without BEGIN must be IGNORED, got {resp:?}"
+    );
+}
+
+// ── Rate-limiting tests ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn bolt_rate_limit_locks_after_max_failures() {
+    // Policy: lock after 2 failures for 60 seconds.
+    let (_dir, ctx) = test_context_with_rate_limit(2, 60);
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    // Two failed attempts with RESET between them.
+    for _ in 0..2 {
+        bolt_send(&mut writer, &hello_request("admin", "wrong")).await;
+        let resp = bolt_recv(&mut reader).await;
+        assert!(matches!(resp, BoltResponse::Failure { .. }));
+        bolt_send(&mut writer, &BoltRequest::Reset).await;
+        assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    }
+
+    // Third attempt with correct password — account is locked.
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Failure { .. }),
+        "locked account must be rejected even with correct password, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn bolt_rate_limit_success_resets_counter() {
+    // Policy: lock after 3 failures for 60 seconds.
+    let (_dir, ctx) = test_context_with_rate_limit(3, 60);
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    // One failure.
+    bolt_send(&mut writer, &hello_request("admin", "wrong")).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+    bolt_send(&mut writer, &BoltRequest::Reset).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+
+    // Successful login resets the counter.
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+}
+
+// ── O1: Unique connection_id ──────────────────────────────────────────────────
+
+#[tokio::test]
+async fn bolt_hello_returns_unique_connection_id() {
+    // Two independent connections must get different connection_ids.
+    let (_dir1, ctx1) = test_context();
+    let (mut w1, mut r1, _s1) = spawn_bolt_handler(ctx1).await;
+    bolt_send(&mut w1, &hello_request("admin", "Admin@Init1!")).await;
+    let resp1 = bolt_recv(&mut r1).await;
+
+    let (_dir2, ctx2) = test_context();
+    let (mut w2, mut r2, _s2) = spawn_bolt_handler(ctx2).await;
+    bolt_send(&mut w2, &hello_request("admin", "Admin@Init1!")).await;
+    let resp2 = bolt_recv(&mut r2).await;
+
+    let id1 = dict_str(&resp1, "connection_id").expect("connection_id in resp1");
+    let id2 = dict_str(&resp2, "connection_id").expect("connection_id in resp2");
+    assert_ne!(id1, id2, "connection_ids must be unique across connections");
+    assert!(
+        id1.starts_with("bolt-tessera-"),
+        "connection_id must start with bolt-tessera-, got {id1}"
+    );
+}
+
+// ── O5: Non-empty params rejected ────────────────────────────────────────────
+
+#[tokio::test]
+async fn bolt_run_with_params_returns_failure() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+
+    // Send RUN with non-empty params.
+    let req = BoltRequest::Run {
+        query: "MATCH (n) WHERE n.name = $name RETURN n".to_owned(),
+        params: vec![("name".to_owned(), PackStreamValue::String("Alice".to_owned()))],
+        extra: vec![],
+    };
+    bolt_send(&mut writer, &req).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Failure { .. }),
+        "RUN with params must fail, got {resp:?}"
     );
 }
 
@@ -526,7 +674,7 @@ async fn bolt_begin_rollback_success() {
 
 #[tokio::test]
 async fn bolt_shutdown_signal_closes_handler() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, shutdown_tx) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;

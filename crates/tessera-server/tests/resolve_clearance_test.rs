@@ -7,7 +7,7 @@ use tessera_auth::session::SessionToken;
 
 #[test]
 fn resolve_clearance_returns_default_for_valid_session() {
-    let ctx = common::test_context();
+    let (_dir, ctx) = common::test_context();
     let user_id = ctx
         .user_store()
         .authenticate(
@@ -22,7 +22,7 @@ fn resolve_clearance_returns_default_for_valid_session() {
 
 #[test]
 fn resolve_clearance_returns_custom_clearance_after_set() {
-    let ctx = common::test_context();
+    let (_dir, ctx) = common::test_context();
     let comps = ["FINANCE", "HR"]
         .iter()
         .map(|s| (*s).to_string())
@@ -46,7 +46,7 @@ fn resolve_clearance_returns_custom_clearance_after_set() {
 
 #[test]
 fn resolve_clearance_fails_for_invalid_token() {
-    let ctx = common::test_context();
+    let (_dir, ctx) = common::test_context();
     let bad_token = SessionToken::from_raw("totally-invalid-token".to_string());
     let result = ctx.resolve_clearance(&bad_token);
     assert!(result.is_err(), "must deny invalid tokens");

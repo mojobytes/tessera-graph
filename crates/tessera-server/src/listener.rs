@@ -10,8 +10,6 @@ use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 
-use tessera_tenant::TenantRegistry;
-
 use crate::bolt_handler::BoltConnectionHandler;
 use crate::context::ServerContext;
 use crate::error::Result;
@@ -61,7 +59,6 @@ impl TesseraListener {
     pub async fn serve(
         self,
         ctx: Arc<ServerContext>,
-        registry: Arc<TenantRegistry>,
         mut shutdown: watch::Receiver<bool>,
         max_connections: usize,
         idle_timeout: Duration,
@@ -108,7 +105,6 @@ impl TesseraListener {
             };
 
             let ctx = Arc::clone(&ctx);
-            let _registry = Arc::clone(&registry);
             let shutdown_rx = shutdown.clone();
             let default_tenant = default_tenant.clone();
 
@@ -146,7 +142,6 @@ impl TesseraListener {
     pub async fn serve_tls(
         self,
         ctx: Arc<ServerContext>,
-        registry: Arc<TenantRegistry>,
         mut shutdown: watch::Receiver<bool>,
         max_connections: usize,
         idle_timeout: Duration,
@@ -192,7 +187,6 @@ impl TesseraListener {
 
             let tls_acceptor = tls_acceptor.clone();
             let ctx = Arc::clone(&ctx);
-            let _registry = Arc::clone(&registry);
             let shutdown_rx = shutdown.clone();
             let default_tenant = default_tenant.clone();
 

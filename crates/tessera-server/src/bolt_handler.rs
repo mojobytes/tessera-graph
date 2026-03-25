@@ -37,6 +37,9 @@ use crate::error::{Result, ServerError};
 /// Must never include usernames, passwords, or internal details.
 const AUTH_FAILURE_MSG: &str = "authentication failed";
 
+/// Global connection counter for unique `connection_id` in HELLO responses.
+static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 // ── Pending result ────────────────────────────────────────────────────────────
 
 /// Stores the result of a RUN command until a PULL (or DISCARD) arrives.
@@ -187,7 +190,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                 self.handle_hello(extra).await?;
             }
             BoltRequest::Logon { ref auth } => {
-                // Treat LOGON the same as HELLO for Bolt 4.4 compatibility.
+                // LOGON re-authenticates on an existing connection. Clean up
+                // any prior session state before processing to prevent stale
+                // pending_result or session_token from leaking across sessions.
+                self.pending_result = None;
+                self.session_token = None;
+                self.graph = None;
                 self.handle_hello(auth).await?;
             }
             BoltRequest::Run {
@@ -288,7 +296,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                 ),
                 (
                     "connection_id".to_owned(),
-                    PackStreamValue::String("bolt-tessera".to_owned()),
+                    PackStreamValue::String(format!(
+                        "bolt-tessera-{}",
+                        CONNECTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    )),
                 ),
             ],
         })
@@ -297,27 +308,55 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
 
     /// Authenticate the client and return the `UserId`.
     ///
+    /// Checks the login attempt tracker first: if the account is locked due to
+    /// too many failed attempts, the request is rejected immediately without
+    /// touching the credential store.
+    ///
     /// Returns `Err(())` on any authentication failure, so the caller can
     /// send the generic failure message without leaking details.
     async fn authenticate(&self, principal: &str, credentials: &str) -> std::result::Result<UserId, ()> {
+        // --- Rate-limit check ---
+        if self
+            .ctx
+            .login_tracker()
+            .is_locked(principal, self.ctx.login_policy())
+        {
+            return Err(());
+        }
+
         if let Some(provider) = self.ctx.external_provider().cloned() {
-            let result = crate::auth_dispatch::authenticate_external(
+            return crate::auth_dispatch::authenticate_external(
                 principal,
                 credentials,
                 &provider,
                 self.ctx.group_mapping(),
                 self.ctx.sessions(),
             )
-            .await;
-            return result.map(|(id, _token)| id).map_err(|_| ());
+            .await
+            .map(|(id, _token)| {
+                self.ctx.login_tracker().record_success(principal);
+                id
+            })
+            .map_err(|_| {
+                self.ctx.login_tracker().record_failure(principal);
+            });
         }
 
         // Local auth path.
-        let password = Password::new(credentials).map_err(|_| ())?;
+        let Ok(password) = Password::new(credentials) else {
+            // Invalid credential format still counts as a failed attempt.
+            self.ctx.login_tracker().record_failure(principal);
+            return Err(());
+        };
         self.ctx
             .user_store()
             .authenticate(principal, &password)
-            .map_err(|_| ())
+            .inspect(|_id| {
+                self.ctx.login_tracker().record_success(principal);
+            })
+            .map_err(|_| {
+                self.ctx.login_tracker().record_failure(principal);
+            })
     }
 
     // ── RUN ───────────────────────────────────────────────────────────────────
@@ -327,20 +366,31 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     async fn handle_run(
         &mut self,
         query: &str,
-        _params: &BoltDict,
+        params: &BoltDict,
         _extra: &BoltDict,
     ) -> Result<()> {
+        // Parametrised queries are not yet implemented. Reject early so clients
+        // don't silently get incorrect results from unsubstituted parameters.
+        if !params.is_empty() {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Statement.ParameterMissing",
+                    "parametrised queries are not yet supported; inline all values in the query text",
+                )
+                .await;
+        }
+
         let query_start = std::time::Instant::now();
 
         // --- Session must exist ---
-        let Some(token) = self.session_token.clone() else {
+        let Some(ref token) = self.session_token else {
             return self
                 .send_failure("Neo.ClientError.Security.Unauthorized", "not authenticated")
                 .await;
         };
 
         // --- Clearance ---
-        let Ok(clearance) = self.ctx.resolve_clearance(&token) else {
+        let Ok(clearance) = self.ctx.resolve_clearance(token) else {
             return self
                 .send_failure("Neo.ClientError.Security.Unauthorized", "access denied")
                 .await;
@@ -432,11 +482,26 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         let (columns, rows) = match exec_result {
             Ok(r) => r,
             Err(e) => {
+                let query_summary: String = query.chars().take(128).collect();
+                let _ = self
+                    .ctx
+                    .audit()
+                    .record_error(None, "QUERY", Some(&query_summary), &e);
                 return self
                     .send_failure("Neo.ClientError.Statement.ExecutionError", &e)
                     .await;
             }
         };
+
+        // --- Audit ---
+        // Truncate query to 128 chars to avoid storing PII in audit logs.
+        let query_summary: String = query.chars().take(128).collect();
+        let op = if matches!(stmt, GqlStatement::Mutation(_)) {
+            "MUTATION"
+        } else {
+            "QUERY"
+        };
+        let _ = self.ctx.audit().record_success(None, op, Some(&query_summary));
 
         // --- Metrics ---
         let duration = query_start.elapsed().as_secs_f64();
@@ -508,17 +573,28 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     // ── BEGIN / COMMIT / ROLLBACK ─────────────────────────────────────────────
 
     async fn handle_begin(&mut self) -> Result<()> {
-        // Stub: explicit transactions are not yet implemented.
-        self.send_response(&BoltResponse::Success { metadata: vec![] }).await
+        // Explicit transactions are not yet implemented. Responding SUCCESS
+        // would be a protocol lie: mutations auto-commit immediately and
+        // ROLLBACK cannot revert them. Send FAILURE so clients enter the
+        // FAILED state and cannot silently corrupt data.
+        self.send_failure(
+            "Neo.DatabaseError.Statement.ExecutionFailed",
+            "explicit transactions are not supported; use auto-commit mode",
+        )
+        .await
     }
 
     async fn handle_commit(&mut self) -> Result<()> {
-        self.send_response(&BoltResponse::Success { metadata: vec![] }).await
+        // Unreachable for well-behaved clients (BEGIN fails → FAILED state).
+        // If reached, the client sent COMMIT outside a transaction.
+        self.send_ignored().await
     }
 
     async fn handle_rollback(&mut self) -> Result<()> {
+        // Unreachable for well-behaved clients (BEGIN fails → FAILED state).
+        // If reached, the client sent ROLLBACK outside a transaction.
         self.pending_result = None;
-        self.send_response(&BoltResponse::Success { metadata: vec![] }).await
+        self.send_ignored().await
     }
 
     // ── RESET ─────────────────────────────────────────────────────────────────

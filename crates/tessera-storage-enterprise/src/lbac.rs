@@ -2,7 +2,6 @@
 
 //! `SecureGraph` — LBAC enforcement wrapper over any `GraphAccess` implementation.
 
-use std::collections::HashSet;
 use tessera_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
 use tessera_graph::{Edge, EdgeId, Error, GraphAccess, Node, NodeId, Properties};
 
@@ -17,7 +16,7 @@ use tessera_graph::{Edge, EdgeId, Error, GraphAccess, Node, NodeId, Properties};
 /// Do not depend on them from outside this crate.
 pub mod filter {
     use tessera_auth::lbac::{Clearance, SecurityPolicy};
-    use tessera_graph::{Edge, GraphAccess, Node, Properties};
+    use tessera_graph::{Edge, EdgeId, GraphAccess, Node, NodeId, Properties};
 
     /// Returns `true` iff `clearance` dominates the security label encoded in `props`.
     #[must_use]
@@ -62,6 +61,164 @@ pub mod filter {
             .map(|n| can_read_props(clearance, n.properties()))
             .unwrap_or(false);
         src_ok && tgt_ok
+    }
+
+    // --- Shared read implementations used by both SecureGraph and SecureGraphRef ---
+
+    pub fn secure_node_ids<G: GraphAccess>(inner: &G, clearance: &Clearance) -> Vec<NodeId> {
+        inner
+            .node_ids()
+            .into_iter()
+            .filter(|&id| {
+                inner
+                    .node(id)
+                    .map(|n| can_read_props(clearance, n.properties()))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    pub fn secure_nodes_by_label<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        label: &str,
+    ) -> Vec<NodeId> {
+        inner
+            .nodes_by_label(label)
+            .into_iter()
+            .filter(|&id| {
+                inner
+                    .node(id)
+                    .map(|n| can_read_props(clearance, n.properties()))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    /// Returns the node at `id` if the caller's clearance dominates its label.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`tessera_graph::Error::NodeNotFound`] if the node does not exist
+    /// or the caller lacks sufficient clearance.
+    pub fn secure_node<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        id: NodeId,
+    ) -> tessera_graph::Result<Node> {
+        let node = inner.node(id)?;
+        if can_read_props(clearance, node.properties()) {
+            Ok(strip_node(node))
+        } else {
+            Err(tessera_graph::Error::NodeNotFound(id))
+        }
+    }
+
+    pub fn secure_node_exists<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        id: NodeId,
+    ) -> bool {
+        inner
+            .node(id)
+            .map(|n| can_read_props(clearance, n.properties()))
+            .unwrap_or(false)
+    }
+
+    pub fn secure_edges_by_label<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        label: &str,
+    ) -> Vec<EdgeId> {
+        inner
+            .edges_by_label(label)
+            .into_iter()
+            .filter(|&id| {
+                inner
+                    .edge(id)
+                    .map(|e| edge_visible_for(inner, clearance, &e))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    /// Returns the edge at `id` if both endpoints are visible to the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`tessera_graph::Error::EdgeNotFound`] if the edge does not exist
+    /// or the caller lacks sufficient clearance for either endpoint.
+    pub fn secure_edge<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        id: EdgeId,
+    ) -> tessera_graph::Result<Edge> {
+        let edge = inner.edge(id)?;
+        if edge_visible_for(inner, clearance, &edge) {
+            Ok(strip_edge(edge))
+        } else {
+            Err(tessera_graph::Error::EdgeNotFound(id))
+        }
+    }
+
+    pub fn secure_edge_count<G: GraphAccess>(inner: &G, clearance: &Clearance) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        for &nid in &secure_node_ids(inner, clearance) {
+            if let Ok(edges) = inner.outgoing_edges(nid) {
+                for e in edges {
+                    if edge_visible_for(inner, clearance, &e) {
+                        seen.insert(e.id());
+                    }
+                }
+            }
+        }
+        seen.len()
+    }
+
+    /// Returns outgoing edges of `node` whose target is visible to the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`tessera_graph::Error::NodeNotFound`] if the source node does
+    /// not exist or the caller lacks sufficient clearance for it.
+    pub fn secure_outgoing_edges<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        node: NodeId,
+    ) -> tessera_graph::Result<Vec<Edge>> {
+        let node_val = inner.node(node)?;
+        if !can_read_props(clearance, node_val.properties()) {
+            return Err(tessera_graph::Error::NodeNotFound(node));
+        }
+        let edges = inner.outgoing_edges(node)?;
+        Ok(edges
+            .into_iter()
+            .filter(|e| edge_visible_for(inner, clearance, e))
+            .map(strip_edge)
+            .collect())
+    }
+
+    /// Returns incoming edges of `node` whose source is visible to the caller.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`tessera_graph::Error::NodeNotFound`] if the target node does
+    /// not exist or the caller lacks sufficient clearance for it.
+    pub fn secure_incoming_edges<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        node: NodeId,
+    ) -> tessera_graph::Result<Vec<Edge>> {
+        let node_val = inner.node(node)?;
+        if !can_read_props(clearance, node_val.properties()) {
+            return Err(tessera_graph::Error::NodeNotFound(node));
+        }
+        let edges = inner.incoming_edges(node)?;
+        Ok(edges
+            .into_iter()
+            .filter(|e| edge_visible_for(inner, clearance, e))
+            .map(strip_edge)
+            .collect())
     }
 }
 
@@ -147,112 +304,34 @@ impl<'g, G: GraphAccess> SecureGraph<'g, G> {
 
 impl<G: GraphAccess> GraphAccess for SecureGraph<'_, G> {
     fn node_ids(&self) -> Vec<NodeId> {
-        self.inner
-            .node_ids()
-            .into_iter()
-            .filter(|&id| {
-                self.inner
-                    .node(id)
-                    .map(|n| filter::can_read_props(&self.clearance, n.properties()))
-                    .unwrap_or(false)
-            })
-            .collect()
+        filter::secure_node_ids(self.inner, &self.clearance)
     }
-
     fn nodes_by_label(&self, label: &str) -> Vec<NodeId> {
-        self.inner
-            .nodes_by_label(label)
-            .into_iter()
-            .filter(|&id| {
-                self.inner
-                    .node(id)
-                    .map(|n| filter::can_read_props(&self.clearance, n.properties()))
-                    .unwrap_or(false)
-            })
-            .collect()
+        filter::secure_nodes_by_label(self.inner, &self.clearance, label)
     }
-
     fn node(&self, id: NodeId) -> tessera_graph::Result<Node> {
-        let node = self.inner.node(id)?;
-        if filter::can_read_props(&self.clearance, node.properties()) {
-            Ok(filter::strip_node(node))
-        } else {
-            Err(Error::NodeNotFound(id))
-        }
+        filter::secure_node(self.inner, &self.clearance, id)
     }
-
     fn node_exists(&self, id: NodeId) -> bool {
-        self.inner
-            .node(id)
-            .map(|n| filter::can_read_props(&self.clearance, n.properties()))
-            .unwrap_or(false)
+        filter::secure_node_exists(self.inner, &self.clearance, id)
     }
-
     fn node_count(&self) -> usize {
         self.node_ids().len()
     }
-
     fn edges_by_label(&self, label: &str) -> Vec<EdgeId> {
-        self.inner
-            .edges_by_label(label)
-            .into_iter()
-            .filter(|&id| {
-                self.inner
-                    .edge(id)
-                    .map(|e| filter::edge_visible_for(self.inner, &self.clearance, &e))
-                    .unwrap_or(false)
-            })
-            .collect()
+        filter::secure_edges_by_label(self.inner, &self.clearance, label)
     }
-
     fn edge(&self, id: EdgeId) -> tessera_graph::Result<Edge> {
-        let edge = self.inner.edge(id)?;
-        if filter::edge_visible_for(self.inner, &self.clearance, &edge) {
-            Ok(filter::strip_edge(edge))
-        } else {
-            Err(Error::EdgeNotFound(id))
-        }
+        filter::secure_edge(self.inner, &self.clearance, id)
     }
-
     fn edge_count(&self) -> usize {
-        // GraphAccess has no all_edge_ids(); scan visible nodes and collect unique edges.
-        let mut seen = HashSet::new();
-        for &nid in &self.node_ids() {
-            if let Ok(edges) = self.inner.outgoing_edges(nid) {
-                for e in edges {
-                    if filter::edge_visible_for(self.inner, &self.clearance, &e) {
-                        seen.insert(e.id());
-                    }
-                }
-            }
-        }
-        seen.len()
+        filter::secure_edge_count(self.inner, &self.clearance)
     }
-
     fn outgoing_edges(&self, node: NodeId) -> tessera_graph::Result<Vec<Edge>> {
-        let node_val = self.inner.node(node)?;
-        if !filter::can_read_props(&self.clearance, node_val.properties()) {
-            return Err(Error::NodeNotFound(node));
-        }
-        let edges = self.inner.outgoing_edges(node)?;
-        Ok(edges
-            .into_iter()
-            .filter(|e| filter::edge_visible_for(self.inner, &self.clearance, e))
-            .map(filter::strip_edge)
-            .collect())
+        filter::secure_outgoing_edges(self.inner, &self.clearance, node)
     }
-
     fn incoming_edges(&self, node: NodeId) -> tessera_graph::Result<Vec<Edge>> {
-        let node_val = self.inner.node(node)?;
-        if !filter::can_read_props(&self.clearance, node_val.properties()) {
-            return Err(Error::NodeNotFound(node));
-        }
-        let edges = self.inner.incoming_edges(node)?;
-        Ok(edges
-            .into_iter()
-            .filter(|e| filter::edge_visible_for(self.inner, &self.clearance, e))
-            .map(filter::strip_edge)
-            .collect())
+        filter::secure_incoming_edges(self.inner, &self.clearance, node)
     }
 
     // --- Mutations ---
@@ -370,111 +449,34 @@ const READ_ONLY_ERROR: &str = "read-only secure graph: mutations are not permitt
 
 impl<G: GraphAccess> GraphAccess for SecureGraphRef<'_, G> {
     fn node_ids(&self) -> Vec<NodeId> {
-        self.inner
-            .node_ids()
-            .into_iter()
-            .filter(|&id| {
-                self.inner
-                    .node(id)
-                    .map(|n| filter::can_read_props(&self.clearance, n.properties()))
-                    .unwrap_or(false)
-            })
-            .collect()
+        filter::secure_node_ids(self.inner, &self.clearance)
     }
-
     fn nodes_by_label(&self, label: &str) -> Vec<NodeId> {
-        self.inner
-            .nodes_by_label(label)
-            .into_iter()
-            .filter(|&id| {
-                self.inner
-                    .node(id)
-                    .map(|n| filter::can_read_props(&self.clearance, n.properties()))
-                    .unwrap_or(false)
-            })
-            .collect()
+        filter::secure_nodes_by_label(self.inner, &self.clearance, label)
     }
-
     fn node(&self, id: NodeId) -> tessera_graph::Result<Node> {
-        let node = self.inner.node(id)?;
-        if filter::can_read_props(&self.clearance, node.properties()) {
-            Ok(filter::strip_node(node))
-        } else {
-            Err(Error::NodeNotFound(id))
-        }
+        filter::secure_node(self.inner, &self.clearance, id)
     }
-
     fn node_exists(&self, id: NodeId) -> bool {
-        self.inner
-            .node(id)
-            .map(|n| filter::can_read_props(&self.clearance, n.properties()))
-            .unwrap_or(false)
+        filter::secure_node_exists(self.inner, &self.clearance, id)
     }
-
     fn node_count(&self) -> usize {
         self.node_ids().len()
     }
-
     fn edges_by_label(&self, label: &str) -> Vec<EdgeId> {
-        self.inner
-            .edges_by_label(label)
-            .into_iter()
-            .filter(|&id| {
-                self.inner
-                    .edge(id)
-                    .map(|e| filter::edge_visible_for(self.inner, &self.clearance, &e))
-                    .unwrap_or(false)
-            })
-            .collect()
+        filter::secure_edges_by_label(self.inner, &self.clearance, label)
     }
-
     fn edge(&self, id: EdgeId) -> tessera_graph::Result<Edge> {
-        let edge = self.inner.edge(id)?;
-        if filter::edge_visible_for(self.inner, &self.clearance, &edge) {
-            Ok(filter::strip_edge(edge))
-        } else {
-            Err(Error::EdgeNotFound(id))
-        }
+        filter::secure_edge(self.inner, &self.clearance, id)
     }
-
     fn edge_count(&self) -> usize {
-        let mut seen = HashSet::new();
-        for &nid in &self.node_ids() {
-            if let Ok(edges) = self.inner.outgoing_edges(nid) {
-                for e in edges {
-                    if filter::edge_visible_for(self.inner, &self.clearance, &e) {
-                        seen.insert(e.id());
-                    }
-                }
-            }
-        }
-        seen.len()
+        filter::secure_edge_count(self.inner, &self.clearance)
     }
-
     fn outgoing_edges(&self, node: NodeId) -> tessera_graph::Result<Vec<Edge>> {
-        let node_val = self.inner.node(node)?;
-        if !filter::can_read_props(&self.clearance, node_val.properties()) {
-            return Err(Error::NodeNotFound(node));
-        }
-        let edges = self.inner.outgoing_edges(node)?;
-        Ok(edges
-            .into_iter()
-            .filter(|e| filter::edge_visible_for(self.inner, &self.clearance, e))
-            .map(filter::strip_edge)
-            .collect())
+        filter::secure_outgoing_edges(self.inner, &self.clearance, node)
     }
-
     fn incoming_edges(&self, node: NodeId) -> tessera_graph::Result<Vec<Edge>> {
-        let node_val = self.inner.node(node)?;
-        if !filter::can_read_props(&self.clearance, node_val.properties()) {
-            return Err(Error::NodeNotFound(node));
-        }
-        let edges = self.inner.incoming_edges(node)?;
-        Ok(edges
-            .into_iter()
-            .filter(|e| filter::edge_visible_for(self.inner, &self.clearance, e))
-            .map(filter::strip_edge)
-            .collect())
+        filter::secure_incoming_edges(self.inner, &self.clearance, node)
     }
 
     // --- Mutations — always denied on a read-only wrapper ---

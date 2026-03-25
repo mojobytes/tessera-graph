@@ -22,7 +22,7 @@ fn server_context_is_send_sync() {
 
 #[test]
 fn permission_check_propagates_through_context() {
-    let _ctx = test_context();
+    let (_dir, _ctx) = test_context();
 
     // Create a separate context with its own stores to test permission check.
     let admin_pw = Password::new("Admin@Init1!").unwrap();
@@ -45,7 +45,7 @@ fn permission_check_propagates_through_context() {
     let dir = tempfile::tempdir().unwrap();
     let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
     let tls = test_tls_config();
-    let registry = test_registry();
+    let (_dir2, registry) = test_registry();
 
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
     let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store, metrics, registry);
@@ -57,7 +57,7 @@ fn permission_check_propagates_through_context() {
 
 #[test]
 fn unauthenticated_request_is_denied() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let fake_token = tessera_auth::SessionToken::from_raw("fake-token".to_owned());
     assert!(
         ctx.check_permission(&fake_token, Permission::NodeRead)

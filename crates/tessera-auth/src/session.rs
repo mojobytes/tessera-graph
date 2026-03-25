@@ -7,6 +7,7 @@ use base64ct::{Base64UrlUnpadded, Encoding};
 use rand::RngCore;
 
 use crate::error::{AuthError, Result};
+use crate::rbac::RoleId;
 use crate::user::UserId;
 use crate::utils::unix_timestamp;
 
@@ -43,6 +44,9 @@ impl SessionToken {
 struct Session {
     user_id: UserId,
     expires_at: u64,
+    /// Roles assigned to this session, primarily for external auth users whose
+    /// roles are mapped from provider groups rather than stored in `UserStore`.
+    roles: Vec<RoleId>,
 }
 
 /// Thread-safe session manager with configurable TTL.
@@ -69,6 +73,22 @@ impl SessionManager {
     ///
     /// Returns `AuthError::LockPoisoned` if the internal lock is poisoned.
     pub fn create_session(&self, user_id: UserId) -> Result<SessionToken> {
+        self.create_session_with_roles(user_id, Vec::new())
+    }
+
+    /// Create a new session with explicit role assignments.
+    ///
+    /// Used for external auth users whose roles are derived from provider
+    /// group mappings rather than from the persistent `UserStore`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError::LockPoisoned` if the internal lock is poisoned.
+    pub fn create_session_with_roles(
+        &self,
+        user_id: UserId,
+        roles: Vec<RoleId>,
+    ) -> Result<SessionToken> {
         let mut raw = [0u8; 32];
         rand::rng().fill_bytes(&mut raw);
 
@@ -79,6 +99,7 @@ impl SessionManager {
         let session = Session {
             user_id,
             expires_at: now + self.ttl_seconds,
+            roles,
         };
 
         let mut sessions = self
@@ -89,6 +110,24 @@ impl SessionManager {
         drop(sessions);
 
         Ok(token)
+    }
+
+    /// Retrieve the roles associated with a session.
+    ///
+    /// Returns an empty `Vec` for sessions created without explicit roles
+    /// (i.e., local auth users whose roles live in `UserStore`).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError::TokenInvalid` if the token is unknown.
+    #[allow(clippy::significant_drop_tightening)]
+    pub fn session_roles(&self, token: &SessionToken) -> Result<Vec<RoleId>> {
+        let sessions = self
+            .sessions
+            .read()
+            .map_err(|_| AuthError::LockPoisoned("session manager"))?;
+        let session = sessions.get(token).ok_or(AuthError::TokenInvalid)?;
+        Ok(session.roles.clone())
     }
 
     /// Validate a session token and return the associated user ID.

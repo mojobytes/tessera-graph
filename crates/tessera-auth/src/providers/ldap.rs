@@ -6,19 +6,25 @@
 //! to verify credentials, and extracts group membership for RBAC mapping.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
+
+use zeroize::Zeroizing;
 
 use crate::error::{AuthError, Result};
 use crate::providers::{ExternalAuthProvider, ExternalUserInfo};
 
 /// Configuration for the LDAP authentication provider.
-#[derive(Debug, Clone)]
+///
+/// `bind_password` is wrapped in [`Zeroizing`] to ensure the service account
+/// password is cleared from memory on drop. The `Debug` impl redacts it.
+#[derive(Clone)]
 pub struct LdapConfig {
     /// LDAP server URL (e.g., `ldap://ldap.example.com:389`).
     pub ldap_url: String,
     /// Distinguished name of the service account for searching users.
     pub bind_dn: String,
-    /// Password of the service account. NEVER log this value.
-    pub bind_password: String,
+    /// Password of the service account. Zeroized on drop; redacted in `Debug`.
+    pub bind_password: Zeroizing<String>,
     /// Base DN for user searches (e.g., `ou=users,dc=example,dc=com`).
     pub base_dn: String,
     /// LDAP filter template with `{username}` placeholder (e.g., `(uid={username})`).
@@ -31,6 +37,21 @@ pub struct LdapConfig {
     pub group_mapping: HashMap<String, String>,
 }
 
+impl std::fmt::Debug for LdapConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LdapConfig")
+            .field("ldap_url", &self.ldap_url)
+            .field("bind_dn", &self.bind_dn)
+            .field("bind_password", &"[REDACTED]")
+            .field("base_dn", &self.base_dn)
+            .field("user_filter_template", &self.user_filter_template)
+            .field("group_attribute", &self.group_attribute)
+            .field("use_tls", &self.use_tls)
+            .field("group_mapping", &self.group_mapping)
+            .finish()
+    }
+}
+
 impl LdapConfig {
     /// Load LDAP configuration from environment variables.
     ///
@@ -41,12 +62,13 @@ impl LdapConfig {
         Ok(Self {
             ldap_url: required_env("TESSERA_LDAP_URL")?,
             bind_dn: required_env("TESSERA_LDAP_BIND_DN")?,
-            bind_password: required_env("TESSERA_LDAP_BIND_PASSWORD")?,
+            bind_password: Zeroizing::new(required_env("TESSERA_LDAP_BIND_PASSWORD")?),
             base_dn: required_env("TESSERA_LDAP_BASE_DN")?,
             user_filter_template: optional_env("TESSERA_LDAP_USER_FILTER")
                 .unwrap_or_else(|| "(uid={username})".to_owned()),
             group_attribute: optional_env("TESSERA_LDAP_GROUP_ATTR")
                 .unwrap_or_else(|| "memberOf".to_owned()),
+            // TLS is on by default; set TESSERA_LDAP_USE_TLS=false to disable.
             use_tls: optional_env("TESSERA_LDAP_USE_TLS")
                 .is_none_or(|v| v.eq_ignore_ascii_case("true")),
             group_mapping: optional_env("TESSERA_LDAP_GROUP_MAPPING")
@@ -130,7 +152,7 @@ impl<C: LdapConnection + 'static> ExternalAuthProvider for LdapAuthProvider<C> {
         Box<dyn std::future::Future<Output = Result<ExternalUserInfo>> + Send + '_>,
     > {
         let username = username.to_owned();
-        let credential = credential.to_owned();
+        let credential = Zeroizing::new(credential.to_owned());
         Box::pin(self.do_authenticate(username, credential))
     }
 
@@ -141,7 +163,7 @@ impl<C: LdapConnection + 'static> ExternalAuthProvider for LdapAuthProvider<C> {
 
 impl<C: LdapConnection> LdapAuthProvider<C> {
     #[allow(clippy::significant_drop_tightening, clippy::literal_string_with_formatting_args)]
-    async fn do_authenticate(&self, username: String, credential: String) -> Result<ExternalUserInfo> {
+    async fn do_authenticate(&self, username: String, credential: Zeroizing<String>) -> Result<ExternalUserInfo> {
         let username = &username;
         let credential = &credential;
         let escaped_username = escape_ldap_filter_value(username);
@@ -156,14 +178,20 @@ impl<C: LdapConnection> LdapAuthProvider<C> {
         // Step 1: Bind as service account
         conn.service_bind(&self.config.bind_dn, &self.config.bind_password)
             .await
-            .map_err(|_| AuthError::InvalidCredentials)?;
+            .map_err(|e| {
+                tracing::warn!("LDAP service bind failed: {e}");
+                AuthError::InvalidCredentials
+            })?;
 
         // Step 2: Search for user
         let attrs = [self.config.group_attribute.as_str(), "mail", "cn"];
         let entries = conn
             .search(&self.config.base_dn, &filter, &attrs)
             .await
-            .map_err(|_| AuthError::InvalidCredentials)?;
+            .map_err(|e| {
+                tracing::warn!("LDAP search failed: {e}");
+                AuthError::InvalidCredentials
+            })?;
 
         let entry = entries.into_iter().next().ok_or(AuthError::InvalidCredentials)?;
 
@@ -201,6 +229,7 @@ impl<C: LdapConnection> LdapAuthProvider<C> {
 /// Escape special characters in an LDAP filter value per RFC 4515.
 ///
 /// Prevents LDAP injection via usernames containing `*`, `(`, `)`, `\`, or NUL.
+/// Non-ASCII bytes are hex-escaped (`\XX`) per RFC 4515 §3.
 #[must_use]
 pub fn escape_ldap_filter_value(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
@@ -211,7 +240,13 @@ pub fn escape_ldap_filter_value(value: &str) -> String {
             b'(' => escaped.push_str("\\28"),
             b')' => escaped.push_str("\\29"),
             0 => escaped.push_str("\\00"),
-            _ => escaped.push(byte as char),
+            // ASCII printable (0x20..=0x7e) minus already-handled specials — safe to pass through.
+            // Control chars (0x01..=0x1f) and DEL (0x7f) are hex-escaped per RFC 4515.
+            0x20..=0x27 | 0x2b..=0x5b | 0x5d..=0x7e => escaped.push(byte as char),
+            // Non-ASCII and remaining control bytes — hex-escape per RFC 4515.
+            _ => {
+                write!(escaped, "\\{byte:02x}").expect("write to String is infallible");
+            }
         }
     }
     escaped
@@ -236,7 +271,7 @@ mod tests {
         LdapConfig {
             ldap_url: "ldap://localhost:389".to_owned(),
             bind_dn: "cn=svc,dc=example,dc=com".to_owned(),
-            bind_password: "secret".to_owned(),
+            bind_password: Zeroizing::new("secret".to_owned()),
             base_dn: "ou=users,dc=example,dc=com".to_owned(),
             user_filter_template: "(uid={username})".to_owned(),
             group_attribute: "memberOf".to_owned(),
@@ -311,6 +346,20 @@ mod tests {
         let cfg = test_config();
         assert_eq!(cfg.ldap_url, "ldap://localhost:389");
         assert!(!cfg.use_tls);
+    }
+
+    #[test]
+    fn ldap_config_debug_redacts_password() {
+        let cfg = test_config();
+        let debug = format!("{cfg:?}");
+        assert!(
+            debug.contains("[REDACTED]"),
+            "Debug output must redact bind_password"
+        );
+        assert!(
+            !debug.contains("secret"),
+            "Debug output must NOT contain the actual password"
+        );
     }
 
     #[tokio::test]
@@ -397,6 +446,20 @@ mod tests {
     #[test]
     fn ldap_escape_empty_string() {
         assert_eq!(escape_ldap_filter_value(""), "");
+    }
+
+    #[test]
+    fn ldap_escape_non_ascii_hex_encoded() {
+        // "café" → UTF-8 bytes: c=0x63, a=0x61, f=0x66, é=0xc3 0xa9
+        let escaped = escape_ldap_filter_value("café");
+        assert_eq!(escaped, r"caf\c3\a9");
+    }
+
+    #[test]
+    fn ldap_escape_full_unicode() {
+        // "日本" → UTF-8: 0xe6 0x97 0xa5 0xe6 0x9c 0xac
+        let escaped = escape_ldap_filter_value("日本");
+        assert_eq!(escaped, r"\e6\97\a5\e6\9c\ac");
     }
 
     #[tokio::test]

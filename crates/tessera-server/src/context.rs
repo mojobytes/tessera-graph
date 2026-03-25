@@ -7,6 +7,7 @@ use tessera_audit::AuditLog;
 use tessera_auth::lbac::Clearance;
 use tessera_auth::policy::AuthPolicy;
 use tessera_auth::providers::ExternalAuthProvider;
+use tessera_auth::rate_limit::{LoginAttemptTracker, LoginPolicy};
 use tessera_auth::rbac::Permission;
 use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::{UserId, UserStoreHandle};
@@ -28,6 +29,8 @@ pub struct ServerContext {
     group_mapping: Arc<HashMap<String, String>>,
     metrics: Arc<MetricsRegistry>,
     tenant_registry: Arc<TenantRegistry>,
+    login_tracker: Arc<LoginAttemptTracker>,
+    login_policy: LoginPolicy,
 }
 
 impl ServerContext {
@@ -55,7 +58,17 @@ impl ServerContext {
             group_mapping: Arc::new(HashMap::new()),
             metrics,
             tenant_registry,
+            login_tracker: Arc::new(LoginAttemptTracker::new()),
+            // Default: lock after 5 failures for 300 seconds.
+            login_policy: LoginPolicy::new(5, 300),
         }
+    }
+
+    /// Override the default login policy (5 failures / 300s lockout).
+    #[must_use]
+    pub const fn with_login_policy(mut self, policy: LoginPolicy) -> Self {
+        self.login_policy = policy;
+        self
     }
 
     /// Set an external authentication provider (LDAP or OIDC).
@@ -124,6 +137,18 @@ impl ServerContext {
     #[must_use]
     pub const fn tenant_registry(&self) -> &Arc<TenantRegistry> {
         &self.tenant_registry
+    }
+
+    /// Access the login attempt tracker.
+    #[must_use]
+    pub const fn login_tracker(&self) -> &Arc<LoginAttemptTracker> {
+        &self.login_tracker
+    }
+
+    /// Access the login policy.
+    #[must_use]
+    pub const fn login_policy(&self) -> &LoginPolicy {
+        &self.login_policy
     }
 
     /// Validate a session token and check the required permission.

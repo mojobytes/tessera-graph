@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -20,7 +20,7 @@ const LSN_PLACEHOLDER: u64 = 0;
 /// Multiple threads can begin/commit concurrently without WAL corruption.
 pub struct TransactionManager {
     next_txn_id: AtomicU64,
-    committed: RwLock<Arc<HashSet<u64>>>,
+    committed: RwLock<Arc<BTreeSet<u64>>>,
     pub(crate) wal: Mutex<WalWriter>,
 }
 
@@ -34,7 +34,7 @@ impl TransactionManager {
         let wal = WalWriter::open(path).map_err(EnterpriseError::Graph)?;
         Ok(Self {
             next_txn_id: AtomicU64::new(1),
-            committed: RwLock::new(Arc::new(HashSet::new())),
+            committed: RwLock::new(Arc::new(BTreeSet::new())),
             wal: Mutex::new(wal),
         })
     }
@@ -184,6 +184,31 @@ impl TransactionManager {
             .read()
             .map_err(|_| EnterpriseError::LockPoisoned("commit log"))?
             .len())
+    }
+
+    /// Remove all committed transaction IDs strictly below `min_txn_id`.
+    ///
+    /// Call this periodically (e.g., after every N commits) with the lowest
+    /// `txn_id` that any active snapshot still references. IDs below that
+    /// threshold are no longer needed for visibility checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnterpriseError::LockPoisoned`] if the commit log lock
+    /// was poisoned by a panicking thread.
+    #[allow(clippy::significant_drop_tightening)]
+    pub fn prune_below(&self, min_txn_id: u64) -> Result<usize> {
+        let mut guard = self
+            .committed
+            .write()
+            .map_err(|_| EnterpriseError::LockPoisoned("commit log"))?;
+        let before = guard.len();
+        let mut new_set = (**guard).clone();
+        // BTreeSet is ordered — split_off returns all elements >= min_txn_id.
+        new_set = new_set.split_off(&min_txn_id);
+        let pruned = before - new_set.len();
+        *guard = Arc::new(new_set);
+        Ok(pruned)
     }
 
     /// Returns `true` if the given transaction has been committed.
@@ -401,6 +426,55 @@ mod tests {
             1_000,
             "snapshot must be immutable after begin"
         );
+    }
+
+    // --- R4: prune_below prevents unbounded growth ---
+
+    #[test]
+    fn prune_below_removes_old_txn_ids() {
+        let tmp = NamedTempFile::new().unwrap(); // OK: test
+        let mgr = TransactionManager::open(tmp.path()).unwrap(); // OK: test
+
+        for _ in 0..10 {
+            let mut h = mgr.begin(IsolationLevel::ReadCommitted).unwrap(); // OK: test
+            mgr.commit(&mut h).unwrap(); // OK: test
+        }
+        assert_eq!(mgr.committed_count().unwrap(), 10); // OK: test
+
+        let pruned = mgr.prune_below(6).unwrap(); // OK: test
+        assert_eq!(pruned, 5);
+        assert_eq!(mgr.committed_count().unwrap(), 5); // OK: test
+        assert!(!mgr.is_committed(1).unwrap()); // OK: test
+        assert!(!mgr.is_committed(5).unwrap()); // OK: test
+        assert!(mgr.is_committed(6).unwrap()); // OK: test
+        assert!(mgr.is_committed(10).unwrap()); // OK: test
+    }
+
+    #[test]
+    fn prune_below_zero_is_noop() {
+        let tmp = NamedTempFile::new().unwrap(); // OK: test
+        let mgr = TransactionManager::open(tmp.path()).unwrap(); // OK: test
+        let mut h = mgr.begin(IsolationLevel::ReadCommitted).unwrap(); // OK: test
+        mgr.commit(&mut h).unwrap(); // OK: test
+        let pruned = mgr.prune_below(0).unwrap(); // OK: test
+        assert_eq!(pruned, 0);
+        assert_eq!(mgr.committed_count().unwrap(), 1); // OK: test
+    }
+
+    #[test]
+    fn prune_does_not_affect_active_snapshots() {
+        let tmp = NamedTempFile::new().unwrap(); // OK: test
+        let mgr = TransactionManager::open(tmp.path()).unwrap(); // OK: test
+        let mut t1 = mgr.begin(IsolationLevel::ReadCommitted).unwrap(); // OK: test
+        let t1_id = t1.txn_id();
+        mgr.commit(&mut t1).unwrap(); // OK: test
+        let t2 = mgr.begin(IsolationLevel::SnapshotIsolation).unwrap(); // OK: test
+        let snap = t2.snapshot().unwrap(); // OK: test
+        assert!(snap.is_visible(t1_id));
+        mgr.prune_below(t1_id + 1).unwrap(); // OK: test
+        assert!(!mgr.is_committed(t1_id).unwrap()); // OK: test
+        // Snapshot is an Arc clone — unaffected by prune.
+        assert!(snap.is_visible(t1_id));
     }
 
     // --- Cycle E-C4: Write WalRecord::Begin in begin() ---

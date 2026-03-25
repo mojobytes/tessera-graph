@@ -54,3 +54,106 @@ fn database_address_display_format() {
     };
     assert_eq!(addr.to_string(), "acme/production");
 }
+
+// --- C1: path-traversal rejection tests ---
+
+#[test]
+fn tenant_id_rejects_dot_dot() {
+    assert!(matches!(
+        TenantId::new("..").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_rejects_single_dot() {
+    assert!(matches!(
+        TenantId::new(".").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_rejects_null_byte() {
+    assert!(matches!(
+        TenantId::new("a\0b").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_rejects_backslash() {
+    assert!(matches!(
+        TenantId::new(r"a\b").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_rejects_dot_prefix() {
+    assert!(matches!(
+        TenantId::new(".hidden").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_rejects_space() {
+    assert!(matches!(
+        TenantId::new("a b").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_rejects_unicode() {
+    assert!(matches!(
+        TenantId::new("café").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn tenant_id_allows_alphanumeric_hyphen_underscore() {
+    assert!(TenantId::new("acme-corp_2").is_ok());
+    assert!(TenantId::new("ACME123").is_ok());
+    assert!(TenantId::new("a").is_ok());
+}
+
+#[test]
+fn database_name_rejects_dot_dot() {
+    assert!(matches!(
+        DatabaseName::new("..").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn database_name_rejects_null_byte() {
+    assert!(matches!(
+        DatabaseName::new("prod\0uction").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn database_name_rejects_backslash() {
+    assert!(matches!(
+        DatabaseName::new(r"prod\db").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn database_name_rejects_space() {
+    assert!(matches!(
+        DatabaseName::new("prod db").unwrap_err(),
+        TenantError::InvalidName(_)
+    ));
+}
+
+#[test]
+fn database_name_allows_alphanumeric_hyphen_underscore() {
+    assert!(DatabaseName::new("production-v2").is_ok());
+    assert!(DatabaseName::new("test_db").is_ok());
+}

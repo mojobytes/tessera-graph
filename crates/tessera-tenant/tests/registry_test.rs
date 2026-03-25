@@ -215,7 +215,7 @@ fn flush_all_flushes_all_loaded() {
         .add_node("M", props! {})
         .unwrap();
 
-    let errors = registry.flush_all();
+    let errors = registry.flush_all().unwrap();
     assert!(errors.is_empty(), "unexpected flush errors: {errors:?}");
 
     // Verify both were actually persisted.

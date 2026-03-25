@@ -42,6 +42,10 @@ pub enum TenantError {
     #[error("graph error: {0}")]
     Graph(#[from] tessera_graph::Error),
 
+    /// An internal lock was poisoned by a panicking thread.
+    #[error("lock poisoned: {0}")]
+    LockPoisoned(&'static str),
+
     /// An OS-level I/O error.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

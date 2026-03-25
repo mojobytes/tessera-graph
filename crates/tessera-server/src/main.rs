@@ -115,7 +115,6 @@ async fn main() {
     if let Err(e) = listener
         .serve_tls(
             ctx,
-            Arc::clone(&registry),
             shutdown_rx,
             max_connections,
             Duration::from_secs(idle_timeout_secs),

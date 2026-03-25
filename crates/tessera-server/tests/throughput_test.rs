@@ -12,7 +12,7 @@ use common::{bolt_recv, bolt_send, spawn_bolt_handler, test_context};
 /// the timed section to avoid measuring auth cost.
 #[tokio::test]
 async fn bolt_run_pull_throughput_guard() {
-    let ctx = test_context();
+    let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     // Authenticate once.

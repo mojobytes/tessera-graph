@@ -44,11 +44,12 @@ pub async fn authenticate_external<S: std::hash::BuildHasher + Send + Sync>(
     let user_id = UserId::new(hash_username(&info.username));
 
     // Map external groups to internal roles (for RBAC)
-    let _roles = map_groups(&info.groups, group_mapping);
+    let roles = map_groups(&info.groups, group_mapping);
 
-    // Create a session
+    // Create a session with the mapped roles attached — these are not stored
+    // in `UserStore` (the user is transient) but live in the session itself.
     let token = sessions
-        .create_session(user_id)
+        .create_session_with_roles(user_id, roles)
         .map_err(|_| AuthError::InvalidCredentials)?;
 
     Ok((user_id, token))
@@ -58,6 +59,14 @@ pub async fn authenticate_external<S: std::hash::BuildHasher + Send + Sync>(
 ///
 /// Used to synthesize a transient `UserId` for external users without
 /// modifying the persistent `UserStore`.
+///
+/// # Security
+///
+/// FNV-1a is **not** collision-resistant. Birthday collisions become probable
+/// at ~2^32 (~4 billion) distinct users. A collision would cause two external
+/// users to share the same `UserId` and therefore the same session visibility.
+/// For deployments expecting >10^6 concurrent external users, replace this
+/// with a cryptographic hash (e.g., BLAKE3 truncated to 64 bits).
 fn hash_username(username: &str) -> u64 {
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0100_0000_01b3;
@@ -149,6 +158,39 @@ mod tests {
 
         let validated = sessions.validate(&token).expect("valid session"); // OK: test
         assert!(validated == user_id);
+    }
+
+    #[tokio::test]
+    async fn external_auth_stores_mapped_roles_in_session() {
+        let provider: Arc<dyn ExternalAuthProvider> = Arc::new(AlwaysOkProvider);
+        let sessions = Arc::new(SessionManager::new(3600));
+
+        // Map "admin" group to "admin" role
+        let mut mapping = HashMap::new();
+        mapping.insert("admin".to_owned(), "admin".to_owned());
+
+        let (_user_id, token) =
+            authenticate_external("alice", "any-cred", &provider, &mapping, &sessions)
+                .await
+                .expect("auth ok"); // OK: test
+
+        let roles = sessions.session_roles(&token).expect("roles"); // OK: test
+        assert!(!roles.is_empty(), "external user roles must be stored in session");
+    }
+
+    #[tokio::test]
+    async fn external_auth_without_mapping_has_no_roles() {
+        let provider: Arc<dyn ExternalAuthProvider> = Arc::new(AlwaysOkProvider);
+        let sessions = Arc::new(SessionManager::new(3600));
+        let mapping = HashMap::new(); // no group→role mapping
+
+        let (_user_id, token) =
+            authenticate_external("alice", "any-cred", &provider, &mapping, &sessions)
+                .await
+                .expect("auth ok"); // OK: test
+
+        let roles = sessions.session_roles(&token).expect("roles"); // OK: test
+        assert!(roles.is_empty(), "no mapping means no roles");
     }
 
     #[tokio::test]

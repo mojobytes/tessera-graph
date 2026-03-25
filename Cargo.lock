@@ -2271,6 +2271,7 @@ dependencies = [
  "tessera-graph",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "zeroize",
 ]
 

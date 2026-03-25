@@ -8,6 +8,7 @@ use std::time::Duration;
 use tessera_audit::AuditLog;
 use tessera_auth::credentials::{Password, PasswordPolicy};
 use tessera_auth::policy::AuthPolicy;
+use tessera_auth::rate_limit::LoginPolicy;
 use tessera_auth::rbac::{RoleStore, RoleStoreHandle};
 use tessera_auth::session::SessionManager;
 use tessera_auth::user::UserStoreHandle;
@@ -40,23 +41,24 @@ pub fn test_tls_config() -> tessera_protocol::TlsConfig {
 
 /// Create a test `TenantRegistry` backed by a temporary directory.
 ///
-/// The `TempDir` is leaked intentionally so the path remains valid for the
-/// lifetime of the test process.  In tests this is always acceptable.
+/// Returns the `TempDir` guard alongside the registry so the directory stays
+/// alive as long as the test needs it, and is cleaned up when dropped.
 #[allow(dead_code)]
-pub fn test_registry() -> Arc<TenantRegistry> {
+pub fn test_registry() -> (tempfile::TempDir, Arc<TenantRegistry>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().to_path_buf();
-    // Leak the guard so the directory is not cleaned up while the registry
-    // holds an open path reference.
-    std::mem::forget(dir);
-    Arc::new(TenantRegistry::new(path, GraphConfig::new()))
+    let registry = Arc::new(TenantRegistry::new(path, GraphConfig::new()));
+    (dir, registry)
 }
 
 /// Create a test `ServerContext` with a fresh `TenantRegistry`.
+///
+/// Returns the `TempDir` guard so the directory stays alive for the test.
 #[allow(dead_code)]
-pub fn test_context() -> Arc<ServerContext> {
-    let registry = test_registry();
-    test_context_with_registry(registry)
+pub fn test_context() -> (tempfile::TempDir, Arc<ServerContext>) {
+    let (dir, registry) = test_registry();
+    let ctx = test_context_with_registry(registry);
+    (dir, ctx)
 }
 
 /// Create a test `ServerContext` sharing the given `TenantRegistry`.
@@ -91,6 +93,17 @@ pub fn test_context_with_registry(registry: Arc<TenantRegistry>) -> Arc<ServerCo
         metrics,
         registry,
     ))
+}
+
+/// Create a test `ServerContext` with a custom login policy for rate-limit tests.
+#[allow(dead_code)]
+pub fn test_context_with_rate_limit(max_attempts: u32, lockout_secs: u64) -> (tempfile::TempDir, Arc<ServerContext>) {
+    let (dir, registry) = test_registry();
+    let ctx = test_context_with_registry(registry);
+    // Unwrap the Arc to modify the policy — this only works when refcount == 1,
+    // which is guaranteed here because we just created it.
+    let inner = Arc::try_unwrap(ctx).unwrap_or_else(|_| panic!("refcount must be 1"));
+    (dir, Arc::new(inner.with_login_policy(LoginPolicy::new(max_attempts, lockout_secs))))
 }
 
 /// Spawn a `BoltConnectionHandler` on a duplex stream, perform the client-side

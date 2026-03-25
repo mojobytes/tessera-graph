@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tessera_server::TesseraListener;
 
-use common::{test_context, test_registry};
+use common::test_context;
 
 #[tokio::test]
 async fn listener_binds_to_address() {
@@ -35,8 +35,7 @@ async fn listener_accepts_and_dispatches_connection() {
 /// The full Bolt handshake flow is tested in `bolt_handler_test.rs`.
 #[tokio::test]
 async fn listener_serves_plain_connections() {
-    let ctx = test_context();
-    let registry = test_registry();
+    let (_dir, ctx) = test_context();
     let listener = TesseraListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -46,7 +45,6 @@ async fn listener_serves_plain_connections() {
         let _ = listener
             .serve(
                 ctx,
-                registry,
                 shutdown_rx,
                 10,
                 Duration::from_secs(30),
@@ -65,8 +63,7 @@ async fn listener_serves_plain_connections() {
 
 #[tokio::test]
 async fn graceful_shutdown_stops_accept_loop() {
-    let ctx = test_context();
-    let registry = test_registry();
+    let (_dir, ctx) = test_context();
     let listener = TesseraListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -76,7 +73,6 @@ async fn graceful_shutdown_stops_accept_loop() {
         listener
             .serve(
                 ctx,
-                registry,
                 shutdown_rx,
                 10,
                 Duration::from_secs(30),

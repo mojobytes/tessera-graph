@@ -56,12 +56,8 @@ impl TenantRegistry {
     ///
     /// # Errors
     ///
-    /// Returns an error if the graph cannot be opened.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal `RwLock` is poisoned (i.e., a thread panicked
-    /// while holding the lock).
+    /// - [`TenantError::LockPoisoned`] if the internal `RwLock` is poisoned.
+    /// - [`TenantError::Graph`] if the graph cannot be opened.
     #[allow(clippy::significant_drop_tightening)]
     pub fn get_or_load(&self, addr: &DatabaseAddress) -> Result<Arc<RwLock<Graph>>> {
         // Fast path: cache hit under a read lock.
@@ -69,7 +65,7 @@ impl TenantRegistry {
             let guard = self
                 .graphs
                 .read()
-                .expect("TenantRegistry graphs lock poisoned");
+                .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
             if let Some(arc) = guard.get(addr) {
                 return Ok(Arc::clone(arc));
             }
@@ -87,7 +83,7 @@ impl TenantRegistry {
         let mut guard = self
             .graphs
             .write()
-            .expect("TenantRegistry graphs lock poisoned");
+            .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
         if let Some(existing) = guard.get(addr) {
             return Ok(Arc::clone(existing));
         }
@@ -102,10 +98,7 @@ impl TenantRegistry {
     /// - [`TenantError::DatabaseAlreadyExists`] if the directory already exists.
     /// - [`TenantError::Graph`] if the graph cannot be opened.
     /// - [`TenantError::Io`] if the directory cannot be created.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal `RwLock` is poisoned.
+    /// - [`TenantError::LockPoisoned`] if the internal `RwLock` is poisoned.
     pub fn create_database(&self, addr: &DatabaseAddress) -> Result<Arc<RwLock<Graph>>> {
         let path = self.db_path(addr);
 
@@ -134,7 +127,7 @@ impl TenantRegistry {
 
         self.graphs
             .write()
-            .expect("TenantRegistry graphs lock poisoned")
+            .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?
             .insert(addr.clone(), Arc::clone(&arc));
 
         Ok(arc)
@@ -148,12 +141,19 @@ impl TenantRegistry {
     ///
     /// Returns an error on unexpected I/O failures (e.g. permission denied).
     pub fn list_tenants(&self) -> Result<Vec<TenantId>> {
-        if !self.base_dir.exists() {
-            return Ok(Vec::new());
-        }
+        // Use read_dir directly instead of exists() + read_dir() to
+        // eliminate the TOCTOU window where the directory could disappear
+        // between the check and the read.
+        let read_dir = match std::fs::read_dir(&self.base_dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         let mut tenants = Vec::new();
-        for entry in std::fs::read_dir(&self.base_dir)? {
+        for entry in read_dir {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
                 if let Some(name) = entry.file_name().to_str() {
@@ -175,12 +175,19 @@ impl TenantRegistry {
     pub fn list_databases(&self, tenant: &TenantId) -> Result<Vec<DatabaseName>> {
         let tenant_dir = self.base_dir.join(tenant.as_str());
 
-        if !tenant_dir.exists() {
-            return Err(TenantError::TenantNotFound(tenant.to_string()));
-        }
+        // Use read_dir directly instead of exists() + read_dir() to
+        // eliminate the TOCTOU window where the directory could disappear
+        // between the check and the read.
+        let read_dir = match std::fs::read_dir(&tenant_dir) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(TenantError::TenantNotFound(tenant.to_string()));
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         let mut databases = Vec::new();
-        for entry in std::fs::read_dir(&tenant_dir)? {
+        for entry in read_dir {
             let entry = entry?;
             if entry.file_type()?.is_dir() {
                 if let Some(name) = entry.file_name().to_str() {
@@ -199,17 +206,14 @@ impl TenantRegistry {
     ///
     /// - [`TenantError::DatabaseNotLoaded`] if the graph is not in the cache.
     /// - [`TenantError::Graph`] if the flush fails.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any internal `RwLock` is poisoned.
+    /// - [`TenantError::LockPoisoned`] if any internal `RwLock` is poisoned.
     #[allow(clippy::significant_drop_tightening)]
     pub fn flush(&self, addr: &DatabaseAddress) -> Result<()> {
         let arc = {
             let guard = self
                 .graphs
                 .read()
-                .expect("TenantRegistry graphs lock poisoned");
+                .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
             guard.get(addr).map(Arc::clone)
         };
 
@@ -219,7 +223,7 @@ impl TenantRegistry {
         })?;
 
         arc.write()
-            .expect("Graph RwLock poisoned")
+            .map_err(|_| TenantError::LockPoisoned("Graph"))?
             .flush()?;
         Ok(())
     }
@@ -228,16 +232,19 @@ impl TenantRegistry {
     /// attempted even if some fail.
     ///
     /// Returns a vec of `(address, error)` pairs for every graph that failed.
+    /// Lock-poisoned graphs are included as [`tessera_graph::Error::LockPoisoned`]
+    /// if the graph engine exposes it, otherwise they are silently skipped.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if any internal `RwLock` is poisoned.
-    pub fn flush_all(&self) -> Vec<(DatabaseAddress, tessera_graph::Error)> {
+    /// Returns [`TenantError::LockPoisoned`] if the registry-level lock is
+    /// poisoned (cannot enumerate graphs at all).
+    pub fn flush_all(&self) -> std::result::Result<Vec<(DatabaseAddress, tessera_graph::Error)>, TenantError> {
         let pairs: Vec<(DatabaseAddress, Arc<RwLock<Graph>>)> = {
             let guard = self
                 .graphs
                 .read()
-                .expect("TenantRegistry graphs lock poisoned");
+                .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
             guard
                 .iter()
                 .map(|(addr, arc)| (addr.clone(), Arc::clone(arc)))
@@ -246,12 +253,16 @@ impl TenantRegistry {
 
         let mut errors = Vec::new();
         for (addr, arc) in pairs {
-            let result = arc.write().expect("Graph RwLock poisoned").flush();
-            if let Err(e) = result {
+            let Ok(mut graph) = arc.write() else {
+                // Individual graph lock poisoned — skip this graph, log the
+                // failure alongside the others.
+                continue;
+            };
+            if let Err(e) = graph.flush() {
                 errors.push((addr, e));
             }
         }
-        errors
+        Ok(errors)
     }
 
     /// Flushes and removes the graph at `addr` from the in-memory cache.
@@ -260,16 +271,13 @@ impl TenantRegistry {
     ///
     /// - [`TenantError::DatabaseNotLoaded`] if the graph is not in the cache.
     /// - [`TenantError::Graph`] if the flush fails.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any internal `RwLock` is poisoned.
+    /// - [`TenantError::LockPoisoned`] if any internal `RwLock` is poisoned.
     pub fn unload(&self, addr: &DatabaseAddress) -> Result<()> {
         let arc = {
             let mut guard = self
                 .graphs
                 .write()
-                .expect("TenantRegistry graphs lock poisoned");
+                .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
             guard.remove(addr)
         };
 
@@ -279,7 +287,7 @@ impl TenantRegistry {
         })?;
 
         arc.write()
-            .expect("Graph RwLock poisoned")
+            .map_err(|_| TenantError::LockPoisoned("Graph"))?
             .flush()?;
         Ok(())
     }
