@@ -53,6 +53,12 @@ pub enum ProtocolError {
 
     #[error("bolt: invalid handshake — {reason}")]
     BoltInvalidHandshake { reason: &'static str },
+
+    #[error("bolt: authentication failed — {message}")]
+    BoltAuthFailure { message: String },
+
+    #[error("bolt: query failed — {message}")]
+    BoltQueryFailure { message: String },
 }
 
 /// Convenience result type for protocol operations.

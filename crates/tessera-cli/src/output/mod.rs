@@ -8,6 +8,8 @@ use std::fmt;
 use std::str::FromStr;
 use std::time::Duration;
 
+use tessera_protocol::packstream::PackStreamValue;
+
 use crate::error::CliError;
 
 /// Output format for query results.
@@ -49,7 +51,7 @@ impl fmt::Display for OutputFormat {
 pub fn render(
     format: OutputFormat,
     columns: &[String],
-    rows: &[Vec<serde_json::Value>],
+    rows: &[Vec<PackStreamValue>],
     elapsed: Option<Duration>,
     include_headers: bool,
 ) -> Result<String, CliError> {
@@ -60,16 +62,59 @@ pub fn render(
     }
 }
 
-/// Convert a `serde_json::Value` to a display string for table/CSV output.
+/// Convert a `PackStreamValue` to a display string for table/CSV output.
 #[must_use]
-pub fn value_to_display(v: &serde_json::Value) -> String {
+pub fn value_to_display(v: &PackStreamValue) -> String {
     match v {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            serde_json::to_string(v).unwrap_or_default() // OK: serializing Value never fails
+        PackStreamValue::Null => String::new(),
+        PackStreamValue::Bool(b) => b.to_string(),
+        PackStreamValue::Int(i) => i.to_string(),
+        PackStreamValue::Float(f) => f.to_string(),
+        PackStreamValue::String(s) => s.clone(),
+        PackStreamValue::List(items) => {
+            let inner: Vec<String> = items.iter().map(value_to_display).collect();
+            format!("[{}]", inner.join(", "))
+        }
+        PackStreamValue::Dict(pairs) => {
+            let inner: Vec<String> = pairs
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", value_to_display(v)))
+                .collect();
+            format!("{{{}}}", inner.join(", "))
+        }
+        PackStreamValue::Bytes(b) => format!("<{} bytes>", b.len()),
+        PackStreamValue::Struct { tag, fields } => {
+            let inner: Vec<String> = fields.iter().map(value_to_display).collect();
+            format!("<struct 0x{tag:02X} [{inner}]>", inner = inner.join(", "))
+        }
+    }
+}
+
+/// Convert a `PackStreamValue` to a `serde_json::Value` for JSON output.
+#[must_use]
+pub fn value_to_json(v: &PackStreamValue) -> serde_json::Value {
+    match v {
+        PackStreamValue::Null => serde_json::Value::Null,
+        PackStreamValue::Bool(b) => serde_json::Value::Bool(*b),
+        PackStreamValue::Int(i) => serde_json::json!(*i),
+        PackStreamValue::Float(f) => serde_json::json!(*f),
+        PackStreamValue::String(s) => serde_json::Value::String(s.clone()),
+        PackStreamValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(value_to_json).collect())
+        }
+        PackStreamValue::Dict(pairs) => {
+            let map: serde_json::Map<String, serde_json::Value> = pairs
+                .iter()
+                .map(|(k, v)| (k.clone(), value_to_json(v)))
+                .collect();
+            serde_json::Value::Object(map)
+        }
+        PackStreamValue::Bytes(b) => serde_json::json!(format!("<{} bytes>", b.len())),
+        PackStreamValue::Struct { tag, fields } => {
+            serde_json::json!({
+                "tag": format!("0x{tag:02X}"),
+                "fields": fields.iter().map(value_to_json).collect::<Vec<_>>(),
+            })
         }
     }
 }
@@ -136,37 +181,53 @@ mod tests {
 
     #[test]
     fn value_to_display_null() {
-        assert_eq!(value_to_display(&serde_json::Value::Null), "");
+        assert_eq!(value_to_display(&PackStreamValue::Null), "");
     }
 
     #[test]
     fn value_to_display_string() {
-        let v = serde_json::Value::String("hello".to_owned());
+        let v = PackStreamValue::String("hello".to_owned());
         assert_eq!(value_to_display(&v), "hello");
     }
 
     #[test]
-    fn value_to_display_number() {
-        let v = serde_json::json!(42);
-        assert_eq!(value_to_display(&v), "42");
+    fn value_to_display_int() {
+        assert_eq!(value_to_display(&PackStreamValue::Int(42)), "42");
+    }
+
+    #[test]
+    fn value_to_display_float() {
+        assert_eq!(value_to_display(&PackStreamValue::Float(3.14)), "3.14");
     }
 
     #[test]
     fn value_to_display_bool() {
-        assert_eq!(value_to_display(&serde_json::json!(true)), "true");
+        assert_eq!(value_to_display(&PackStreamValue::Bool(true)), "true");
     }
 
     #[test]
-    fn value_to_display_array() {
-        let v = serde_json::json!([1, 2, 3]);
-        let s = value_to_display(&v);
-        assert!(s.contains("[1,2,3]"));
+    fn value_to_display_list() {
+        let v = PackStreamValue::List(vec![
+            PackStreamValue::Int(1),
+            PackStreamValue::Int(2),
+        ]);
+        assert_eq!(value_to_display(&v), "[1, 2]");
+    }
+
+    #[test]
+    fn value_to_json_converts_correctly() {
+        assert_eq!(value_to_json(&PackStreamValue::Null), serde_json::Value::Null);
+        assert_eq!(value_to_json(&PackStreamValue::Int(42)), serde_json::json!(42));
+        assert_eq!(
+            value_to_json(&PackStreamValue::String("hello".to_owned())),
+            serde_json::json!("hello")
+        );
     }
 
     #[test]
     fn render_dispatches_to_table() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = render(OutputFormat::Table, &cols, &rows, None, true).expect("render"); // OK: test
         assert!(out.contains("1 row"));
     }
@@ -174,7 +235,7 @@ mod tests {
     #[test]
     fn render_dispatches_to_json() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = render(OutputFormat::Json, &cols, &rows, None, true).expect("render"); // OK: test
         let parsed: serde_json::Value = serde_json::from_str(out.trim()).expect("json"); // OK: test
         assert_eq!(parsed["x"], 1);
@@ -183,7 +244,7 @@ mod tests {
     #[test]
     fn render_dispatches_to_csv() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = render(OutputFormat::Csv, &cols, &rows, None, true).expect("render"); // OK: test
         assert!(out.starts_with('x'));
     }

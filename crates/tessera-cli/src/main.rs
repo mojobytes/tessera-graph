@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use clap::Parser;
-use tokio::io::split;
+use tokio::io::{AsyncRead, AsyncWrite, split};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
@@ -21,7 +21,7 @@ use tessera_cli_lib::output::OutputFormat;
 use tessera_cli_lib::query;
 use tessera_cli_lib::repl::{self, MetaCommand, QueryAccumulator};
 
-use tessera_protocol::{ClientMessage, ServerMessage};
+use tessera_protocol::BoltClient;
 
 #[tokio::main]
 async fn main() {
@@ -76,24 +76,34 @@ async fn run() -> Result<(), CliError> {
         .map_err(|e| CliError::Connection(format!("TLS handshake failed: {e}")))?;
 
     let (reader, writer) = split(tls_stream);
-    let mut session = Session::from_split(reader, writer);
 
-    // Ping subcommand — no auth needed
+    // Bolt 4.4 handshake
+    let client = BoltClient::connect_split(reader, writer)
+        .await
+        .map_err(|e| CliError::Connection(format!("Bolt handshake failed: {e}")))?;
+
+    let mut session = Session::from_client(client);
+
+    // Ping subcommand — performs HELLO with credentials to verify connectivity
     if matches!(cli.command, Some(Command::Ping)) {
-        return handle_ping(&mut session).await;
+        let password = password.unwrap_or_default();
+        auth::login(&mut session, &config.username, &password, None).await?;
+        println!("OK");
+        let _ = session.client.goodbye().await;
+        return Ok(());
     }
 
     // Authenticate
     let password = password.unwrap_or_else(|| {
         rpassword::prompt_password("Password: ").unwrap_or_default() // OK: fallback to empty if terminal fails
     });
-    auth::login(&mut session, &config.username, &password).await?;
+    auth::login(&mut session, &config.username, &password, None).await?;
 
     // Dispatch command
     dispatch_command(cli.command, &mut session, &config).await?;
 
-    // Logout
-    let _ = session.send(ClientMessage::Logout).await;
+    // Graceful disconnect
+    let _ = session.client.goodbye().await;
     Ok(())
 }
 
@@ -103,8 +113,8 @@ async fn dispatch_command<R, W>(
     config: &ConnectionConfig,
 ) -> Result<(), CliError>
 where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
     match command {
         Some(Command::Query(args)) => {
@@ -135,8 +145,8 @@ async fn handle_exec<R, W>(
     args: &tessera_cli_lib::cli::ExecArgs,
 ) -> Result<(), CliError>
 where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
     let content = std::fs::read_to_string(&args.file)
         .map_err(|e| CliError::ImportExport(format!("cannot read {}: {e}", args.file)))?;
@@ -160,8 +170,8 @@ async fn handle_import<R, W>(
     args: &tessera_cli_lib::cli::ImportArgs,
 ) -> Result<(), CliError>
 where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
     let content = if args.file == "-" {
         use std::io::Read;
@@ -210,8 +220,8 @@ async fn handle_export<R, W>(
     args: &tessera_cli_lib::cli::ExportArgs,
 ) -> Result<(), CliError>
 where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
     let output = query::execute_query(session, "MATCH (n) RETURN n", "gql").await?;
     let rendered = export::format_export(&args.format, &output.columns, &output.rows)?;
@@ -225,27 +235,10 @@ where
     Ok(())
 }
 
-async fn handle_ping<R, W>(session: &mut Session<R, W>) -> Result<(), CliError>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
-{
-    session.send(ClientMessage::Ping).await?;
-    match session.recv().await? {
-        ServerMessage::Pong => {
-            println!("OK");
-            Ok(())
-        }
-        other => Err(CliError::Connection(format!(
-            "unexpected response to ping: {other:?}"
-        ))),
-    }
-}
-
 async fn run_repl<R, W>(session: &mut Session<R, W>, config: &ConnectionConfig) -> Result<(), CliError>
 where
-    R: tokio::io::AsyncRead + Unpin,
-    W: tokio::io::AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
 {
     let mut rl = rustyline::DefaultEditor::new()
         .map_err(|e| CliError::Config(format!("cannot initialize readline: {e}")))?;
@@ -471,7 +464,6 @@ mod tests {
 
     #[test]
     fn infer_format_json_falls_back_to_gql() {
-        // JSON import not implemented — .json files default to "gql"
         assert_ne!(infer_import_format("data.json"), "json");
         assert_eq!(infer_import_format("data.json"), "gql");
     }

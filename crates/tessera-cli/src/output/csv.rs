@@ -1,5 +1,7 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use tessera_protocol::packstream::PackStreamValue;
+
 use super::value_to_display;
 
 /// Render query results as RFC 4180 CSV.
@@ -9,7 +11,7 @@ use super::value_to_display;
 #[must_use]
 pub fn render(
     columns: &[String],
-    rows: &[Vec<serde_json::Value>],
+    rows: &[Vec<PackStreamValue>],
     include_headers: bool,
 ) -> String {
     let mut wtr = csv::Writer::from_writer(Vec::new());
@@ -45,7 +47,7 @@ mod tests {
     #[test]
     fn value_with_comma_is_quoted() {
         let cols = vec!["city".to_owned()];
-        let rows = vec![vec![serde_json::Value::String(
+        let rows = vec![vec![PackStreamValue::String(
             "Tallinn, Estonia".to_owned(),
         )]];
         let out = render(&cols, &rows, true);
@@ -57,7 +59,7 @@ mod tests {
     #[test]
     fn no_headers_omits_header_row() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = render(&cols, &rows, false);
         let trimmed = out.trim();
         assert_eq!(trimmed.lines().count(), 1);
@@ -67,7 +69,7 @@ mod tests {
     #[test]
     fn null_renders_as_empty_field() {
         let cols = vec!["a".to_owned(), "b".to_owned()];
-        let rows = vec![vec![serde_json::Value::Null, serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Null, PackStreamValue::Int(1)]];
         let out = render(&cols, &rows, true);
         let line = out.lines().nth(1).expect("has data"); // OK: test
         assert_eq!(line, ",1");
@@ -76,7 +78,7 @@ mod tests {
     #[test]
     fn multiple_rows() {
         let cols = vec!["n".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)], vec![serde_json::json!(2)]];
+        let rows = vec![vec![PackStreamValue::Int(1)], vec![PackStreamValue::Int(2)]];
         let out = render(&cols, &rows, true);
         let lines: Vec<&str> = out.trim().lines().collect();
         assert_eq!(lines.len(), 3); // header + 2 data
@@ -88,16 +90,16 @@ mod tests {
     #[test]
     fn value_with_quotes_is_escaped() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::Value::String("say \"hello\"".to_owned())]];
+        let rows = vec![vec![PackStreamValue::String("say \"hello\"".to_owned())]];
         let out = render(&cols, &rows, false);
         // CSV escapes quotes by doubling them
         assert!(out.contains("\"\""));
     }
 
     #[test]
-    fn bool_and_number_render() {
+    fn bool_and_float_render() {
         let cols = vec!["a".to_owned(), "b".to_owned()];
-        let rows = vec![vec![serde_json::json!(true), serde_json::json!(3.15)]];
+        let rows = vec![vec![PackStreamValue::Bool(true), PackStreamValue::Float(3.15)]];
         let out = render(&cols, &rows, false);
         let line = out.trim();
         assert_eq!(line, "true,3.15");

@@ -2,6 +2,7 @@
 
 //! Wire protocol definitions for tessera-graph-enterprise.
 
+pub mod bolt_client;
 pub mod bolt_frame;
 pub mod bolt_handshake;
 pub mod bolt_message;
@@ -20,6 +21,7 @@ pub use bolt_message::{
     decode_request, decode_response, encode_request, encode_response, BoltDict, BoltRequest,
     BoltResponse,
 };
+pub use bolt_client::{connect, BoltClient, QueryResult};
 pub use error::{ProtocolError, Result};
 pub use frame::{FramedReader, FramedWriter, MAX_FRAME_SIZE};
 pub use message::{ClientMessage, ServerMessage};

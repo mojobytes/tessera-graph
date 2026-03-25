@@ -1,5 +1,7 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use tessera_protocol::packstream::PackStreamValue;
+
 use crate::error::CliError;
 use crate::output;
 
@@ -7,7 +9,7 @@ use crate::output;
 ///
 /// Each row is assumed to represent a node with properties from the columns.
 #[must_use]
-pub fn format_as_gql(columns: &[String], rows: &[Vec<serde_json::Value>]) -> String {
+pub fn format_as_gql(columns: &[String], rows: &[Vec<PackStreamValue>]) -> String {
     use std::fmt::Write;
 
     let mut out = String::new();
@@ -16,14 +18,15 @@ pub fn format_as_gql(columns: &[String], rows: &[Vec<serde_json::Value>]) -> Str
         let mut props = Vec::new();
         for (i, col) in columns.iter().enumerate() {
             if let Some(val) = row.get(i) {
-                if !val.is_null() {
+                if !matches!(val, PackStreamValue::Null) {
                     let formatted = match val {
-                        serde_json::Value::String(s) => {
+                        PackStreamValue::String(s) => {
                             format!("{col}: '{}'", s.replace('\'', "\\'"))
                         }
-                        serde_json::Value::Number(n) => format!("{col}: {n}"),
-                        serde_json::Value::Bool(b) => format!("{col}: {b}"),
-                        _ => format!("{col}: '{val}'"),
+                        PackStreamValue::Int(n) => format!("{col}: {n}"),
+                        PackStreamValue::Float(f) => format!("{col}: {f}"),
+                        PackStreamValue::Bool(b) => format!("{col}: {b}"),
+                        other => format!("{col}: '{}'", output::value_to_display(other)),
                     };
                     props.push(formatted);
                 }
@@ -50,7 +53,7 @@ pub fn format_as_gql(columns: &[String], rows: &[Vec<serde_json::Value>]) -> Str
 pub fn format_export(
     format: &str,
     columns: &[String],
-    rows: &[Vec<serde_json::Value>],
+    rows: &[Vec<PackStreamValue>],
 ) -> Result<String, CliError> {
     match format {
         "gql" => Ok(format_as_gql(columns, rows)),
@@ -70,8 +73,8 @@ mod tests {
     fn gql_export_single_node() {
         let cols = vec!["name".to_owned(), "age".to_owned()];
         let rows = vec![vec![
-            serde_json::json!("Alice"),
-            serde_json::json!(30),
+            PackStreamValue::String("Alice".to_owned()),
+            PackStreamValue::Int(30),
         ]];
         let out = format_as_gql(&cols, &rows);
         assert!(out.contains("CREATE (n {name: 'Alice', age: 30})"));
@@ -82,8 +85,8 @@ mod tests {
     fn gql_export_multiple_nodes() {
         let cols = vec!["name".to_owned()];
         let rows = vec![
-            vec![serde_json::json!("Alice")],
-            vec![serde_json::json!("Bob")],
+            vec![PackStreamValue::String("Alice".to_owned())],
+            vec![PackStreamValue::String("Bob".to_owned())],
         ];
         let out = format_as_gql(&cols, &rows);
         assert_eq!(out.lines().count(), 2);
@@ -92,7 +95,7 @@ mod tests {
     #[test]
     fn gql_export_null_properties_omitted() {
         let cols = vec!["name".to_owned(), "age".to_owned()];
-        let rows = vec![vec![serde_json::json!("Alice"), serde_json::Value::Null]];
+        let rows = vec![vec![PackStreamValue::String("Alice".to_owned()), PackStreamValue::Null]];
         let out = format_as_gql(&cols, &rows);
         assert!(out.contains("name: 'Alice'"));
         assert!(!out.contains("age"));
@@ -107,7 +110,7 @@ mod tests {
     #[test]
     fn gql_export_bool_property() {
         let cols = vec!["active".to_owned()];
-        let rows = vec![vec![serde_json::json!(true)]];
+        let rows = vec![vec![PackStreamValue::Bool(true)]];
         let out = format_as_gql(&cols, &rows);
         assert!(out.contains("active: true"));
     }
@@ -115,7 +118,7 @@ mod tests {
     #[test]
     fn gql_export_string_with_quote() {
         let cols = vec!["name".to_owned()];
-        let rows = vec![vec![serde_json::json!("O'Brien")]];
+        let rows = vec![vec![PackStreamValue::String("O'Brien".to_owned())]];
         let out = format_as_gql(&cols, &rows);
         assert!(out.contains("O\\'Brien"));
     }
@@ -123,7 +126,7 @@ mod tests {
     #[test]
     fn format_export_gql() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = format_export("gql", &cols, &rows).expect("export"); // OK: test
         assert!(out.contains("CREATE"));
     }
@@ -131,7 +134,7 @@ mod tests {
     #[test]
     fn format_export_json() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = format_export("json", &cols, &rows).expect("export"); // OK: test
         let parsed: serde_json::Value = serde_json::from_str(out.trim()).expect("json"); // OK: test
         assert_eq!(parsed["x"], 1);
@@ -140,7 +143,7 @@ mod tests {
     #[test]
     fn format_export_csv() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = format_export("csv", &cols, &rows).expect("export"); // OK: test
         assert!(out.starts_with('x'));
     }
