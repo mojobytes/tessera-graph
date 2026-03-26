@@ -4,13 +4,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tessera_audit::AuditLog;
+use tessera_auth::lbac::Clearance;
 use tessera_auth::policy::AuthPolicy;
 use tessera_auth::providers::ExternalAuthProvider;
+use tessera_auth::rate_limit::{LoginAttemptTracker, LoginPolicy};
 use tessera_auth::rbac::Permission;
 use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::{UserId, UserStoreHandle};
 use tessera_monitor::MetricsRegistry;
 use tessera_protocol::tls::TlsConfig;
+use tessera_tenant::TenantRegistry;
 
 /// Server context that holds all security components.
 ///
@@ -25,6 +28,9 @@ pub struct ServerContext {
     external_provider: Option<Arc<dyn ExternalAuthProvider>>,
     group_mapping: Arc<HashMap<String, String>>,
     metrics: Arc<MetricsRegistry>,
+    tenant_registry: Arc<TenantRegistry>,
+    login_tracker: Arc<LoginAttemptTracker>,
+    login_policy: LoginPolicy,
 }
 
 impl ServerContext {
@@ -40,6 +46,7 @@ impl ServerContext {
         tls: TlsConfig,
         user_store: Arc<UserStoreHandle>,
         metrics: Arc<MetricsRegistry>,
+        tenant_registry: Arc<TenantRegistry>,
     ) -> Self {
         Self {
             auth_policy,
@@ -50,7 +57,18 @@ impl ServerContext {
             external_provider: None,
             group_mapping: Arc::new(HashMap::new()),
             metrics,
+            tenant_registry,
+            login_tracker: Arc::new(LoginAttemptTracker::new()),
+            // Default: lock after 5 failures for 300 seconds.
+            login_policy: LoginPolicy::new(5, 300),
         }
+    }
+
+    /// Override the default login policy (5 failures / 300s lockout).
+    #[must_use]
+    pub const fn with_login_policy(mut self, policy: LoginPolicy) -> Self {
+        self.login_policy = policy;
+        self
     }
 
     /// Set an external authentication provider (LDAP or OIDC).
@@ -115,6 +133,24 @@ impl ServerContext {
         &self.metrics
     }
 
+    /// Access the tenant registry.
+    #[must_use]
+    pub const fn tenant_registry(&self) -> &Arc<TenantRegistry> {
+        &self.tenant_registry
+    }
+
+    /// Access the login attempt tracker.
+    #[must_use]
+    pub const fn login_tracker(&self) -> &Arc<LoginAttemptTracker> {
+        &self.login_tracker
+    }
+
+    /// Access the login policy.
+    #[must_use]
+    pub const fn login_policy(&self) -> &LoginPolicy {
+        &self.login_policy
+    }
+
     /// Validate a session token and check the required permission.
     ///
     /// On success, records a success audit entry and returns the authenticated
@@ -157,5 +193,18 @@ impl ServerContext {
                 Err(e)
             }
         }
+    }
+
+    /// Resolve the LBAC `Clearance` for the session identified by `token`.
+    ///
+    /// Steps: (1) validate token → `UserId`, (2) look up clearance for that user.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError` if the token is invalid, expired, or the user cannot
+    /// be found. **Fail-safe**: any error results in denial, never in granting access.
+    pub fn resolve_clearance(&self, token: &SessionToken) -> tessera_auth::Result<Clearance> {
+        let user_id = self.sessions.validate(token)?;
+        self.user_store.get_clearance(user_id)
     }
 }

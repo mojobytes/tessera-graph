@@ -5,6 +5,7 @@
 pub mod credentials;
 pub mod error;
 pub mod external_config;
+pub mod lbac;
 pub mod policy;
 pub mod providers;
 pub mod rate_limit;
@@ -14,6 +15,7 @@ pub mod user;
 pub(crate) mod utils;
 
 pub use error::{AuthError, Result};
+pub use lbac::{Clearance, SecurityLabel, SecurityPolicy};
 pub use policy::AuthPolicy;
 pub use rbac::{Permission, Role, RoleId, RoleStore, RoleStoreHandle};
 pub use session::{SessionManager, SessionToken};

@@ -138,8 +138,7 @@ mod tests {
 
     #[test]
     fn parse_query_subcommand() {
-        let cli =
-            Cli::try_parse_from(["tessera-cli", "query", "MATCH (n) RETURN n"]).unwrap();
+        let cli = Cli::try_parse_from(["tessera-cli", "query", "MATCH (n) RETURN n"]).unwrap();
         let Some(Command::Query(q)) = cli.command else {
             panic!("expected Query command");
         };
@@ -149,14 +148,9 @@ mod tests {
 
     #[test]
     fn parse_query_with_language() {
-        let cli = Cli::try_parse_from([
-            "tessera-cli",
-            "query",
-            "-l",
-            "cypher",
-            "MATCH (n) RETURN n",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["tessera-cli", "query", "-l", "cypher", "MATCH (n) RETURN n"])
+                .unwrap();
         let Some(Command::Query(q)) = cli.command else {
             panic!("expected Query command");
         };

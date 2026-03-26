@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use tessera_graph::Graph;
+use tessera_graph::GraphAccess;
 
 use crate::error::ExportResult;
 use crate::property_coerce::{property_to_gql_literal, validate_property_key};
@@ -31,7 +31,7 @@ use crate::property_coerce::{property_to_gql_literal, validate_property_key};
 /// type `Bytes`.
 /// Returns [`crate::error::ExportError::InvalidPropertyKey`] if a property key
 /// contains characters outside `[a-zA-Z_][a-zA-Z0-9_]*`.
-pub fn export_gql(graph: &Graph) -> ExportResult<String> {
+pub fn export_gql<G: GraphAccess>(graph: &G) -> ExportResult<String> {
     use crate::error::ExportError;
 
     let node_count = graph.node_ids().len();

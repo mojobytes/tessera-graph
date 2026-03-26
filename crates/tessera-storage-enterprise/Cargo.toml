@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 tessera-graph  = { workspace = true }
+tessera-auth   = { workspace = true }
 tessera-config = { workspace = true }
 tessera-cypher = { workspace = true }
 thiserror      = { workspace = true }

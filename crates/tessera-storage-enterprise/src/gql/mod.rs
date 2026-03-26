@@ -1,8 +1,8 @@
 //! GQL mutation execution — enterprise-only.
 //!
 //! Provides `execute_mut` for executing GQL mutation statements (CREATE, DELETE,
-//! SET, MERGE) against a mutable `Graph`. Read-only query execution remains in
-//! the MIT core (`tessera_graph::gql::execute`).
+//! SET, MERGE) against any mutable `GraphAccess` implementation. Read-only query
+//! execution remains in the MIT core (`tessera_graph::gql::execute`).
 
 use std::collections::HashMap;
 
@@ -10,7 +10,7 @@ use tessera_graph::gql::{
     CreatePattern, DeleteClause, MergeClause, MutationClause, MutationStatement, SetClause,
     compile_match_for_mutation, eval_set_value, literal_to_property, literal_vec_to_properties,
 };
-use tessera_graph::{Error, GqlMutationResult, Graph, NodeId, Property};
+use tessera_graph::{Error, GqlMutationResult, GraphAccess, NodeId, Property};
 
 /// Executes a GQL mutation statement against a mutable graph.
 ///
@@ -23,8 +23,8 @@ use tessera_graph::{Error, GqlMutationResult, Graph, NodeId, Property};
 /// DETACH when a node has edges, referencing an unbound variable).
 /// Returns [`Error::GqlCompileError`] if variable resolution fails.
 /// May also return storage errors from the underlying `Graph` API.
-pub fn execute_mut(
-    graph: &mut Graph,
+pub fn execute_mut<G: GraphAccess>(
+    graph: &mut G,
     stmt: &MutationStatement,
 ) -> tessera_graph::Result<GqlMutationResult> {
     // Phase 1: immutable MATCH — collect (variable_name, NodeId) pairs.
@@ -80,8 +80,8 @@ pub fn execute_mut(
 
 // ── CREATE ───────────────────────────────────────────────────────────────────
 
-fn execute_create(
-    graph: &mut Graph,
+fn execute_create<G: GraphAccess>(
+    graph: &mut G,
     clause: &tessera_graph::gql::CreateClause,
     node_vars: &mut HashMap<String, NodeId>,
     result: &mut GqlMutationResult,
@@ -90,7 +90,7 @@ fn execute_create(
         match pattern {
             CreatePattern::Node { var, label, props } => {
                 let properties = literal_vec_to_properties(props);
-                let id = graph.add_node(label.clone(), properties)?;
+                let id = graph.add_node(label, properties)?;
                 result.nodes_created += 1;
                 if let Some(v) = var {
                     node_vars.insert(v.clone(), id);
@@ -113,7 +113,7 @@ fn execute_create(
                     ))
                 })?;
                 let properties = literal_vec_to_properties(rel_props);
-                graph.add_edge(rel_label.clone(), source, target, properties)?;
+                graph.add_edge(rel_label, source, target, properties)?;
                 result.edges_created += 1;
             }
         }
@@ -123,8 +123,8 @@ fn execute_create(
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
 
-fn execute_delete(
-    graph: &mut Graph,
+fn execute_delete<G: GraphAccess>(
+    graph: &mut G,
     clause: &DeleteClause,
     node_var_multi: &HashMap<String, Vec<NodeId>>,
     result: &mut GqlMutationResult,
@@ -173,8 +173,8 @@ fn execute_delete(
 
 // ── SET ──────────────────────────────────────────────────────────────────────
 
-fn execute_set(
-    graph: &mut Graph,
+fn execute_set<G: GraphAccess>(
+    graph: &mut G,
     clause: &SetClause,
     node_var_multi: &HashMap<String, Vec<NodeId>>,
     result: &mut GqlMutationResult,
@@ -214,15 +214,12 @@ fn execute_set(
 
 // ── MERGE ────────────────────────────────────────────────────────────────────
 
-fn execute_merge(
-    graph: &mut Graph,
+fn execute_merge<G: GraphAccess>(
+    graph: &mut G,
     clause: &MergeClause,
     node_vars: &mut HashMap<String, NodeId>,
     result: &mut GqlMutationResult,
 ) -> tessera_graph::Result<()> {
-    // TODO(perf): `nodes_by_label` materializes all IDs for the label into a Vec — O(n)
-    // allocation where n is the label bucket size. Replace with a streaming iterator when
-    // the Graph API supports lazy label-scan iteration.
     let candidate_ids = graph.nodes_by_label(&clause.label);
 
     let match_props: Vec<(String, Property)> = clause
@@ -249,7 +246,7 @@ fn execute_merge(
         existing
     } else {
         let properties: tessera_graph::Properties = match_props.into_iter().collect();
-        let new_id = graph.add_node(clause.label.clone(), properties)?;
+        let new_id = graph.add_node(&clause.label, properties)?;
         result.nodes_created += 1;
         new_id
     };

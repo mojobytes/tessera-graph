@@ -2,9 +2,10 @@
 
 //! TCP server binary for tessera-graph-enterprise.
 //!
-//! Starts a TLS-enabled TCP server with mandatory authentication.
+//! Starts a TLS-enabled TCP server speaking the Bolt 4.4 protocol with
+//! mandatory authentication and LBAC enforcement.
 
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tessera_audit::AuditLog;
@@ -13,10 +14,11 @@ use tessera_auth::policy::AuthPolicy;
 use tessera_auth::rbac::RoleStoreHandle;
 use tessera_auth::session::SessionManager;
 use tessera_auth::user::UserStoreHandle;
-use tessera_graph::Graph;
 use tessera_protocol::tls::TlsConfigBuilder;
+use tessera_server::config::PersistenceConfig;
 use tessera_server::context::ServerContext;
 use tessera_server::listener::TesseraListener;
+use tessera_tenant::TenantRegistry;
 
 #[tokio::main]
 async fn main() {
@@ -58,11 +60,19 @@ async fn main() {
     let audit =
         Arc::new(AuditLog::open(std::path::Path::new(&audit_path)).expect("audit log init"));
 
-    // --- Graph ---
-    let graph = Arc::new(RwLock::new(Graph::new()));
+    // --- Tenant registry (replaces single-graph approach) ---
+    let persistence = PersistenceConfig::from_env();
+    let base_dir = persistence
+        .data_dir
+        .unwrap_or_else(|| std::env::temp_dir().join("tessera-data"));
+    tracing::info!("tenant data dir: {}", base_dir.display());
+    let registry = Arc::new(TenantRegistry::new(&base_dir, persistence.graph_config));
+    let default_tenant = persistence.default_tenant;
 
     // --- Metrics ---
-    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(max_connections as u64));
+    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(
+        max_connections as u64,
+    ));
 
     // --- Metrics HTTP server (optional) ---
     if let Ok(metrics_bind) = std::env::var("TESSERA_METRICS_BIND") {
@@ -83,6 +93,7 @@ async fn main() {
         tls,
         user_store,
         metrics,
+        Arc::clone(&registry),
     ));
 
     // --- Shutdown signal ---
@@ -101,18 +112,21 @@ async fn main() {
         .await
         .expect("failed to bind");
     let addr = listener.local_addr().expect("local addr");
-    tracing::info!("TesseraGraph listening on {addr} (TLS)");
+    tracing::info!("TesseraGraph listening on {addr} (TLS, Bolt 4.4)");
 
     if let Err(e) = listener
         .serve_tls(
             ctx,
-            graph,
             shutdown_rx,
             max_connections,
             Duration::from_secs(idle_timeout_secs),
+            default_tenant,
         )
         .await
     {
         tracing::error!("server error: {e}");
     }
+
+    // --- Graceful shutdown: flush all databases to disk ---
+    tessera_server::shutdown::flush_all_on_shutdown(&registry);
 }

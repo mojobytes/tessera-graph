@@ -21,6 +21,7 @@ use std::time::Instant;
 ///   if cross-replica lockout is required.
 /// - **No persistence on panic**: if the process panics the attempt log is lost,
 ///   which can be exploited to reset lockouts.
+#[derive(Default)]
 pub struct LoginAttemptTracker {
     attempts: Mutex<HashMap<String, (u32, Instant)>>,
 }
@@ -36,37 +37,42 @@ impl LoginAttemptTracker {
 
     /// Record a failed authentication attempt for the given username.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
+    /// If the internal lock is poisoned (another thread panicked while holding
+    /// it), the failure is silently dropped. This is fail-safe: the worst case
+    /// is that one failed attempt goes unrecorded.
     pub fn record_failure(&self, username: &str) {
-        let mut map = self.attempts.lock().expect("tracker lock poisoned");
+        let Ok(mut map) = self.attempts.lock() else {
+            return;
+        };
         let entry = map
             .entry(username.to_owned())
             .or_insert_with(|| (0, Instant::now()));
         entry.0 += 1;
         entry.1 = Instant::now();
-        drop(map);
     }
 
     /// Reset the failure counter after a successful login.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
+    /// If the internal lock is poisoned, the reset is silently skipped.
+    /// This is fail-safe: the worst case is that the counter stays elevated,
+    /// which may cause an earlier lockout — not a bypass.
     pub fn record_success(&self, username: &str) {
-        let mut map = self.attempts.lock().expect("tracker lock poisoned");
+        let Ok(mut map) = self.attempts.lock() else {
+            return;
+        };
         map.remove(username);
     }
 
     /// Check if the account is currently locked due to too many failed attempts.
     ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
+    /// If the internal lock is poisoned, returns `true` (locked) — fail-safe
+    /// default that denies access rather than allowing it.
     #[must_use]
     pub fn is_locked(&self, username: &str, policy: &LoginPolicy) -> bool {
-        let map = self.attempts.lock().expect("tracker lock poisoned");
+        let Ok(map) = self.attempts.lock() else {
+            // Lock poisoned — fail-safe: treat as locked.
+            return true;
+        };
         match map.get(username) {
             Some(&(count, last_attempt)) => {
                 if count < policy.max_attempts {
@@ -76,12 +82,6 @@ impl LoginAttemptTracker {
             }
             None => false,
         }
-    }
-}
-
-impl Default for LoginAttemptTracker {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

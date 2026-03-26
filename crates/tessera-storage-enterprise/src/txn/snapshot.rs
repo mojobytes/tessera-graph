@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 /// Immutable snapshot of the committed transaction set at a point in time.
@@ -6,18 +6,18 @@ use std::sync::Arc;
 /// A transaction with `SnapshotIsolation` sees exactly the transactions that
 /// were committed when its snapshot was taken, plus its own writes.
 ///
-/// Uses `Arc<HashSet<u64>>` internally so that creating a snapshot is O(1)
+/// Uses `Arc<BTreeSet<u64>>` internally so that creating a snapshot is O(1)
 /// (a single atomic increment) regardless of how many transactions have
 /// committed.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
-    committed_at_begin: Arc<HashSet<u64>>,
+    committed_at_begin: Arc<BTreeSet<u64>>,
     owner_txn_id: u64,
 }
 
 impl Snapshot {
     /// Creates a new snapshot capturing the given committed set.
-    pub(crate) const fn new(committed_at_begin: Arc<HashSet<u64>>, owner_txn_id: u64) -> Self {
+    pub(crate) const fn new(committed_at_begin: Arc<BTreeSet<u64>>, owner_txn_id: u64) -> Self {
         Self {
             committed_at_begin,
             owner_txn_id,
@@ -44,13 +44,13 @@ mod tests {
 
     #[test]
     fn own_writes_visible() {
-        let snap = Snapshot::new(Arc::new(HashSet::new()), 10);
+        let snap = Snapshot::new(Arc::new(BTreeSet::new()), 10);
         assert!(snap.is_visible(10));
     }
 
     #[test]
     fn committed_writes_visible() {
-        let committed = Arc::new(HashSet::from([1, 2, 3]));
+        let committed = Arc::new(BTreeSet::from([1, 2, 3]));
         let snap = Snapshot::new(committed, 10);
         assert!(snap.is_visible(1));
         assert!(snap.is_visible(2));
@@ -59,20 +59,20 @@ mod tests {
 
     #[test]
     fn unknown_writes_not_visible() {
-        let committed = Arc::new(HashSet::from([1, 2]));
+        let committed = Arc::new(BTreeSet::from([1, 2]));
         let snap = Snapshot::new(committed, 10);
         assert!(!snap.is_visible(99));
     }
 
     #[test]
     fn snapshot_debug_does_not_panic() {
-        let snap = Snapshot::new(Arc::new(HashSet::new()), 42);
+        let snap = Snapshot::new(Arc::new(BTreeSet::new()), 42);
         let _ = format!("{snap:?}");
     }
 
     #[test]
     fn committed_count_matches() {
-        let committed = Arc::new(HashSet::from([1, 2, 3]));
+        let committed = Arc::new(BTreeSet::from([1, 2, 3]));
         let snap = Snapshot::new(committed, 10);
         assert_eq!(snap.committed_count(), 3);
     }

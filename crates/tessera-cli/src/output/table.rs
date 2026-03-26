@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use comfy_table::Table;
+use tessera_protocol::packstream::PackStreamValue;
 
 use super::{rows_label, value_to_display};
 
@@ -10,7 +11,7 @@ use super::{rows_label, value_to_display};
 #[must_use]
 pub fn render(
     columns: &[String],
-    rows: &[Vec<serde_json::Value>],
+    rows: &[Vec<PackStreamValue>],
     elapsed: Option<Duration>,
 ) -> String {
     let mut table = Table::new();
@@ -37,7 +38,7 @@ mod tests {
     #[test]
     fn empty_result_shows_zero_rows() {
         let cols = vec!["name".to_owned(), "age".to_owned()];
-        let rows: Vec<Vec<serde_json::Value>> = vec![];
+        let rows: Vec<Vec<PackStreamValue>> = vec![];
         let out = render(&cols, &rows, None);
         assert!(out.contains("0 rows"));
         assert!(out.contains("name"));
@@ -47,18 +48,17 @@ mod tests {
     #[test]
     fn single_row_renders_values() {
         let cols = vec!["name".to_owned()];
-        let rows = vec![vec![serde_json::Value::String("Alice".to_owned())]];
+        let rows = vec![vec![PackStreamValue::String("Alice".to_owned())]];
         let out = render(&cols, &rows, None);
         assert!(out.contains("Alice"));
         assert!(out.contains("1 row"));
-        // singular "row", not "rows"
         assert!(!out.contains("1 rows"));
     }
 
     #[test]
     fn multiple_rows() {
         let cols = vec!["n".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)], vec![serde_json::json!(2)]];
+        let rows = vec![vec![PackStreamValue::Int(1)], vec![PackStreamValue::Int(2)]];
         let out = render(&cols, &rows, None);
         assert!(out.contains("2 rows"));
     }
@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn null_value_renders_as_empty() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::Value::Null]];
+        let rows = vec![vec![PackStreamValue::Null]];
         let out = render(&cols, &rows, None);
         assert!(out.contains("1 row"));
     }
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn timing_appears_when_provided() {
         let cols = vec!["n".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = render(&cols, &rows, Some(Duration::from_millis(42)));
         assert!(out.contains("42.0 ms"));
     }
@@ -82,15 +82,18 @@ mod tests {
     #[test]
     fn timing_absent_when_none() {
         let cols = vec!["n".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]];
+        let rows = vec![vec![PackStreamValue::Int(1)]];
         let out = render(&cols, &rows, None);
         assert!(!out.contains("ms"));
     }
 
     #[test]
-    fn bool_and_number_render() {
+    fn bool_and_float_render() {
         let cols = vec!["a".to_owned(), "b".to_owned()];
-        let rows = vec![vec![serde_json::json!(true), serde_json::json!(3.15)]];
+        let rows = vec![vec![
+            PackStreamValue::Bool(true),
+            PackStreamValue::Float(3.15),
+        ]];
         let out = render(&cols, &rows, None);
         assert!(out.contains("true"));
         assert!(out.contains("3.15"));

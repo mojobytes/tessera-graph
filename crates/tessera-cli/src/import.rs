@@ -120,9 +120,7 @@ impl ImportPlan {
     /// Number of batches needed to execute all statements.
     #[must_use]
     pub fn batch_count(&self) -> usize {
-        self.statements
-            .len()
-            .div_ceil(self.batch_size)
+        self.statements.len().div_ceil(self.batch_size)
     }
 
     /// Get a specific batch of statements.
@@ -189,15 +187,11 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
     let mut statements = Vec::new();
 
     for result in reader.records() {
-        let record =
-            result.map_err(|e| CliError::ImportExport(format!("invalid CSV row: {e}")))?;
+        let record = result.map_err(|e| CliError::ImportExport(format!("invalid CSV row: {e}")))?;
 
-        let label = record
-            .get(0)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                CliError::ImportExport(format!("empty {label_col} (label) in CSV row"))
-            })?;
+        let label = record.get(0).filter(|s| !s.is_empty()).ok_or_else(|| {
+            CliError::ImportExport(format!("empty {label_col} (label) in CSV row"))
+        })?;
 
         let mut props = Vec::new();
         for (i, col) in prop_cols.iter().enumerate() {
@@ -342,11 +336,8 @@ mod tests {
 
     #[test]
     fn plan_batch_indexing() {
-        let plan = ImportPlan::from_gql_content(
-            "CREATE (:A);\nCREATE (:B);\nCREATE (:C);",
-            2,
-        )
-        .expect("plan"); // OK: test
+        let plan = ImportPlan::from_gql_content("CREATE (:A);\nCREATE (:B);\nCREATE (:C);", 2)
+            .expect("plan"); // OK: test
         assert_eq!(plan.batch(0).len(), 2);
         assert_eq!(plan.batch(1).len(), 1);
         assert!(plan.batch(2).is_empty());
@@ -360,8 +351,7 @@ mod tests {
 
     #[test]
     fn dry_run_summary_format() {
-        let plan = ImportPlan::from_gql_content("CREATE (:A);\nCREATE (:B);", 100)
-            .expect("plan"); // OK: test
+        let plan = ImportPlan::from_gql_content("CREATE (:A);\nCREATE (:B);", 100).expect("plan"); // OK: test
         let summary = plan.dry_run_summary();
         assert!(summary.contains("2 statements"));
         assert!(summary.contains("1 batches"));

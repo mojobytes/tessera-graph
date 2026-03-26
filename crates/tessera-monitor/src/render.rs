@@ -5,7 +5,7 @@
 use std::fmt::Write;
 use std::sync::atomic::Ordering;
 
-use crate::registry::{MetricsRegistry, HISTOGRAM_BUCKETS};
+use crate::registry::{HISTOGRAM_BUCKETS, MetricsRegistry};
 
 /// Render all metrics in Prometheus text exposition format (version 0.0.4).
 #[must_use]
@@ -41,7 +41,10 @@ pub fn render_prometheus(registry: &MetricsRegistry) -> String {
     );
 
     // Auth attempts with result label
-    let _ = writeln!(buf, "# HELP tessera_auth_attempts_total Total authentication attempts");
+    let _ = writeln!(
+        buf,
+        "# HELP tessera_auth_attempts_total Total authentication attempts"
+    );
     let _ = writeln!(buf, "# TYPE tessera_auth_attempts_total counter");
     write_labeled(
         &mut buf,
@@ -214,7 +217,9 @@ mod tests {
         let output = render_prometheus(&r);
         // All 12 bucket lines + +Inf
         assert_eq!(
-            output.matches("tessera_query_duration_seconds_bucket").count(),
+            output
+                .matches("tessera_query_duration_seconds_bucket")
+                .count(),
             13
         );
     }

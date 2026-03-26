@@ -105,7 +105,12 @@ impl ConnectionConfig {
         let content = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(CliError::Config(format!("cannot read {}: {e}", path.display()))),
+            Err(e) => {
+                return Err(CliError::Config(format!(
+                    "cannot read {}: {e}",
+                    path.display()
+                )));
+            }
         };
 
         // Reject files that contain a password key anywhere in [connection]
@@ -228,7 +233,10 @@ fn merge_options(
 
     let connect_timeout_secs = cli
         .connect_timeout
-        .or_else(|| env.get("TESSERA_CONNECT_TIMEOUT").and_then(|v| v.parse().ok()))
+        .or_else(|| {
+            env.get("TESSERA_CONNECT_TIMEOUT")
+                .and_then(|v| v.parse().ok())
+        })
         .or_else(|| file_cfg.and_then(|f| f.connection.as_ref()?.connect_timeout_secs))
         .unwrap_or(defaults.connect_timeout_secs);
 
@@ -242,10 +250,7 @@ fn merge_options(
         .and_then(|f| f.defaults.as_ref()?.language.clone())
         .unwrap_or(defaults.language);
 
-    let password = cli
-        .password
-        .clone()
-        .or_else(|| env.get("TESSERA_PASSWORD"));
+    let password = cli.password.clone().or_else(|| env.get("TESSERA_PASSWORD"));
 
     let cfg = ConnectionConfig {
         host,
@@ -427,8 +432,11 @@ mod tests {
     fn toml_file_sets_host_and_port() {
         let dir = tempfile::tempdir().expect("tempdir"); // OK: test
         let path = dir.path().join("tessera.toml");
-        std::fs::write(&path, "[connection]\nhost = \"file-host.local\"\nport = 9999\n")
-            .expect("write"); // OK: test
+        std::fs::write(
+            &path,
+            "[connection]\nhost = \"file-host.local\"\nport = 9999\n",
+        )
+        .expect("write"); // OK: test
         let file_cfg = ConnectionConfig::from_toml_file(&path)
             .expect("parse") // OK: test
             .expect("some"); // OK: test
@@ -448,8 +456,7 @@ mod tests {
     fn toml_with_password_key_is_rejected() {
         let dir = tempfile::tempdir().expect("tempdir"); // OK: test
         let path = dir.path().join("tessera.toml");
-        std::fs::write(&path, "[connection]\npassword = \"secret\"\n")
-            .expect("write"); // OK: test
+        std::fs::write(&path, "[connection]\npassword = \"secret\"\n").expect("write"); // OK: test
         let result = ConnectionConfig::from_toml_file(&path);
         assert!(result.is_err());
         let err = result.expect_err("should be error"); // OK: test
@@ -461,8 +468,11 @@ mod tests {
     fn toml_with_defaults_section() {
         let dir = tempfile::tempdir().expect("tempdir"); // OK: test
         let path = dir.path().join("tessera.toml");
-        std::fs::write(&path, "[defaults]\nlanguage = \"cypher\"\nformat = \"json\"\n")
-            .expect("write"); // OK: test
+        std::fs::write(
+            &path,
+            "[defaults]\nlanguage = \"cypher\"\nformat = \"json\"\n",
+        )
+        .expect("write"); // OK: test
         let file_cfg = ConnectionConfig::from_toml_file(&path)
             .expect("parse") // OK: test
             .expect("some"); // OK: test
@@ -494,14 +504,23 @@ mod tests {
 
     #[test]
     fn resolve_and_resolve_full_agree_when_no_file_config() {
-        let cli = cli_from(&["tessera-cli", "-H", "shared-host", "--connect-timeout", "42"]);
+        let cli = cli_from(&[
+            "tessera-cli",
+            "-H",
+            "shared-host",
+            "--connect-timeout",
+            "42",
+        ]);
         let env = empty_env();
         let (cfg_basic, pwd_basic) = ConnectionConfig::resolve_with_env(&cli, &env);
         let (cfg_full, pwd_full) = ConnectionConfig::resolve_full_with_env(&cli, &env);
         assert_eq!(cfg_basic.host, cfg_full.host);
         assert_eq!(cfg_basic.port, cfg_full.port);
         assert_eq!(cfg_basic.username, cfg_full.username);
-        assert_eq!(cfg_basic.connect_timeout_secs, cfg_full.connect_timeout_secs);
+        assert_eq!(
+            cfg_basic.connect_timeout_secs,
+            cfg_full.connect_timeout_secs
+        );
         assert_eq!(cfg_basic.format, cfg_full.format);
         assert_eq!(pwd_basic, pwd_full);
     }
@@ -510,8 +529,7 @@ mod tests {
     fn toml_file_sets_connect_timeout() {
         let dir = tempfile::tempdir().expect("tempdir"); // OK: test
         let path = dir.path().join("tessera.toml");
-        std::fs::write(&path, "[connection]\nconnect_timeout_secs = 42\n")
-            .expect("write"); // OK: test
+        std::fs::write(&path, "[connection]\nconnect_timeout_secs = 42\n").expect("write"); // OK: test
         let file_cfg = ConnectionConfig::from_toml_file(&path)
             .expect("parse") // OK: test
             .expect("some"); // OK: test

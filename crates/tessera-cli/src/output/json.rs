@@ -1,11 +1,15 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use tessera_protocol::packstream::PackStreamValue;
+
+use super::value_to_json;
+
 /// Render query results as NDJSON (one JSON object per line).
 ///
 /// Each row is emitted as a JSON object with column names as keys.
 /// Empty result sets produce an empty string.
 #[must_use]
-pub fn render(columns: &[String], rows: &[Vec<serde_json::Value>]) -> String {
+pub fn render(columns: &[String], rows: &[Vec<PackStreamValue>]) -> String {
     let mut lines = Vec::with_capacity(rows.len());
     for row in rows {
         let obj = row_to_object(columns, row);
@@ -28,11 +32,11 @@ pub fn render(columns: &[String], rows: &[Vec<serde_json::Value>]) -> String {
 #[must_use]
 pub fn row_to_object(
     columns: &[String],
-    row: &[serde_json::Value],
+    row: &[PackStreamValue],
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut map = serde_json::Map::with_capacity(columns.len());
     for (i, col) in columns.iter().enumerate() {
-        let val = row.get(i).cloned().unwrap_or(serde_json::Value::Null);
+        let val = row.get(i).map_or(serde_json::Value::Null, value_to_json);
         map.insert(col.clone(), val);
     }
     map
@@ -46,8 +50,8 @@ mod tests {
     fn single_row_is_valid_ndjson() {
         let cols = vec!["name".to_owned(), "age".to_owned()];
         let rows = vec![vec![
-            serde_json::Value::String("Alice".to_owned()),
-            serde_json::json!(30),
+            PackStreamValue::String("Alice".to_owned()),
+            PackStreamValue::Int(30),
         ]];
         let out = render(&cols, &rows);
         let parsed: serde_json::Value = serde_json::from_str(out.trim()).expect("valid json"); // OK: test
@@ -58,7 +62,7 @@ mod tests {
     #[test]
     fn two_rows_produce_two_lines() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)], vec![serde_json::json!(2)]];
+        let rows = vec![vec![PackStreamValue::Int(1)], vec![PackStreamValue::Int(2)]];
         let out = render(&cols, &rows);
         assert_eq!(out.trim().lines().count(), 2);
     }
@@ -73,7 +77,7 @@ mod tests {
     #[test]
     fn null_value_appears_as_json_null() {
         let cols = vec!["x".to_owned()];
-        let rows = vec![vec![serde_json::Value::Null]];
+        let rows = vec![vec![PackStreamValue::Null]];
         let out = render(&cols, &rows);
         let parsed: serde_json::Value = serde_json::from_str(out.trim()).expect("valid json"); // OK: test
         assert!(parsed["x"].is_null());
@@ -82,7 +86,7 @@ mod tests {
     #[test]
     fn each_line_is_independently_parseable() {
         let cols = vec!["a".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)], vec![serde_json::json!(2)]];
+        let rows = vec![vec![PackStreamValue::Int(1)], vec![PackStreamValue::Int(2)]];
         let out = render(&cols, &rows);
         for line in out.trim().lines() {
             let _: serde_json::Value = serde_json::from_str(line).expect("each line is json"); // OK: test
@@ -92,7 +96,7 @@ mod tests {
     #[test]
     fn missing_values_filled_with_null() {
         let cols = vec!["a".to_owned(), "b".to_owned()];
-        let rows = vec![vec![serde_json::json!(1)]]; // only 1 value for 2 columns
+        let rows = vec![vec![PackStreamValue::Int(1)]]; // only 1 value for 2 columns
         let out = render(&cols, &rows);
         let parsed: serde_json::Value = serde_json::from_str(out.trim()).expect("valid json"); // OK: test
         assert_eq!(parsed["a"], 1);
@@ -102,7 +106,7 @@ mod tests {
     #[test]
     fn row_to_object_basic() {
         let cols = vec!["x".to_owned()];
-        let row = vec![serde_json::json!(42)];
+        let row = vec![PackStreamValue::Int(42)];
         let obj = row_to_object(&cols, &row);
         assert_eq!(obj["x"], 42);
     }
