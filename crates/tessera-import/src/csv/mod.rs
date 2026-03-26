@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use tessera_graph::{Graph, Property};
+use tessera_graph::{GraphAccess, Property};
 
 use crate::error::{ExportResult, ImportError, ImportResult};
 use crate::node_lookup::{build_lookup_index, find_node_in_index};
@@ -94,9 +94,9 @@ fn quote_csv_field(value: &str) -> String {
 /// Returns [`ImportError::CsvParse`] if the header is missing, the `label`
 /// column is absent, a data row has fewer columns than the header, or the label
 /// column is empty or whitespace-only.
-/// Returns [`ImportError::CsvParse`] (with row context) if inserting a node
-/// into the graph fails.
-pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
+/// Returns [`ImportError::GraphWrite`] if inserting a node into the graph
+/// fails.
+pub fn import_nodes_csv<G: GraphAccess>(graph: &mut G, csv: &str) -> ImportResult<usize> {
     let mut lines = csv.lines();
 
     // Parse header.
@@ -159,11 +159,8 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
         }
 
         graph
-            .add_node(label, properties)
-            .map_err(|e| ImportError::CsvParse {
-                row: row_num,
-                reason: format!("graph write failed: {e}"),
-            })?;
+            .add_node(&label, properties)
+            .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
         count += 1;
     }
 
@@ -185,9 +182,18 @@ pub fn import_nodes_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 ///
 /// Returns [`ImportError::CsvParse`] if the header has fewer than 7 columns or
 /// a data row cannot be parsed. Returns [`ImportError::NodeNotFoundForEdge`] if
-/// an endpoint node cannot be located. Returns [`ImportError::CsvParse`] (with
-/// row context) if inserting an edge fails.
-pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
+/// an endpoint node cannot be located. Returns [`ImportError::GraphWrite`] if
+/// inserting an edge into the graph fails.
+///
+/// # LBAC Note
+///
+/// When `graph` is a `SecureGraph`, the lookup index only contains nodes
+/// visible at the writer's clearance level. Nodes imported at a higher
+/// clearance will be invisible to the index, causing
+/// [`ImportError::NodeNotFoundForEdge`] — indistinguishable from a truly
+/// absent node. Callers must import nodes and edges at the same clearance
+/// level to avoid this.
+pub fn import_edges_csv<G: GraphAccess>(graph: &mut G, csv: &str) -> ImportResult<usize> {
     let mut lines = csv.lines();
 
     let header_line = lines.next().ok_or_else(|| ImportError::CsvParse {
@@ -271,11 +277,8 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
         }
 
         graph
-            .add_edge(rel_label, source_id, target_id, edge_props)
-            .map_err(|e| ImportError::CsvParse {
-                row: row_num,
-                reason: format!("graph write: {e}"),
-            })?;
+            .add_edge(&rel_label, source_id, target_id, edge_props)
+            .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
         count += 1;
     }
 
@@ -295,7 +298,7 @@ pub fn import_edges_csv(graph: &mut Graph, csv: &str) -> ImportResult<usize> {
 /// Returns [`crate::error::ExportError::GraphRead`] if a node cannot be read.
 /// Returns [`crate::error::ExportError::UnsupportedType`] if a node property
 /// has type `Bytes`.
-pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
+pub fn export_nodes_csv<G: GraphAccess>(graph: &G) -> ExportResult<String> {
     use crate::error::ExportError;
 
     // Collect all node IDs once — avoids a second call later for capacity hint
@@ -372,7 +375,7 @@ pub fn export_nodes_csv(graph: &Graph) -> ExportResult<String> {
 /// Returns [`crate::error::ExportError::GraphRead`] if an edge cannot be read.
 /// Returns [`crate::error::ExportError::UnsupportedType`] if an edge property
 /// has type `Bytes`.
-pub fn export_edges_csv(graph: &Graph) -> ExportResult<String> {
+pub fn export_edges_csv<G: GraphAccess>(graph: &G) -> ExportResult<String> {
     use crate::error::ExportError;
 
     // Collect all edge property keys.

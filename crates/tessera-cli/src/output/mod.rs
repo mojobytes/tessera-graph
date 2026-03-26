@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn value_to_display_float() {
-        assert_eq!(value_to_display(&PackStreamValue::Float(3.14)), "3.14");
+        assert_eq!(value_to_display(&PackStreamValue::Float(3.125)), "3.125");
     }
 
     #[test]

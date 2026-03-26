@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use tessera_graph::{Graph, NodeId, Property};
+use tessera_graph::{GraphAccess, NodeId, Property};
 
 use crate::error::{ImportError, ImportResult};
 
@@ -11,8 +11,8 @@ use crate::error::{ImportError, ImportResult};
 ///
 /// Kept for callers that do not benefit from a pre-built index.
 #[allow(dead_code)]
-pub fn find_node_by_label_and_prop(
-    graph: &Graph,
+pub fn find_node_by_label_and_prop<G: GraphAccess>(
+    graph: &G,
     label: &str,
     prop_key: &str,
     prop_value: &str,
@@ -65,7 +65,7 @@ pub type NodeLookupIndex = HashMap<String, NodeId>;
 /// Returns [`ImportError::GraphRead`] if any node cannot be read from the
 /// graph. Previously such errors were silently swallowed, producing an
 /// incomplete index and ghost `NodeNotFoundForEdge` errors downstream.
-pub fn build_lookup_index(graph: &Graph) -> ImportResult<NodeLookupIndex> {
+pub fn build_lookup_index<G: GraphAccess>(graph: &G) -> ImportResult<NodeLookupIndex> {
     let mut index = NodeLookupIndex::new();
     for id in graph.node_ids() {
         let node = graph

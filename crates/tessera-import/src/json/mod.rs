@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use tessera_graph::Graph;
+use tessera_graph::GraphAccess;
 
 use crate::error::{ExportResult, ImportError, ImportResult};
 use crate::node_lookup::{NodeLookupIndex, build_lookup_index, find_node_in_index};
@@ -49,7 +49,16 @@ pub struct ImportJsonSummary {
 /// Returns [`ImportError::JsonMissingField`] if required fields are absent.
 /// Returns [`ImportError::NodeNotFoundForEdge`] if an endpoint cannot be found.
 /// Returns [`ImportError::GraphWrite`] if a graph insertion fails.
-pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJsonSummary> {
+///
+/// # LBAC Note
+///
+/// When `graph` is a `SecureGraph`, the lookup index only contains nodes
+/// visible at the writer's clearance level. Nodes imported at a higher
+/// clearance will be invisible to the index, causing
+/// [`ImportError::NodeNotFoundForEdge`] — indistinguishable from a truly
+/// absent node. Callers must import nodes and edges at the same clearance
+/// level to avoid this.
+pub fn import_json<G: GraphAccess>(graph: &mut G, json_text: &str) -> ImportResult<ImportJsonSummary> {
     let root: serde_json::Value =
         serde_json::from_str(json_text).map_err(|e| ImportError::JsonInvalid(e.to_string()))?;
 
@@ -88,7 +97,7 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
         }
 
         graph
-            .add_node(label, properties)
+            .add_node(&label, properties)
             .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
         nodes_imported += 1;
     }
@@ -131,7 +140,7 @@ pub fn import_json(graph: &mut Graph, json_text: &str) -> ImportResult<ImportJso
             }
 
             graph
-                .add_edge(rel_label, source_id, target_id, edge_props)
+                .add_edge(&rel_label, source_id, target_id, edge_props)
                 .map_err(|e| ImportError::GraphWrite(e.to_string()))?;
             edges_imported += 1;
         }
@@ -211,7 +220,7 @@ fn resolve_endpoint(
 /// Returns [`crate::error::ExportError::UnsupportedType`] if a property has
 /// type `Bytes`.
 /// Returns [`crate::error::ExportError::Serialize`] if JSON serialization fails.
-pub fn export_json(graph: &Graph) -> ExportResult<String> {
+pub fn export_json<G: GraphAccess>(graph: &G) -> ExportResult<String> {
     use crate::error::ExportError;
 
     // Build nodes array.

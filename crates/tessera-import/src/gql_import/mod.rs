@@ -2,7 +2,7 @@
 
 //! GQL statement import for `TesseraGraph`.
 
-use tessera_graph::{GqlStatement, Graph};
+use tessera_graph::{GqlStatement, GraphAccess};
 
 use crate::error::{ImportError, ImportResult};
 
@@ -29,7 +29,7 @@ pub struct GqlImportSummary {
 ///
 /// Returns [`ImportError::GqlStatement`] if a statement cannot be parsed or
 /// executed, including the 1-based line number and error description.
-pub fn import_gql(graph: &mut Graph, gql_text: &str) -> ImportResult<GqlImportSummary> {
+pub fn import_gql<G: GraphAccess>(graph: &mut G, gql_text: &str) -> ImportResult<GqlImportSummary> {
     let mut summary = GqlImportSummary::default();
 
     for (idx, line) in gql_text.lines().enumerate() {
