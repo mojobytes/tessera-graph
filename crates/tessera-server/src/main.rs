@@ -70,7 +70,9 @@ async fn main() {
     let default_tenant = persistence.default_tenant;
 
     // --- Metrics ---
-    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(max_connections as u64));
+    let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(
+        max_connections as u64,
+    ));
 
     // --- Metrics HTTP server (optional) ---
     if let Ok(metrics_bind) = std::env::var("TESSERA_METRICS_BIND") {

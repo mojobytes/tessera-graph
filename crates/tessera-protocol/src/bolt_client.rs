@@ -95,16 +95,12 @@ where
     ///   connection.
     /// - [`ProtocolError`] on decoding failure.
     pub async fn recv_response(&mut self) -> crate::Result<BoltResponse> {
-        let data = self
-            .reader
-            .read_message()
-            .await?
-            .ok_or_else(|| {
-                ProtocolError::Io(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "server closed connection",
-                ))
-            })?;
+        let data = self.reader.read_message().await?.ok_or_else(|| {
+            ProtocolError::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "server closed connection",
+            ))
+        })?;
         decode_response(&data)
     }
 

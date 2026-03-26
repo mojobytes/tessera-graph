@@ -34,7 +34,9 @@ pub fn parse_meta_command(input: &str) -> Option<MetaCommand> {
         "h" | "?" | "help" => MetaCommand::Help,
         "format" => {
             let Some(fmt_str) = arg else {
-                return Some(MetaCommand::Unknown("\\format requires an argument (table, json, csv)".to_owned()));
+                return Some(MetaCommand::Unknown(
+                    "\\format requires an argument (table, json, csv)".to_owned(),
+                ));
             };
             fmt_str.parse::<OutputFormat>().map_or_else(
                 |_| MetaCommand::Unknown(format!("unknown format: {fmt_str}")),
@@ -43,7 +45,9 @@ pub fn parse_meta_command(input: &str) -> Option<MetaCommand> {
         }
         "l" | "language" => {
             let Some(lang) = arg else {
-                return Some(MetaCommand::Unknown("\\l requires an argument (gql, cypher)".to_owned()));
+                return Some(MetaCommand::Unknown(
+                    "\\l requires an argument (gql, cypher)".to_owned(),
+                ));
             };
             MetaCommand::SetLanguage(lang.to_owned())
         }

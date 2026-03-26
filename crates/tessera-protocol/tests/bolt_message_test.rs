@@ -4,8 +4,8 @@
 
 use tessera_protocol::packstream::decode as ps_decode;
 use tessera_protocol::{
-    decode_request, decode_response, encode_request, encode_response, BoltChunkedReader,
-    BoltChunkedWriter, BoltDict, BoltRequest, BoltResponse, PackStreamValue, ProtocolError,
+    BoltChunkedReader, BoltChunkedWriter, BoltDict, BoltRequest, BoltResponse, PackStreamValue,
+    ProtocolError, decode_request, decode_response, encode_request, encode_response,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -35,7 +35,10 @@ fn sample_dict() -> BoltDict {
             "user_agent".to_owned(),
             PackStreamValue::String("tessera/1.0".to_owned()),
         ),
-        ("scheme".to_owned(), PackStreamValue::String("basic".to_owned())),
+        (
+            "scheme".to_owned(),
+            PackStreamValue::String("basic".to_owned()),
+        ),
     ]
 }
 
@@ -449,7 +452,11 @@ fn decode_request_non_struct_returns_unexpected_tag_error() {
     // Encode a plain string — not a struct at all
     use tessera_protocol::packstream::encode as ps_encode;
     let mut buf = Vec::new();
-    ps_encode(&PackStreamValue::String("not a struct".to_owned()), &mut buf).unwrap();
+    ps_encode(
+        &PackStreamValue::String("not a struct".to_owned()),
+        &mut buf,
+    )
+    .unwrap();
 
     let err = decode_request(&buf).unwrap_err();
     assert!(
@@ -580,9 +587,18 @@ async fn full_stack_multiple_messages_in_sequence() {
 
     let (mut writer, mut reader) = make_pair(8192);
 
-    writer.write_message(&encode_request(&hello).unwrap()).await.unwrap();
-    writer.write_message(&encode_request(&run).unwrap()).await.unwrap();
-    writer.write_message(&encode_request(&pull).unwrap()).await.unwrap();
+    writer
+        .write_message(&encode_request(&hello).unwrap())
+        .await
+        .unwrap();
+    writer
+        .write_message(&encode_request(&run).unwrap())
+        .await
+        .unwrap();
+    writer
+        .write_message(&encode_request(&pull).unwrap())
+        .await
+        .unwrap();
 
     let m1 = decode_request(&reader.read_message().await.unwrap().unwrap()).unwrap();
     let m2 = decode_request(&reader.read_message().await.unwrap().unwrap()).unwrap();

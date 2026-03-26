@@ -2,11 +2,11 @@
 
 //! `PackStream` binary serialization codec for the Neo4j Bolt protocol.
 
+pub mod decoder;
+pub mod encoder;
 pub(crate) mod markers;
 pub mod value;
-pub mod encoder;
-pub mod decoder;
 
-pub use value::PackStreamValue;
-pub use encoder::encode;
 pub use decoder::decode;
+pub use encoder::encode;
+pub use value::PackStreamValue;

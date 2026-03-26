@@ -42,10 +42,10 @@ impl OidcConfig {
             jwks_url: required_env("TESSERA_OIDC_JWKS_URL")?,
             group_claim: optional_env("TESSERA_OIDC_GROUP_CLAIM")
                 .unwrap_or_else(|| "groups".to_owned()),
-            group_mapping: optional_env("TESSERA_OIDC_GROUP_MAPPING").map_or_else(
-                HashMap::new,
-                |s| crate::providers::group_mapping::parse_group_mapping(&s),
-            ),
+            group_mapping: optional_env("TESSERA_OIDC_GROUP_MAPPING")
+                .map_or_else(HashMap::new, |s| {
+                    crate::providers::group_mapping::parse_group_mapping(&s)
+                }),
         })
     }
 }
@@ -132,9 +132,7 @@ impl<F: JwksFetcher> OidcAuthProvider<F> {
 
     /// Map `jsonwebtoken::jwk::KeyAlgorithm` to `jsonwebtoken::Algorithm`.
     /// Rejects symmetric algorithms (HS256, etc.) and `none`.
-    const fn key_algorithm_to_algorithm(
-        ka: jsonwebtoken::jwk::KeyAlgorithm,
-    ) -> Option<Algorithm> {
+    const fn key_algorithm_to_algorithm(ka: jsonwebtoken::jwk::KeyAlgorithm) -> Option<Algorithm> {
         match ka {
             jsonwebtoken::jwk::KeyAlgorithm::RS256 => Some(Algorithm::RS256),
             jsonwebtoken::jwk::KeyAlgorithm::RS384 => Some(Algorithm::RS384),
@@ -167,9 +165,8 @@ impl<F: JwksFetcher + 'static> ExternalAuthProvider for OidcAuthProvider<F> {
         &self,
         username: &str,
         credential: &str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ExternalUserInfo>> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExternalUserInfo>> + Send + '_>>
+    {
         let username = username.to_owned();
         let credential = credential.to_owned();
         Box::pin(self.do_authenticate(username, credential))
@@ -182,12 +179,16 @@ impl<F: JwksFetcher + 'static> ExternalAuthProvider for OidcAuthProvider<F> {
 
 impl<F: JwksFetcher> OidcAuthProvider<F> {
     #[allow(clippy::significant_drop_tightening)]
-    async fn do_authenticate(&self, username: String, credential: String) -> Result<ExternalUserInfo> {
+    async fn do_authenticate(
+        &self,
+        username: String,
+        credential: String,
+    ) -> Result<ExternalUserInfo> {
         let username = &username;
         let credential = &credential;
         // Step 1: Decode header to get kid (unverified)
-        let header = jsonwebtoken::decode_header(credential)
-            .map_err(|_| AuthError::InvalidCredentials)?;
+        let header =
+            jsonwebtoken::decode_header(credential).map_err(|_| AuthError::InvalidCredentials)?;
 
         let kid = header.kid.ok_or(AuthError::InvalidCredentials)?;
 
@@ -276,8 +277,7 @@ mod tests {
         let rsa_private = include_str!("../../tests/fixtures/test_rsa_private.pem");
         let rsa_public = include_str!("../../tests/fixtures/test_rsa_public.pem");
 
-        let encoding_key = EncodingKey::from_rsa_pem(rsa_private.as_bytes())
-            .expect("encoding key"); // OK: test
+        let encoding_key = EncodingKey::from_rsa_pem(rsa_private.as_bytes()).expect("encoding key"); // OK: test
 
         let kid = "test-kid-001".to_owned();
 
@@ -354,11 +354,7 @@ mod tests {
         }
     }
 
-    fn sign_jwt(
-        encoding_key: &EncodingKey,
-        kid: &str,
-        claims: &serde_json::Value,
-    ) -> String {
+    fn sign_jwt(encoding_key: &EncodingKey, kid: &str, claims: &serde_json::Value) -> String {
         let mut header = Header::new(Algorithm::RS256);
         header.kid = Some(kid.to_owned());
         jsonwebtoken::encode(&header, claims, encoding_key).expect("sign JWT") // OK: test
@@ -431,15 +427,10 @@ mod tests {
         let claims = valid_claims();
         let jwt = sign_jwt(&encoding_key, &kid, &claims);
 
-        let fetcher = MockJwksFetcher {
-            document: jwks,
-        };
+        let fetcher = MockJwksFetcher { document: jwks };
         let provider = OidcAuthProvider::with_fetcher(test_config(), fetcher);
 
-        let info = provider
-            .authenticate("alice", &jwt)
-            .await
-            .expect("auth ok"); // OK: test
+        let info = provider.authenticate("alice", &jwt).await.expect("auth ok"); // OK: test
         assert_eq!(info.username, "alice");
         assert_eq!(info.email.as_deref(), Some("alice@example.com"));
         assert_eq!(info.display_name.as_deref(), Some("Alice Liddell"));
@@ -457,7 +448,10 @@ mod tests {
         let fetcher = MockJwksFetcher { document: jwks };
         let provider = OidcAuthProvider::with_fetcher(test_config(), fetcher);
 
-        let err = provider.authenticate("alice", &jwt).await.expect_err("fail"); // OK: test
+        let err = provider
+            .authenticate("alice", &jwt)
+            .await
+            .expect_err("fail"); // OK: test
         assert!(matches!(err, AuthError::InvalidCredentials));
     }
 
@@ -471,7 +465,10 @@ mod tests {
         let fetcher = MockJwksFetcher { document: jwks };
         let provider = OidcAuthProvider::with_fetcher(test_config(), fetcher);
 
-        let err = provider.authenticate("alice", &jwt).await.expect_err("fail"); // OK: test
+        let err = provider
+            .authenticate("alice", &jwt)
+            .await
+            .expect_err("fail"); // OK: test
         assert!(matches!(err, AuthError::InvalidCredentials));
     }
 
@@ -485,7 +482,10 @@ mod tests {
         let fetcher = MockJwksFetcher { document: jwks };
         let provider = OidcAuthProvider::with_fetcher(test_config(), fetcher);
 
-        let err = provider.authenticate("alice", &jwt).await.expect_err("fail"); // OK: test
+        let err = provider
+            .authenticate("alice", &jwt)
+            .await
+            .expect_err("fail"); // OK: test
         assert!(matches!(err, AuthError::InvalidCredentials));
     }
 
@@ -534,10 +534,7 @@ mod tests {
         assert_eq!(info.username, "alice");
 
         // Should have fetched twice (initial miss + refresh)
-        assert_eq!(
-            provider.fetcher.call_count.load(Ordering::SeqCst),
-            2
-        );
+        assert_eq!(provider.fetcher.call_count.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

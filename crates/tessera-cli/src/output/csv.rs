@@ -9,11 +9,7 @@ use super::value_to_display;
 /// When `include_headers` is `true`, the first line contains column names.
 /// The `csv` crate handles quoting of values containing commas, quotes, or newlines.
 #[must_use]
-pub fn render(
-    columns: &[String],
-    rows: &[Vec<PackStreamValue>],
-    include_headers: bool,
-) -> String {
+pub fn render(columns: &[String], rows: &[Vec<PackStreamValue>], include_headers: bool) -> String {
     let mut wtr = csv::Writer::from_writer(Vec::new());
 
     if include_headers {
@@ -47,9 +43,7 @@ mod tests {
     #[test]
     fn value_with_comma_is_quoted() {
         let cols = vec!["city".to_owned()];
-        let rows = vec![vec![PackStreamValue::String(
-            "Tallinn, Estonia".to_owned(),
-        )]];
+        let rows = vec![vec![PackStreamValue::String("Tallinn, Estonia".to_owned())]];
         let out = render(&cols, &rows, true);
         let data_line = out.lines().nth(1).expect("has data"); // OK: test
         assert!(data_line.contains('"'));
@@ -99,7 +93,10 @@ mod tests {
     #[test]
     fn bool_and_float_render() {
         let cols = vec!["a".to_owned(), "b".to_owned()];
-        let rows = vec![vec![PackStreamValue::Bool(true), PackStreamValue::Float(3.15)]];
+        let rows = vec![vec![
+            PackStreamValue::Bool(true),
+            PackStreamValue::Float(3.15),
+        ]];
         let out = render(&cols, &rows, false);
         let line = out.trim();
         assert_eq!(line, "true,3.15");

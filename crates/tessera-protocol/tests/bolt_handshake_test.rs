@@ -3,8 +3,8 @@
 //! Integration tests for Bolt protocol handshake — version negotiation.
 
 use tessera_protocol::{
-    encode_version_response, negotiate_version, parse_version_proposal, BoltVersion, BOLT_MAGIC,
-    SUPPORTED_VERSION,
+    BOLT_MAGIC, BoltVersion, SUPPORTED_VERSION, encode_version_response, negotiate_version,
+    parse_version_proposal,
 };
 
 // ── parse_version_proposal ────────────────────────────────────────────────────

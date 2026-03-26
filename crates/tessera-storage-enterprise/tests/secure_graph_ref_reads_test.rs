@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use tessera_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
-use tessera_graph::{props, Graph, GraphAccess};
+use tessera_graph::{Graph, GraphAccess, props};
 use tessera_storage_enterprise::lbac::SecureGraphRef;
 
 fn comps(names: &[&str]) -> BTreeSet<String> {
@@ -224,7 +224,10 @@ fn ref_add_node_returns_error() {
     let g = Graph::new();
     let mut sg = SecureGraphRef::new(&g, clearance(99, &[]));
     let result = sg.add_node("X", props! {});
-    assert!(result.is_err(), "add_node on SecureGraphRef must return Err");
+    assert!(
+        result.is_err(),
+        "add_node on SecureGraphRef must return Err"
+    );
     let err_msg = result.unwrap_err().to_string();
     assert!(
         err_msg.contains("read-only"),

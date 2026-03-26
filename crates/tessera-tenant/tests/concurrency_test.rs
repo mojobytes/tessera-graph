@@ -38,11 +38,7 @@ fn concurrent_get_or_load_same_address_single_instance() {
     let arcs: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
     // Write a node via the first arc.
-    arcs[0]
-        .write()
-        .unwrap()
-        .add_node("X", props! {})
-        .unwrap();
+    arcs[0].write().unwrap().add_node("X", props! {}).unwrap();
 
     // All other arcs must see the same node (they share the same Arc).
     for arc in &arcs[1..] {
@@ -77,15 +73,15 @@ fn concurrent_create_database_only_one_succeeds() {
     let successes = results.iter().filter(|r| r.is_ok()).count();
     let already_exists = results
         .iter()
-        .filter(|r| {
-            matches!(r, Err(TenantError::DatabaseAlreadyExists { .. }))
-        })
+        .filter(|r| matches!(r, Err(TenantError::DatabaseAlreadyExists { .. })))
         .count();
 
-    assert_eq!(successes, 1, "expected exactly one success, got {successes}");
     assert_eq!(
-        already_exists,
-        7,
+        successes, 1,
+        "expected exactly one success, got {successes}"
+    );
+    assert_eq!(
+        already_exists, 7,
         "expected 7 DatabaseAlreadyExists, got {already_exists}"
     );
 }

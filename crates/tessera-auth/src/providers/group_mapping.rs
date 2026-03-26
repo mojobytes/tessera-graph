@@ -87,10 +87,7 @@ mod tests {
     #[test]
     fn map_groups_returns_multiple_roles() {
         let mapping = default_mapping();
-        let mut roles = map_groups(
-            &["admin".to_owned(), "viewers".to_owned()],
-            &mapping,
-        );
+        let mut roles = map_groups(&["admin".to_owned(), "viewers".to_owned()], &mapping);
         roles.sort_by_key(|r| r.raw());
         assert_eq!(
             roles,
@@ -141,10 +138,7 @@ mod tests {
         let raw = "admin=admin,developers=readwrite,viewers=readonly";
         let map = parse_group_mapping(raw);
         assert_eq!(map.get("admin").map(String::as_str), Some("admin"));
-        assert_eq!(
-            map.get("developers").map(String::as_str),
-            Some("readwrite")
-        );
+        assert_eq!(map.get("developers").map(String::as_str), Some("readwrite"));
         assert_eq!(map.get("viewers").map(String::as_str), Some("readonly"));
     }
 

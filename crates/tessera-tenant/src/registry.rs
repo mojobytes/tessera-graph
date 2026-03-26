@@ -6,8 +6,8 @@ use std::sync::{Arc, RwLock};
 
 use tessera_graph::{Graph, GraphConfig};
 
-use crate::{DatabaseAddress, DatabaseName, TenantError, TenantId};
 use crate::error::Result;
+use crate::{DatabaseAddress, DatabaseName, TenantError, TenantId};
 
 /// Registry that maps [`DatabaseAddress`] values to live [`Graph`] instances.
 ///
@@ -239,7 +239,9 @@ impl TenantRegistry {
     ///
     /// Returns [`TenantError::LockPoisoned`] if the registry-level lock is
     /// poisoned (cannot enumerate graphs at all).
-    pub fn flush_all(&self) -> std::result::Result<Vec<(DatabaseAddress, tessera_graph::Error)>, TenantError> {
+    pub fn flush_all(
+        &self,
+    ) -> std::result::Result<Vec<(DatabaseAddress, tessera_graph::Error)>, TenantError> {
         let pairs: Vec<(DatabaseAddress, Arc<RwLock<Graph>>)> = {
             let guard = self
                 .graphs

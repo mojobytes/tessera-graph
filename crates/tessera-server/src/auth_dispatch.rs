@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tessera_auth::error::AuthError;
-use tessera_auth::providers::group_mapping::map_groups;
 use tessera_auth::providers::ExternalAuthProvider;
+use tessera_auth::providers::group_mapping::map_groups;
 use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::UserId;
 
@@ -92,7 +92,11 @@ mod tests {
             username: &str,
             _cred: &str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = tessera_auth::Result<ExternalUserInfo>> + Send + '_>,
+            Box<
+                dyn std::future::Future<Output = tessera_auth::Result<ExternalUserInfo>>
+                    + Send
+                    + '_,
+            >,
         > {
             let username = username.to_owned();
             Box::pin(async move {
@@ -117,7 +121,11 @@ mod tests {
             _username: &str,
             _cred: &str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = tessera_auth::Result<ExternalUserInfo>> + Send + '_>,
+            Box<
+                dyn std::future::Future<Output = tessera_auth::Result<ExternalUserInfo>>
+                    + Send
+                    + '_,
+            >,
         > {
             Box::pin(async { Err(AuthError::InvalidCredentials) })
         }
@@ -134,11 +142,13 @@ mod tests {
             _username: &str,
             _cred: &str,
         ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = tessera_auth::Result<ExternalUserInfo>> + Send + '_>,
+            Box<
+                dyn std::future::Future<Output = tessera_auth::Result<ExternalUserInfo>>
+                    + Send
+                    + '_,
+            >,
         > {
-            Box::pin(async {
-                Err(AuthError::ProviderUnavailable("timeout".to_owned()))
-            })
+            Box::pin(async { Err(AuthError::ProviderUnavailable("timeout".to_owned())) })
         }
         fn provider_name(&self) -> &'static str {
             "mock-unavailable"
@@ -175,7 +185,10 @@ mod tests {
                 .expect("auth ok"); // OK: test
 
         let roles = sessions.session_roles(&token).expect("roles"); // OK: test
-        assert!(!roles.is_empty(), "external user roles must be stored in session");
+        assert!(
+            !roles.is_empty(),
+            "external user roles must be stored in session"
+        );
     }
 
     #[tokio::test]

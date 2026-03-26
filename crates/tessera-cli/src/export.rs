@@ -95,7 +95,10 @@ mod tests {
     #[test]
     fn gql_export_null_properties_omitted() {
         let cols = vec!["name".to_owned(), "age".to_owned()];
-        let rows = vec![vec![PackStreamValue::String("Alice".to_owned()), PackStreamValue::Null]];
+        let rows = vec![vec![
+            PackStreamValue::String("Alice".to_owned()),
+            PackStreamValue::Null,
+        ]];
         let out = format_as_gql(&cols, &rows);
         assert!(out.contains("name: 'Alice'"));
         assert!(!out.contains("age"));

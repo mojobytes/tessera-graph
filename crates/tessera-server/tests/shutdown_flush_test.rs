@@ -42,8 +42,7 @@ fn flush_all_on_shutdown_persists_data() {
         count
     };
     assert_eq!(
-        node_count,
-        1,
+        node_count, 1,
         "expected 1 node after reopen, flush_all_on_shutdown did not persist data"
     );
 }

@@ -59,7 +59,10 @@ fn import_gql_lbac_enforced_node_invisible_below_clearance() {
     let id = g.nodes_by_label("Secret")[0];
     let raw = g.node(id).unwrap();
     let label = SecurityPolicy::extract_label(raw.properties());
-    assert_eq!(label.level, 5, "node imported at clearance 5 must be stamped at level 5");
+    assert_eq!(
+        label.level, 5,
+        "node imported at clearance 5 must be stamped at level 5"
+    );
 }
 
 // ── import_gql edges via SecureGraph (Item 6) ───────────────────────────────
@@ -81,7 +84,11 @@ fn import_gql_edges_via_secure_graph() {
     assert_eq!(g.edge_count(), 1);
     // Edge is invisible to a lower clearance.
     let sg_low = SecureGraphRef::new(&g, clearance(0));
-    assert_eq!(sg_low.edge_count(), 0, "edge at level 3 invisible at level 0");
+    assert_eq!(
+        sg_low.edge_count(),
+        0,
+        "edge at level 3 invisible at level 0"
+    );
     // Edge is visible at the same clearance.
     let sg_ok = SecureGraphRef::new(&g, clearance(3));
     assert_eq!(sg_ok.edge_count(), 1);
@@ -139,7 +146,11 @@ fn import_edges_csv_lbac_enforced() {
     }
     // A level-0 user cannot see the edge (stamped at level 2).
     let sg_low = SecureGraphRef::new(&g, clearance(0));
-    assert_eq!(sg_low.edge_count(), 0, "edge stamped at level 2 must be invisible at level 0");
+    assert_eq!(
+        sg_low.edge_count(),
+        0,
+        "edge stamped at level 2 must be invisible at level 0"
+    );
     // But via raw graph or high-clearance view, the edge exists.
     let sg_high = SecureGraphRef::new(&g, clearance(2));
     assert_eq!(sg_high.edge_count(), 1);
@@ -237,7 +248,10 @@ fn export_nodes_csv_via_secure_graph_ref_filters_by_clearance() {
         "only 1 node visible at clearance 3"
     );
     assert!(csv.contains("Alice"), "Alice should be in the export");
-    assert!(!csv.contains("Bob"), "Bob (clearance 5) should be filtered out");
+    assert!(
+        !csv.contains("Bob"),
+        "Bob (clearance 5) should be filtered out"
+    );
 }
 
 // ── export_edges_csv via SecureGraphRef filters by clearance ─────────────────
@@ -276,7 +290,10 @@ fn export_json_via_secure_graph_ref_filters_by_clearance() {
     let json_str = export_json(&sg_low).unwrap();
     let root: serde_json::Value = serde_json::from_str(&json_str).unwrap();
     let nodes = root["nodes"].as_array().unwrap();
-    assert!(nodes.is_empty(), "no nodes should be visible at clearance 1");
+    assert!(
+        nodes.is_empty(),
+        "no nodes should be visible at clearance 1"
+    );
 }
 
 // ── export_gql via SecureGraphRef filters by clearance ───────────────────────

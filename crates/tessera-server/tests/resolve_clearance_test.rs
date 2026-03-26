@@ -23,10 +23,7 @@ fn resolve_clearance_returns_default_for_valid_session() {
 #[test]
 fn resolve_clearance_returns_custom_clearance_after_set() {
     let (_dir, ctx) = common::test_context();
-    let comps = ["FINANCE", "HR"]
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    let comps = ["FINANCE", "HR"].iter().map(|s| (*s).to_string()).collect();
     let custom = Clearance::new(5, comps);
     ctx.user_store()
         .set_clearance("admin", custom.clone())

@@ -1,7 +1,7 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
 use tessera_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
-use tessera_graph::{props, Graph};
+use tessera_graph::{Graph, props};
 use tessera_storage_enterprise::lbac::filter;
 
 fn clearance(level: u16, comps: &[&str]) -> Clearance {
@@ -41,7 +41,11 @@ fn strip_node_removes_security_keys() {
     let id = g.add_node("P", p).unwrap();
     let node = g.node(id).unwrap();
     let stripped = filter::strip_node(node);
-    assert!(!stripped.properties().contains_key(SecurityPolicy::LEVEL_KEY));
+    assert!(
+        !stripped
+            .properties()
+            .contains_key(SecurityPolicy::LEVEL_KEY)
+    );
     assert!(
         !stripped
             .properties()
@@ -65,7 +69,11 @@ fn strip_edge_removes_security_keys() {
     let eid = g.add_edge("E", src, tgt, ep).unwrap();
     let edge = g.edge(eid).unwrap();
     let stripped = filter::strip_edge(edge);
-    assert!(!stripped.properties().contains_key(SecurityPolicy::LEVEL_KEY));
+    assert!(
+        !stripped
+            .properties()
+            .contains_key(SecurityPolicy::LEVEL_KEY)
+    );
     assert!(
         !stripped
             .properties()

@@ -87,7 +87,9 @@ fn strip_security_properties_removes_reserved_keys() {
 
 #[test]
 fn is_security_property_detects_reserved_keys() {
-    assert!(SecurityPolicy::is_security_property(SecurityPolicy::LEVEL_KEY));
+    assert!(SecurityPolicy::is_security_property(
+        SecurityPolicy::LEVEL_KEY
+    ));
     assert!(SecurityPolicy::is_security_property(
         SecurityPolicy::COMPARTMENTS_KEY
     ));

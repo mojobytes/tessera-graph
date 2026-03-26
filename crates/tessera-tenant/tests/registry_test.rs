@@ -104,8 +104,12 @@ fn list_tenants_returns_tenant_dirs() {
     let tmp = tempdir().unwrap();
     let registry = TenantRegistry::new(tmp.path(), test_config());
 
-    registry.create_database(&test_addr("acme", "main")).unwrap();
-    registry.create_database(&test_addr("globex", "main")).unwrap();
+    registry
+        .create_database(&test_addr("acme", "main"))
+        .unwrap();
+    registry
+        .create_database(&test_addr("globex", "main"))
+        .unwrap();
 
     let mut tenants: Vec<String> = registry
         .list_tenants()
@@ -169,10 +173,7 @@ fn flush_persists_data() {
     let addr = test_addr("acme", "main");
 
     let arc = registry.get_or_load(&addr).unwrap();
-    arc.write()
-        .unwrap()
-        .add_node("Thing", props! {})
-        .unwrap();
+    arc.write().unwrap().add_node("Thing", props! {}).unwrap();
 
     registry.flush(&addr).unwrap();
 
@@ -242,10 +243,7 @@ fn unload_flushes_and_removes() {
     let addr = test_addr("acme", "main");
 
     let arc = registry.get_or_load(&addr).unwrap();
-    arc.write()
-        .unwrap()
-        .add_node("Node", props! {})
-        .unwrap();
+    arc.write().unwrap().add_node("Node", props! {}).unwrap();
 
     registry.unload(&addr).unwrap();
 

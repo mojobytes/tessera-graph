@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 use tessera_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
-use tessera_graph::{props, Graph, GraphAccess};
+use tessera_graph::{Graph, GraphAccess, props};
 use tessera_storage_enterprise::lbac::SecureGraph;
 
 fn build_graph(node_count: usize) -> (Graph, Vec<tessera_graph::NodeId>) {
@@ -40,7 +40,11 @@ fn node_read_throughput_regression_guard() {
     let elapsed_us = elapsed.as_micros() as u64;
     let ops_per_sec = iterations * 1_000_000 / u64::max(elapsed_us, 1);
 
-    let min_ops = if cfg!(debug_assertions) { 50_000 } else { 500_000 };
+    let min_ops = if cfg!(debug_assertions) {
+        50_000
+    } else {
+        500_000
+    };
 
     assert!(
         ops_per_sec >= min_ops,
@@ -74,10 +78,13 @@ fn node_ids_throughput_regression_guard() {
 
 #[test]
 fn dominance_check_throughput_regression_guard() {
-    let comps_label: BTreeSet<String> = ["FINANCE", "HR"].iter().map(|s| (*s).to_string()).collect();
+    let comps_label: BTreeSet<String> =
+        ["FINANCE", "HR"].iter().map(|s| (*s).to_string()).collect();
     let label = SecurityLabel::new(3, comps_label);
-    let comps_clearance: BTreeSet<String> =
-        ["FINANCE", "HR", "LEGAL"].iter().map(|s| (*s).to_string()).collect();
+    let comps_clearance: BTreeSet<String> = ["FINANCE", "HR", "LEGAL"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     let clearance = Clearance::new(5, comps_clearance);
 
     let iterations = 1_000_000_u64;

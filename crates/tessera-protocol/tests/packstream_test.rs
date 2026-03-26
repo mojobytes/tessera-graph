@@ -2,8 +2,8 @@
 
 use std::f64::consts::PI;
 
-use tessera_protocol::packstream::{decode, encode, PackStreamValue};
 use tessera_protocol::ProtocolError;
+use tessera_protocol::packstream::{PackStreamValue, decode, encode};
 
 // ---------------------------------------------------------------------------
 // Round-trip helper
@@ -13,7 +13,11 @@ fn roundtrip(value: &PackStreamValue) {
     let mut buf = Vec::new();
     encode(value, &mut buf).unwrap();
     let (decoded, consumed) = decode(&buf).unwrap();
-    assert_eq!(consumed, buf.len(), "round-trip did not consume entire buffer for {value:?}");
+    assert_eq!(
+        consumed,
+        buf.len(),
+        "round-trip did not consume entire buffer for {value:?}"
+    );
     assert_eq!(&decoded, value, "round-trip value mismatch for {value:?}");
 }
 
@@ -287,7 +291,11 @@ fn encode_list_empty() {
 #[test]
 fn encode_list_one_null() {
     let mut buf = Vec::new();
-    encode(&PackStreamValue::List(vec![PackStreamValue::Null]), &mut buf).unwrap();
+    encode(
+        &PackStreamValue::List(vec![PackStreamValue::Null]),
+        &mut buf,
+    )
+    .unwrap();
     assert_eq!(buf, [0x91, 0xC0]);
 }
 
@@ -706,7 +714,10 @@ fn roundtrip_struct_empty() {
 fn roundtrip_struct_complex() {
     roundtrip(&PackStreamValue::Struct {
         tag: 0x71,
-        fields: vec![PackStreamValue::Dict(vec![("x".to_owned(), PackStreamValue::Int(1))])],
+        fields: vec![PackStreamValue::Dict(vec![(
+            "x".to_owned(),
+            PackStreamValue::Int(1),
+        )])],
     });
 }
 

@@ -58,7 +58,10 @@ pub struct ImportJsonSummary {
 /// [`ImportError::NodeNotFoundForEdge`] — indistinguishable from a truly
 /// absent node. Callers must import nodes and edges at the same clearance
 /// level to avoid this.
-pub fn import_json<G: GraphAccess>(graph: &mut G, json_text: &str) -> ImportResult<ImportJsonSummary> {
+pub fn import_json<G: GraphAccess>(
+    graph: &mut G,
+    json_text: &str,
+) -> ImportResult<ImportJsonSummary> {
     let root: serde_json::Value =
         serde_json::from_str(json_text).map_err(|e| ImportError::JsonInvalid(e.to_string()))?;
 

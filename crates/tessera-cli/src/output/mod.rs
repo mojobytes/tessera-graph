@@ -207,17 +207,20 @@ mod tests {
 
     #[test]
     fn value_to_display_list() {
-        let v = PackStreamValue::List(vec![
-            PackStreamValue::Int(1),
-            PackStreamValue::Int(2),
-        ]);
+        let v = PackStreamValue::List(vec![PackStreamValue::Int(1), PackStreamValue::Int(2)]);
         assert_eq!(value_to_display(&v), "[1, 2]");
     }
 
     #[test]
     fn value_to_json_converts_correctly() {
-        assert_eq!(value_to_json(&PackStreamValue::Null), serde_json::Value::Null);
-        assert_eq!(value_to_json(&PackStreamValue::Int(42)), serde_json::json!(42));
+        assert_eq!(
+            value_to_json(&PackStreamValue::Null),
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            value_to_json(&PackStreamValue::Int(42)),
+            serde_json::json!(42)
+        );
         assert_eq!(
             value_to_json(&PackStreamValue::String("hello".to_owned())),
             serde_json::json!("hello")

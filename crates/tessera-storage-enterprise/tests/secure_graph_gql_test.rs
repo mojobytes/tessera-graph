@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 use tessera_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
-use tessera_graph::{gql, props, Graph};
+use tessera_graph::{Graph, gql, props};
 use tessera_storage_enterprise::gql::execute_mut;
 use tessera_storage_enterprise::lbac::SecureGraph;
 
@@ -60,7 +60,11 @@ fn delete_through_secure_graph_denied_when_level_insufficient() {
         "MATCH (n:Person {name: 'Bob'}) DETACH DELETE n",
     );
     assert!(result.is_err(), "DELETE with unbound variable should fail");
-    assert_eq!(g.node_count(), 1, "node must still exist — it was invisible to MATCH");
+    assert_eq!(
+        g.node_count(),
+        1,
+        "node must still exist — it was invisible to MATCH"
+    );
 }
 
 #[test]

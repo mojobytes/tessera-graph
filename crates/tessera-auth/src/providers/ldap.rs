@@ -148,9 +148,8 @@ impl<C: LdapConnection + 'static> ExternalAuthProvider for LdapAuthProvider<C> {
         &self,
         username: &str,
         credential: &str,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ExternalUserInfo>> + Send + '_>,
-    > {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<ExternalUserInfo>> + Send + '_>>
+    {
         let username = username.to_owned();
         let credential = Zeroizing::new(credential.to_owned());
         Box::pin(self.do_authenticate(username, credential))
@@ -162,8 +161,15 @@ impl<C: LdapConnection + 'static> ExternalAuthProvider for LdapAuthProvider<C> {
 }
 
 impl<C: LdapConnection> LdapAuthProvider<C> {
-    #[allow(clippy::significant_drop_tightening, clippy::literal_string_with_formatting_args)]
-    async fn do_authenticate(&self, username: String, credential: Zeroizing<String>) -> Result<ExternalUserInfo> {
+    #[allow(
+        clippy::significant_drop_tightening,
+        clippy::literal_string_with_formatting_args
+    )]
+    async fn do_authenticate(
+        &self,
+        username: String,
+        credential: Zeroizing<String>,
+    ) -> Result<ExternalUserInfo> {
         let username = &username;
         let credential = &credential;
         let escaped_username = escape_ldap_filter_value(username);
@@ -193,7 +199,10 @@ impl<C: LdapConnection> LdapAuthProvider<C> {
                 AuthError::InvalidCredentials
             })?;
 
-        let entry = entries.into_iter().next().ok_or(AuthError::InvalidCredentials)?;
+        let entry = entries
+            .into_iter()
+            .next()
+            .ok_or(AuthError::InvalidCredentials)?;
 
         // Step 3: Re-bind as user to verify password
         conn.user_bind(&entry.dn, credential)
@@ -207,15 +216,9 @@ impl<C: LdapConnection> LdapAuthProvider<C> {
             .cloned()
             .unwrap_or_default();
 
-        let email = entry
-            .attrs
-            .get("mail")
-            .and_then(|v| v.first().cloned());
+        let email = entry.attrs.get("mail").and_then(|v| v.first().cloned());
 
-        let display_name = entry
-            .attrs
-            .get("cn")
-            .and_then(|v| v.first().cloned());
+        let display_name = entry.attrs.get("cn").and_then(|v| v.first().cloned());
 
         Ok(ExternalUserInfo {
             username: username.to_owned(),
@@ -374,9 +377,10 @@ mod tests {
         assert_eq!(info.username, "alice");
         assert_eq!(info.email.as_deref(), Some("alice@example.com"));
         assert_eq!(info.display_name.as_deref(), Some("Alice Liddell"));
-        assert!(info
-            .groups
-            .contains(&"cn=developers,dc=example,dc=com".to_owned()));
+        assert!(
+            info.groups
+                .contains(&"cn=developers,dc=example,dc=com".to_owned())
+        );
     }
 
     #[tokio::test]
@@ -387,7 +391,10 @@ mod tests {
             user_bind_ok: false,
         };
         let provider = LdapAuthProvider::with_connection(test_config(), mock);
-        let err = provider.authenticate("alice", "pw").await.expect_err("fail"); // OK: test
+        let err = provider
+            .authenticate("alice", "pw")
+            .await
+            .expect_err("fail"); // OK: test
         assert!(matches!(err, AuthError::InvalidCredentials));
     }
 
@@ -470,7 +477,10 @@ mod tests {
             user_bind_ok: false,
         };
         let provider = LdapAuthProvider::with_connection(test_config(), mock);
-        let err = provider.authenticate("alice", "pw").await.expect_err("fail"); // OK: test
+        let err = provider
+            .authenticate("alice", "pw")
+            .await
+            .expect_err("fail"); // OK: test
         assert!(matches!(err, AuthError::InvalidCredentials));
     }
 

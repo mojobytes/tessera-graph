@@ -20,7 +20,10 @@ impl SecurityLabel {
     /// Create a new label with the given level and compartments.
     #[must_use]
     pub const fn new(level: u16, compartments: BTreeSet<String>) -> Self {
-        Self { level, compartments }
+        Self {
+            level,
+            compartments,
+        }
     }
 }
 
@@ -40,7 +43,10 @@ impl Clearance {
     /// Create a new clearance with the given level and compartments.
     #[must_use]
     pub const fn new(level: u16, compartments: BTreeSet<String>) -> Self {
-        Self { level, compartments }
+        Self {
+            level,
+            compartments,
+        }
     }
 
     /// Returns `true` iff this clearance dominates the given label.
@@ -115,7 +121,10 @@ impl SecurityPolicy {
             })
             .unwrap_or_default();
 
-        SecurityLabel { level, compartments }
+        SecurityLabel {
+            level,
+            compartments,
+        }
     }
 
     /// Removes all reserved security properties from `props`.

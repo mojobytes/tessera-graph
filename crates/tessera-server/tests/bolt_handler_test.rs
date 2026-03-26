@@ -49,10 +49,7 @@ fn hello_with_db(username: &str, password: &str, db: &str) -> BoltRequest {
                 "credentials".to_owned(),
                 PackStreamValue::String(password.to_owned()),
             ),
-            (
-                "db".to_owned(),
-                PackStreamValue::String(db.to_owned()),
-            ),
+            ("db".to_owned(), PackStreamValue::String(db.to_owned())),
         ],
     }
 }
@@ -169,8 +166,11 @@ async fn bolt_run_pull_returns_records() {
         graph
             .add_node(
                 "Person",
-                std::iter::once(("name".to_owned(), tessera_graph::Property::String("Alice".to_owned())))
-                    .collect(),
+                std::iter::once((
+                    "name".to_owned(),
+                    tessera_graph::Property::String("Alice".to_owned()),
+                ))
+                .collect(),
             )
             .unwrap();
     }
@@ -179,7 +179,10 @@ async fn bolt_run_pull_returns_records() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
     let run_resp = bolt_recv(&mut reader).await;
@@ -217,10 +220,16 @@ async fn bolt_run_pull_empty_result() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &run_query("MATCH (n:NonExistent) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &pull()).await;
 
@@ -241,7 +250,10 @@ async fn bolt_run_mutation_creates_node() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(
         &mut writer,
@@ -290,10 +302,20 @@ async fn bolt_run_pull_mutation_is_flushed() {
         let (mut writer, mut reader, shutdown_tx) = spawn_bolt_handler(ctx).await;
 
         bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-        assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+        assert!(matches!(
+            bolt_recv(&mut reader).await,
+            BoltResponse::Success { .. }
+        ));
 
-        bolt_send(&mut writer, &run_query("CREATE (n:Durable {name: 'persisted'})")).await;
-        assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+        bolt_send(
+            &mut writer,
+            &run_query("CREATE (n:Durable {name: 'persisted'})"),
+        )
+        .await;
+        assert!(matches!(
+            bolt_recv(&mut reader).await,
+            BoltResponse::Success { .. }
+        ));
         bolt_send(&mut writer, &pull()).await;
         loop {
             if matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }) {
@@ -324,7 +346,11 @@ fn ctx_with_clearance_and_node(
     compartments: &[&str],
     node_level: u16,
     node_compartments: &[&str],
-) -> (tempfile::TempDir, Arc<tessera_server::context::ServerContext>, Arc<TenantRegistry>) {
+) -> (
+    tempfile::TempDir,
+    Arc<tessera_server::context::ServerContext>,
+    Arc<TenantRegistry>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let registry = Arc::new(TenantRegistry::new(dir.path(), GraphConfig::new()));
 
@@ -356,9 +382,7 @@ fn ctx_with_clearance_and_node(
             .map(|s| (*s).to_string())
             .collect::<BTreeSet<_>>(),
     );
-    ctx.user_store()
-        .set_clearance("admin", clearance)
-        .unwrap();
+    ctx.user_store().set_clearance("admin", clearance).unwrap();
     (dir, ctx, registry)
 }
 
@@ -369,10 +393,16 @@ async fn bolt_lbac_hides_classified_node() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &run_query("MATCH (n:Thing) RETURN n.name")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &pull()).await;
     let mut record_count = 0;
@@ -394,10 +424,16 @@ async fn bolt_lbac_shows_node_to_cleared_user() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &run_query("MATCH (n:Thing) RETURN n.name")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &pull()).await;
     let mut record_count = 0;
@@ -421,7 +457,10 @@ async fn bolt_after_failure_returns_ignored() {
 
     // Authenticate first.
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Trigger a failure with an invalid query.
     bolt_send(&mut writer, &run_query("THIS IS NOT VALID CYPHER!!!")).await;
@@ -446,15 +485,24 @@ async fn bolt_reset_clears_failure() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Trigger failure.
     bolt_send(&mut writer, &run_query("BAD QUERY")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Failure { .. }
+    ));
 
     // RESET must clear the failed flag.
     bolt_send(&mut writer, &BoltRequest::Reset).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Now a valid RUN should succeed.
     bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
@@ -471,7 +519,10 @@ async fn bolt_goodbye_closes_connection() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Send GOODBYE — the handler should close the connection.
     bolt_send(&mut writer, &BoltRequest::Goodbye).await;
@@ -491,7 +542,10 @@ async fn bolt_begin_responds_failure() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
     let resp = bolt_recv(&mut reader).await;
@@ -507,11 +561,17 @@ async fn bolt_after_begin_failure_run_is_ignored() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // BEGIN enters FAILED state
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Failure { .. }
+    ));
 
     // RUN in FAILED state must be IGNORED
     bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
@@ -528,15 +588,24 @@ async fn bolt_after_begin_failure_reset_recovers() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // BEGIN fails
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Failure { .. }
+    ));
 
     // RESET recovers
     bolt_send(&mut writer, &BoltRequest::Reset).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // RUN should work again
     bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
@@ -553,7 +622,10 @@ async fn bolt_commit_without_begin_returns_ignored() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &BoltRequest::Commit).await;
     let resp = bolt_recv(&mut reader).await;
@@ -569,7 +641,10 @@ async fn bolt_rollback_without_begin_returns_ignored() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &BoltRequest::Rollback).await;
     let resp = bolt_recv(&mut reader).await;
@@ -593,7 +668,10 @@ async fn bolt_rate_limit_locks_after_max_failures() {
         let resp = bolt_recv(&mut reader).await;
         assert!(matches!(resp, BoltResponse::Failure { .. }));
         bolt_send(&mut writer, &BoltRequest::Reset).await;
-        assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+        assert!(matches!(
+            bolt_recv(&mut reader).await,
+            BoltResponse::Success { .. }
+        ));
     }
 
     // Third attempt with correct password — account is locked.
@@ -613,13 +691,22 @@ async fn bolt_rate_limit_success_resets_counter() {
 
     // One failure.
     bolt_send(&mut writer, &hello_request("admin", "wrong")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Failure { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Failure { .. }
+    ));
     bolt_send(&mut writer, &BoltRequest::Reset).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Successful login resets the counter.
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 }
 
 // ── O1: Unique connection_id ──────────────────────────────────────────────────
@@ -654,12 +741,18 @@ async fn bolt_run_with_params_returns_failure() {
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Send RUN with non-empty params.
     let req = BoltRequest::Run {
         query: "MATCH (n) WHERE n.name = $name RETURN n".to_owned(),
-        params: vec![("name".to_owned(), PackStreamValue::String("Alice".to_owned()))],
+        params: vec![(
+            "name".to_owned(),
+            PackStreamValue::String("Alice".to_owned()),
+        )],
         extra: vec![],
     };
     bolt_send(&mut writer, &req).await;
@@ -678,7 +771,10 @@ async fn bolt_shutdown_signal_closes_handler() {
     let (mut writer, mut reader, shutdown_tx) = spawn_bolt_handler(ctx).await;
 
     bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Signal shutdown.
     let _ = shutdown_tx.send(true);

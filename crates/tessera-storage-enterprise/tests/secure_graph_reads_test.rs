@@ -38,7 +38,11 @@ fn node_strips_security_properties_from_result() {
     let sg = SecureGraph::new(&mut g, clearance(3, &["FINANCE"]));
     let node = sg.node(id).unwrap();
     assert!(!node.properties().contains_key(SecurityPolicy::LEVEL_KEY));
-    assert!(!node.properties().contains_key(SecurityPolicy::COMPARTMENTS_KEY));
+    assert!(
+        !node
+            .properties()
+            .contains_key(SecurityPolicy::COMPARTMENTS_KEY)
+    );
 }
 
 #[test]
@@ -161,7 +165,11 @@ fn edge_strips_security_properties_from_result() {
     let sg = SecureGraph::new(&mut g, clearance(2, &["FINANCE"]));
     let edge = sg.edge(eid).unwrap();
     assert!(!edge.properties().contains_key(SecurityPolicy::LEVEL_KEY));
-    assert!(!edge.properties().contains_key(SecurityPolicy::COMPARTMENTS_KEY));
+    assert!(
+        !edge
+            .properties()
+            .contains_key(SecurityPolicy::COMPARTMENTS_KEY)
+    );
 }
 
 #[test]

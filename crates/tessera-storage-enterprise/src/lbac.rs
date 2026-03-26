@@ -44,11 +44,7 @@ pub mod filter {
     /// Checks: edge label dominated AND src node label dominated AND tgt node label
     /// dominated. Any missing node or graph error is treated as invisible (fail-safe).
     #[must_use]
-    pub fn edge_visible_for<G: GraphAccess>(
-        graph: &G,
-        clearance: &Clearance,
-        edge: &Edge,
-    ) -> bool {
+    pub fn edge_visible_for<G: GraphAccess>(graph: &G, clearance: &Clearance, edge: &Edge) -> bool {
         if !can_read_props(clearance, edge.properties()) {
             return false;
         }
@@ -481,11 +477,7 @@ impl<G: GraphAccess> GraphAccess for SecureGraphRef<'_, G> {
 
     // --- Mutations — always denied on a read-only wrapper ---
 
-    fn add_node(
-        &mut self,
-        _label: &str,
-        _properties: Properties,
-    ) -> tessera_graph::Result<NodeId> {
+    fn add_node(&mut self, _label: &str, _properties: Properties) -> tessera_graph::Result<NodeId> {
         Err(Error::GqlMutationError(READ_ONLY_ERROR.to_string()))
     }
 

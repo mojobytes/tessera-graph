@@ -235,7 +235,10 @@ where
     Ok(())
 }
 
-async fn run_repl<R, W>(session: &mut Session<R, W>, config: &ConnectionConfig) -> Result<(), CliError>
+async fn run_repl<R, W>(
+    session: &mut Session<R, W>,
+    config: &ConnectionConfig,
+) -> Result<(), CliError>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -263,10 +266,17 @@ where
     println!("Type \\h for help, \\q to quit.\n");
 
     loop {
-        let prompt = repl::format_prompt(&config.username, &config.host, config.port, accumulator.is_pending());
+        let prompt = repl::format_prompt(
+            &config.username,
+            &config.host,
+            config.port,
+            accumulator.is_pending(),
+        );
         let line = match rl.readline(&prompt) {
             Ok(line) => line,
-            Err(rustyline::error::ReadlineError::Interrupted | rustyline::error::ReadlineError::Eof) => {
+            Err(
+                rustyline::error::ReadlineError::Interrupted | rustyline::error::ReadlineError::Eof,
+            ) => {
                 break;
             }
             Err(e) => {
@@ -311,8 +321,18 @@ where
             let start = Instant::now();
             match query::execute_query(session, &completed_query, &language).await {
                 Ok(output) => {
-                    let elapsed = if show_timing { Some(start.elapsed()) } else { None };
-                    match tessera_cli_lib::output::render(format, &output.columns, &output.rows, elapsed, true) {
+                    let elapsed = if show_timing {
+                        Some(start.elapsed())
+                    } else {
+                        None
+                    };
+                    match tessera_cli_lib::output::render(
+                        format,
+                        &output.columns,
+                        &output.rows,
+                        elapsed,
+                        true,
+                    ) {
                         Ok(rendered) => print!("{rendered}"),
                         Err(e) => eprintln!("{e}"),
                     }

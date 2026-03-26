@@ -90,7 +90,10 @@ mod tests {
     #[test]
     fn bool_and_float_render() {
         let cols = vec!["a".to_owned(), "b".to_owned()];
-        let rows = vec![vec![PackStreamValue::Bool(true), PackStreamValue::Float(3.15)]];
+        let rows = vec![vec![
+            PackStreamValue::Bool(true),
+            PackStreamValue::Float(3.15),
+        ]];
         let out = render(&cols, &rows, None);
         assert!(out.contains("true"));
         assert!(out.contains("3.15"));

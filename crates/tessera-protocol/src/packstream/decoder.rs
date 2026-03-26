@@ -207,12 +207,8 @@ fn decode_integer_at(buf: &[u8], marker: u8, start: usize) -> Result<(PackStream
 
         m::INT32 => {
             require_bytes_from(buf, start, 4)?;
-            let value = i32::from_be_bytes([
-                buf[start],
-                buf[start + 1],
-                buf[start + 2],
-                buf[start + 3],
-            ]);
+            let value =
+                i32::from_be_bytes([buf[start], buf[start + 1], buf[start + 2], buf[start + 3]]);
             Ok((PackStreamValue::Int(i64::from(value)), start + 4))
         }
 
@@ -346,10 +342,7 @@ const fn require_bytes(buf: &[u8], needed: usize) -> Result<()> {
 const fn require_bytes_from(buf: &[u8], offset: usize, needed: usize) -> Result<()> {
     let available = buf.len().saturating_sub(offset);
     if available < needed {
-        return Err(ProtocolError::PackStreamUnderflow {
-            needed,
-            available,
-        });
+        return Err(ProtocolError::PackStreamUnderflow { needed, available });
     }
     Ok(())
 }

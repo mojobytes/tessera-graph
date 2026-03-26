@@ -85,25 +85,25 @@ pub fn test_context_with_registry(registry: Arc<TenantRegistry>) -> Arc<ServerCo
 
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
     Arc::new(ServerContext::new(
-        policy,
-        sessions,
-        audit,
-        tls,
-        user_store,
-        metrics,
-        registry,
+        policy, sessions, audit, tls, user_store, metrics, registry,
     ))
 }
 
 /// Create a test `ServerContext` with a custom login policy for rate-limit tests.
 #[allow(dead_code)]
-pub fn test_context_with_rate_limit(max_attempts: u32, lockout_secs: u64) -> (tempfile::TempDir, Arc<ServerContext>) {
+pub fn test_context_with_rate_limit(
+    max_attempts: u32,
+    lockout_secs: u64,
+) -> (tempfile::TempDir, Arc<ServerContext>) {
     let (dir, registry) = test_registry();
     let ctx = test_context_with_registry(registry);
     // Unwrap the Arc to modify the policy — this only works when refcount == 1,
     // which is guaranteed here because we just created it.
     let inner = Arc::try_unwrap(ctx).unwrap_or_else(|_| panic!("refcount must be 1"));
-    (dir, Arc::new(inner.with_login_policy(LoginPolicy::new(max_attempts, lockout_secs))))
+    (
+        dir,
+        Arc::new(inner.with_login_policy(LoginPolicy::new(max_attempts, lockout_secs))),
+    )
 }
 
 /// Spawn a `BoltConnectionHandler` on a duplex stream, perform the client-side
@@ -158,7 +158,11 @@ pub async fn spawn_bolt_handler(
     let mut resp = [0u8; 4];
     client_read.read_exact(&mut resp).await.unwrap();
     // Server responds with [0x00, major, minor, 0x00] = [0x00, 0x04, 0x04, 0x00]
-    assert_eq!(resp, [0x00, 0x04, 0x04, 0x00], "bolt handshake version mismatch");
+    assert_eq!(
+        resp,
+        [0x00, 0x04, 0x04, 0x00],
+        "bolt handshake version mismatch"
+    );
 
     (
         BoltChunkedWriter::new(client_write),
@@ -182,6 +186,10 @@ pub async fn bolt_send(
 pub async fn bolt_recv(
     reader: &mut BoltChunkedReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
 ) -> BoltResponse {
-    let data = reader.read_message().await.unwrap().expect("expected message");
+    let data = reader
+        .read_message()
+        .await
+        .unwrap()
+        .expect("expected message");
     decode_response(&data).unwrap()
 }

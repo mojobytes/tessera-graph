@@ -39,7 +39,10 @@ fn add_node_user_cannot_inject_security_level_directly() {
         .get(SecurityPolicy::LEVEL_KEY)
         .and_then(tessera_graph::Property::as_i64)
         .unwrap_or(0);
-    assert_eq!(stored_level, 5, "level must match caller clearance, not user-injected value");
+    assert_eq!(
+        stored_level, 5,
+        "level must match caller clearance, not user-injected value"
+    );
 }
 
 #[test]
@@ -106,18 +109,28 @@ fn update_node_preserves_existing_security_label() {
     let mut sg = SecureGraph::new(&mut g, clearance(3, &["FINANCE"]));
     let mut node = sg.node(id).unwrap();
     // Try to update with a new name and sneak in a security property
-    node.properties_mut()
-        .insert("name".to_string(), tessera_graph::Property::String("updated".to_string()));
-    node.properties_mut()
-        .insert(SecurityPolicy::LEVEL_KEY.to_string(), tessera_graph::Property::I64(99));
+    node.properties_mut().insert(
+        "name".to_string(),
+        tessera_graph::Property::String("updated".to_string()),
+    );
+    node.properties_mut().insert(
+        SecurityPolicy::LEVEL_KEY.to_string(),
+        tessera_graph::Property::I64(99),
+    );
     sg.update_node(id, &node).unwrap();
     drop(sg);
 
     let raw = g.node(id).unwrap();
     let stored = SecurityPolicy::extract_label(raw.properties());
-    assert_eq!(stored.level, 2, "security level must be preserved, not overwritten");
+    assert_eq!(
+        stored.level, 2,
+        "security level must be preserved, not overwritten"
+    );
     assert_eq!(stored.compartments, comps(&["FINANCE"]));
-    assert_eq!(raw.properties().get("name").and_then(|p| p.as_str()), Some("updated"));
+    assert_eq!(
+        raw.properties().get("name").and_then(|p| p.as_str()),
+        Some("updated")
+    );
 }
 
 #[test]
@@ -194,7 +207,10 @@ fn add_edge_with_label_denied_if_clearance_insufficient() {
     let b = g.add_node("N", labeled_props(0, &[])).unwrap();
     let mut sg = SecureGraph::new(&mut g, clearance(1, &[]));
     let label = SecurityLabel::new(5, BTreeSet::new());
-    assert!(sg.add_edge_with_label("REL", a, b, props! {}, &label).is_err());
+    assert!(
+        sg.add_edge_with_label("REL", a, b, props! {}, &label)
+            .is_err()
+    );
 }
 
 // --- remove_edge ---

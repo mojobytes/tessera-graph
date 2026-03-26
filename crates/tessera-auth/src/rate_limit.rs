@@ -85,7 +85,6 @@ impl LoginAttemptTracker {
     }
 }
 
-
 /// Configuration for brute-force protection.
 pub struct LoginPolicy {
     /// Number of failed attempts before lockout.

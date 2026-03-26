@@ -314,7 +314,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     ///
     /// Returns `Err(())` on any authentication failure, so the caller can
     /// send the generic failure message without leaking details.
-    async fn authenticate(&self, principal: &str, credentials: &str) -> std::result::Result<UserId, ()> {
+    async fn authenticate(
+        &self,
+        principal: &str,
+        credentials: &str,
+    ) -> std::result::Result<UserId, ()> {
         // --- Rate-limit check ---
         if self
             .ctx
@@ -501,7 +505,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         } else {
             "QUERY"
         };
-        let _ = self.ctx.audit().record_success(None, op, Some(&query_summary));
+        let _ = self
+            .ctx
+            .audit()
+            .record_success(None, op, Some(&query_summary));
 
         // --- Metrics ---
         let duration = query_start.elapsed().as_secs_f64();
@@ -542,23 +549,18 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         let Some(result) = self.pending_result.take() else {
             return self
                 .send_response(&BoltResponse::Success {
-                    metadata: vec![(
-                        "has_more".to_owned(),
-                        PackStreamValue::Bool(false),
-                    )],
+                    metadata: vec![("has_more".to_owned(), PackStreamValue::Bool(false))],
                 })
                 .await;
         };
 
         for row in result.rows {
-            self.send_response(&BoltResponse::Record { fields: row }).await?;
+            self.send_response(&BoltResponse::Record { fields: row })
+                .await?;
         }
 
         self.send_response(&BoltResponse::Success {
-            metadata: vec![(
-                "has_more".to_owned(),
-                PackStreamValue::Bool(false),
-            )],
+            metadata: vec![("has_more".to_owned(), PackStreamValue::Bool(false))],
         })
         .await
     }
@@ -567,7 +569,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
 
     async fn handle_discard(&mut self) -> Result<()> {
         self.pending_result = None;
-        self.send_response(&BoltResponse::Success { metadata: vec![] }).await
+        self.send_response(&BoltResponse::Success { metadata: vec![] })
+            .await
     }
 
     // ── BEGIN / COMMIT / ROLLBACK ─────────────────────────────────────────────
@@ -602,7 +605,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     async fn handle_reset(&mut self) -> Result<()> {
         self.failed = false;
         self.pending_result = None;
-        self.send_response(&BoltResponse::Success { metadata: vec![] }).await
+        self.send_response(&BoltResponse::Success { metadata: vec![] })
+            .await
     }
 
     // ── Response helpers ──────────────────────────────────────────────────────
@@ -619,10 +623,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         self.failed = true;
         self.send_response(&BoltResponse::Failure {
             metadata: vec![
-                (
-                    "code".to_owned(),
-                    PackStreamValue::String(code.to_owned()),
-                ),
+                ("code".to_owned(), PackStreamValue::String(code.to_owned())),
                 (
                     "message".to_owned(),
                     PackStreamValue::String(message.to_owned()),
@@ -670,9 +671,11 @@ pub fn parse_db_field(raw: Option<&str>, default_tenant: &str) -> Result<Databas
             let database = DatabaseName::new(*db_name)?;
             Ok(DatabaseAddress { tenant, database })
         }
-        _ => Err(ServerError::Tenant(tessera_tenant::TenantError::InvalidName(
-            format!("db field must be 'database' or 'tenant/database', got: {s}"),
-        ))),
+        _ => Err(ServerError::Tenant(
+            tessera_tenant::TenantError::InvalidName(format!(
+                "db field must be 'database' or 'tenant/database', got: {s}"
+            )),
+        )),
     }
 }
 

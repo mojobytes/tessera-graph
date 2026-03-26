@@ -2,8 +2,8 @@
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use tessera_protocol::packstream::PackStreamValue;
 use tessera_protocol::ProtocolError;
+use tessera_protocol::packstream::PackStreamValue;
 
 use crate::connection::Session;
 use crate::error::CliError;
@@ -35,15 +35,11 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let result = session
-        .client
-        .run_query(query)
-        .await
-        .map_err(|e| match e {
-            ProtocolError::BoltQueryFailure { message } => CliError::Query(message),
-            ProtocolError::BoltAuthFailure { message } => CliError::Auth(message),
-            other => CliError::Connection(other.to_string()),
-        })?;
+    let result = session.client.run_query(query).await.map_err(|e| match e {
+        ProtocolError::BoltQueryFailure { message } => CliError::Query(message),
+        ProtocolError::BoltAuthFailure { message } => CliError::Auth(message),
+        other => CliError::Connection(other.to_string()),
+    })?;
 
     Ok(QueryOutput {
         columns: result.columns,
