@@ -17,7 +17,7 @@ thiserror     = { workspace = true }
 
 # Memgraph / Bolt target (optional)
 neo4rs = { version = "0.8", optional = true }
-tokio  = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+tokio  = { workspace = true, features = ["rt-multi-thread", "macros"], optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

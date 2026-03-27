@@ -54,6 +54,77 @@ impl FromStr for QueryLanguage {
     }
 }
 
+// ── Audit configuration ─────────────────────────────────────────────────────
+
+/// Configuration for the activity audit log.
+#[derive(Debug, Clone)]
+pub struct AuditConfig {
+    /// Whether audit logging is enabled.
+    pub enabled: bool,
+    /// Path to the audit log file.
+    pub log_path: std::path::PathBuf,
+    /// Maximum size in bytes before rotating. 0 = disabled.
+    pub rotation_max_size_bytes: u64,
+    /// Maximum number of rotated files to keep. 0 = keep all.
+    pub max_rotated_files: usize,
+    /// Channel buffer capacity for the async audit writer.
+    pub channel_capacity: usize,
+}
+
+impl AuditConfig {
+    /// Load audit configuration from environment variables.
+    ///
+    /// - `TESSERA_AUDIT_ENABLED` (default `"true"`)
+    /// - `TESSERA_AUDIT_PATH` (default `"audit.ndjson"`)
+    /// - `TESSERA_AUDIT_ROTATION_MAX_MB` (default `100`)
+    /// - `TESSERA_AUDIT_MAX_FILES` (default `0` = keep all)
+    #[must_use]
+    pub fn from_env() -> Self {
+        let enabled = std::env::var("TESSERA_AUDIT_ENABLED")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+
+        let log_path = std::env::var("TESSERA_AUDIT_PATH")
+            .map_or_else(|_| std::path::PathBuf::from("audit.ndjson"), std::path::PathBuf::from);
+
+        let rotation_max_mb: u64 = std::env::var("TESSERA_AUDIT_ROTATION_MAX_MB")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100);
+        let rotation_max_size_bytes = rotation_max_mb * 1024 * 1024;
+
+        let max_rotated_files: usize = std::env::var("TESSERA_AUDIT_MAX_FILES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let channel_capacity: usize = std::env::var("TESSERA_AUDIT_CHANNEL_CAPACITY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4096);
+
+        Self {
+            enabled,
+            log_path,
+            rotation_max_size_bytes,
+            max_rotated_files,
+            channel_capacity,
+        }
+    }
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            log_path: std::path::PathBuf::from("audit.ndjson"),
+            rotation_max_size_bytes: 100 * 1024 * 1024,
+            max_rotated_files: 0,
+            channel_capacity: 4096,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,7 +167,42 @@ mod tests {
             QueryLanguage::CypherCompat,
             QueryLanguage::StrictGql,
         ] {
-            assert_eq!(mode.to_string().parse::<QueryLanguage>().unwrap(), mode);
+            assert_eq!(mode.to_string().parse::<QueryLanguage>().unwrap(), mode); // OK: test
         }
+    }
+
+    // ── AuditConfig ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn audit_config_default_values() {
+        let cfg = AuditConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.log_path, std::path::PathBuf::from("audit.ndjson"));
+        assert_eq!(cfg.rotation_max_size_bytes, 100 * 1024 * 1024);
+        assert_eq!(cfg.max_rotated_files, 0);
+        assert_eq!(cfg.channel_capacity, 4096);
+    }
+
+    #[test]
+    fn audit_config_custom_values() {
+        let cfg = AuditConfig {
+            enabled: false,
+            log_path: std::path::PathBuf::from("/tmp/custom.ndjson"),
+            rotation_max_size_bytes: 0,
+            max_rotated_files: 5,
+            channel_capacity: 2048,
+        };
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.rotation_max_size_bytes, 0);
+        assert_eq!(cfg.max_rotated_files, 5);
+    }
+
+    #[test]
+    fn audit_config_clone_preserves_fields() {
+        let cfg = AuditConfig::default();
+        let cloned = cfg.clone();
+        assert_eq!(cloned.enabled, cfg.enabled);
+        assert_eq!(cloned.log_path, cfg.log_path);
+        assert_eq!(cloned.rotation_max_size_bytes, cfg.rotation_max_size_bytes);
     }
 }

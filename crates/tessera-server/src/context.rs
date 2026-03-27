@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tessera_audit::AuditLog;
+use tessera_audit::{AuditEntry, AuditEvent, AuditLog};
 use tessera_auth::lbac::Clearance;
 use tessera_auth::policy::AuthPolicy;
 use tessera_auth::providers::ExternalAuthProvider;
@@ -169,27 +169,22 @@ impl ServerContext {
             .check_session(token, required, &self.sessions)
         {
             Ok(user_id) => {
-                let _ = self
-                    .audit
-                    .record_success(Some(user_id.raw()), &required.to_string(), None);
+                // Permission check succeeded — no dedicated audit event here;
+                // the query/mutation event in bolt_handler covers the success path.
                 Ok(user_id)
             }
             Err(e) => {
-                let is_authz_error = matches!(
-                    e,
-                    tessera_auth::AuthError::PermissionDenied { .. }
-                        | tessera_auth::AuthError::TokenInvalid
-                        | tessera_auth::AuthError::TokenExpired
-                );
-                if is_authz_error {
-                    let _ =
-                        self.audit
-                            .record_denied(None, &required.to_string(), None, &e.to_string());
-                } else {
-                    let _ =
-                        self.audit
-                            .record_error(None, &required.to_string(), None, &e.to_string());
-                }
+                // Resolve user_id from token if possible for audit traceability.
+                let user_id = self
+                    .sessions
+                    .validate(token)
+                    .ok()
+                    .map(|uid| uid.raw());
+                let event = AuditEvent::PermissionDenied {
+                    permission: required.to_string(),
+                };
+                let entry = AuditEntry::denied(user_id, event, e.to_string());
+                let _ = self.audit.record_event(entry);
                 Err(e)
             }
         }

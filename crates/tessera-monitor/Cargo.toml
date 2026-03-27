@@ -11,10 +11,10 @@ rust-version.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
-tokio     = { version = "1", features = ["net", "rt", "macros", "io-util", "time"] }
+tokio     = { workspace = true, features = ["net", "rt", "macros", "io-util", "time"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "time"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util", "time"] }
 
 [lints]
 workspace = true

@@ -42,8 +42,7 @@ fn permission_check_propagates_through_context() {
     let admin_id = user_store.authenticate("admin", &admin_pw2).unwrap();
     let token = sessions.create_session(admin_id).unwrap();
 
-    let dir = tempfile::tempdir().unwrap();
-    let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
+    let audit = Arc::new(AuditLog::new_null());
     let tls = test_tls_config();
     let (_dir2, registry) = test_registry();
 

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tessera_audit::AuditLog;
+use tessera_config::AuditConfig;
 use tessera_auth::credentials::{Password, PasswordPolicy};
 use tessera_auth::policy::AuthPolicy;
 use tessera_auth::rbac::RoleStoreHandle;
@@ -56,9 +57,21 @@ async fn main() {
     let sessions = Arc::new(SessionManager::new(3600));
 
     // --- Audit ---
-    let audit_path = std::env::var("TESSERA_AUDIT_PATH").unwrap_or_else(|_| "audit.ndjson".into());
-    let audit =
-        Arc::new(AuditLog::open(std::path::Path::new(&audit_path)).expect("audit log init"));
+    let audit_config = AuditConfig::from_env();
+    let audit = if audit_config.enabled {
+        let (log, writer_task) = AuditLog::open_with_capacity(
+            &audit_config.log_path,
+            audit_config.rotation_max_size_bytes,
+            audit_config.max_rotated_files,
+            audit_config.channel_capacity,
+        )
+        .expect("audit log init"); // OK: server cannot start without audit
+        tokio::spawn(writer_task.run());
+        Arc::new(log)
+    } else {
+        tracing::warn!("audit logging is DISABLED — set TESSERA_AUDIT_ENABLED=true for production");
+        Arc::new(AuditLog::new_null())
+    };
 
     // --- Tenant registry (replaces single-graph approach) ---
     let persistence = PersistenceConfig::from_env();

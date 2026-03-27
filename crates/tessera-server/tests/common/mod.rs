@@ -76,11 +76,7 @@ pub fn test_context_with_registry(registry: Arc<TenantRegistry>) -> Arc<ServerCo
         RoleStoreHandle::with_defaults(),
     ));
 
-    let dir = tempfile::tempdir().unwrap();
-    let audit = Arc::new(AuditLog::open(&dir.path().join("audit.ndjson")).unwrap());
-    // `dir` must not be dropped before `audit` is created; after `open()` the
-    // file descriptor is held independently so the guard can be dropped.
-    drop(dir);
+    let audit = Arc::new(AuditLog::new_null());
     let tls = test_tls_config();
 
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));

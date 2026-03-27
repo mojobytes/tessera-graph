@@ -37,6 +37,10 @@ tessera-config             = { path = "crates/tessera-config" }
 tessera-cypher             = { path = "crates/tessera-cypher" }
 tessera-replication        = { path = "crates/tessera-replication" }
 tessera-tenant             = { path = "crates/tessera-tenant" }
+# default-features = false: each crate must declare the tokio features it needs.
+# See: https://doc.rust-lang.org/cargo/reference/features.html#feature-unification
+tokio        = { version = "1", default-features = false }
+tokio-rustls = { version = "0.26" }
 thiserror  = "2"
 crc32fast  = "1"
 serde      = { version = "1", features = ["derive"] }

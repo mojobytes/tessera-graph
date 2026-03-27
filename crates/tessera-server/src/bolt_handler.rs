@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::watch;
 
+use tessera_audit::{AuditEntry, AuditEvent};
 use tessera_auth::credentials::Password;
 use tessera_auth::session::SessionToken;
 use tessera_auth::user::UserId;
@@ -306,11 +307,23 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         .await
     }
 
+    /// Resolve the current session's user ID for audit logging.
+    ///
+    /// Returns `None` if no session token is set or if validation fails.
+    fn resolve_audit_user_id(&self) -> Option<u64> {
+        self.session_token
+            .as_ref()
+            .and_then(|t| self.ctx.sessions().validate(t).ok())
+            .map(|uid| uid.raw())
+    }
+
     /// Authenticate the client and return the `UserId`.
     ///
     /// Checks the login attempt tracker first: if the account is locked due to
     /// too many failed attempts, the request is rejected immediately without
     /// touching the credential store.
+    ///
+    /// Emits audit events for login success, failure, and rate-limiting.
     ///
     /// Returns `Err(())` on any authentication failure, so the caller can
     /// send the generic failure message without leaking details.
@@ -319,12 +332,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         principal: &str,
         credentials: &str,
     ) -> std::result::Result<UserId, ()> {
-        // --- Rate-limit check ---
+        // --- Rate-limit check (C3: audit rate-limited attempts) ---
         if self
             .ctx
             .login_tracker()
             .is_locked(principal, self.ctx.login_policy())
         {
+            let _ = self.ctx.audit().record_event(AuditEntry::denied(
+                None,
+                AuditEvent::LoginRateLimited { username: principal.to_owned() },
+                "account locked due to too many failed attempts".into(),
+            ));
             return Err(());
         }
 
@@ -339,27 +357,49 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
             .await
             .map(|(id, _token)| {
                 self.ctx.login_tracker().record_success(principal);
+                let _ = self.ctx.audit().record_event(AuditEntry::success(
+                    Some(id.raw()),
+                    AuditEvent::LoginSuccess { username: principal.to_owned() },
+                ));
                 id
             })
             .map_err(|_| {
                 self.ctx.login_tracker().record_failure(principal);
+                let _ = self.ctx.audit().record_event(AuditEntry::denied(
+                    None,
+                    AuditEvent::LoginFailure { username: principal.to_owned() },
+                    "authentication failed".into(),
+                ));
             });
         }
 
         // Local auth path.
         let Ok(password) = Password::new(credentials) else {
-            // Invalid credential format still counts as a failed attempt.
             self.ctx.login_tracker().record_failure(principal);
+            let _ = self.ctx.audit().record_event(AuditEntry::denied(
+                None,
+                AuditEvent::LoginFailure { username: principal.to_owned() },
+                "invalid credential format".into(),
+            ));
             return Err(());
         };
         self.ctx
             .user_store()
             .authenticate(principal, &password)
-            .inspect(|_id| {
+            .inspect(|id| {
                 self.ctx.login_tracker().record_success(principal);
+                let _ = self.ctx.audit().record_event(AuditEntry::success(
+                    Some(id.raw()),
+                    AuditEvent::LoginSuccess { username: principal.to_owned() },
+                ));
             })
             .map_err(|_| {
                 self.ctx.login_tracker().record_failure(principal);
+                let _ = self.ctx.audit().record_event(AuditEntry::denied(
+                    None,
+                    AuditEvent::LoginFailure { username: principal.to_owned() },
+                    "authentication failed".into(),
+                ));
             })
     }
 
@@ -487,10 +527,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
             Ok(r) => r,
             Err(e) => {
                 let query_summary: String = query.chars().take(128).collect();
-                let _ = self
-                    .ctx
-                    .audit()
-                    .record_error(None, "QUERY", Some(&query_summary), &e);
+                let user_id = self.resolve_audit_user_id();
+                let event = AuditEvent::QueryExecuted { query_preview: query_summary };
+                let _ = self.ctx.audit().record_event(AuditEntry::error(user_id, event, e.clone()));
                 return self
                     .send_failure("Neo.ClientError.Statement.ExecutionError", &e)
                     .await;
@@ -500,15 +539,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         // --- Audit ---
         // Truncate query to 128 chars to avoid storing PII in audit logs.
         let query_summary: String = query.chars().take(128).collect();
-        let op = if matches!(stmt, GqlStatement::Mutation(_)) {
-            "MUTATION"
+        let user_id = self.resolve_audit_user_id();
+        let event = if matches!(stmt, GqlStatement::Mutation(_)) {
+            AuditEvent::MutationExecuted { query_preview: query_summary }
         } else {
-            "QUERY"
+            AuditEvent::QueryExecuted { query_preview: query_summary }
         };
-        let _ = self
-            .ctx
-            .audit()
-            .record_success(None, op, Some(&query_summary));
+        let _ = self.ctx.audit().record_event(AuditEntry::success(user_id, event));
 
         // --- Metrics ---
         let duration = query_start.elapsed().as_secs_f64();
