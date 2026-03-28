@@ -327,6 +327,64 @@ fn set_unbound_variable_returns_error() {
     );
 }
 
+// ── MATCH...CREATE edge between existing nodes ────────────────────────────────
+
+#[test]
+#[ignore = "blocked: MIT core parser does not yet support MATCH...CREATE var-ref patterns (see .private/tdd-plan-match-create-json-import.md)"]
+fn match_create_edge_between_existing_nodes() {
+    let mut g = Graph::new();
+    run_mutation(&mut g, "CREATE (:Person {name: 'Alice'})").unwrap();
+    run_mutation(&mut g, "CREATE (:Person {name: 'Bob'})").unwrap();
+    assert_eq!(g.node_count(), 2);
+    assert_eq!(g.edge_count(), 0);
+
+    let result = run_mutation(
+        &mut g,
+        "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) \
+         CREATE (a)-[:KNOWS]->(b)",
+    )
+    .unwrap();
+
+    assert_eq!(result.nodes_created, 0, "no new nodes should be created");
+    assert_eq!(result.edges_created, 1);
+    assert_eq!(g.edge_count(), 1);
+}
+
+#[test]
+#[ignore = "blocked: MIT core parser does not yet support MATCH...CREATE var-ref patterns (see .private/tdd-plan-match-create-json-import.md)"]
+fn match_create_edge_with_properties() {
+    let mut g = Graph::new();
+    run_mutation(&mut g, "CREATE (:Person {name: 'Alice'})").unwrap();
+    run_mutation(&mut g, "CREATE (:Person {name: 'Bob'})").unwrap();
+
+    let result = run_mutation(
+        &mut g,
+        "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) \
+         CREATE (a)-[:KNOWS {since: 2024}]->(b)",
+    )
+    .unwrap();
+
+    assert_eq!(result.edges_created, 1);
+
+    let alice_id = g.nodes_by_label("Person")[0];
+    let edges = g.outgoing_edges(alice_id).unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].label(), "KNOWS");
+    assert_eq!(edges[0].properties().get("since").unwrap().as_i64(), Some(2024));
+}
+
+#[test]
+fn match_create_edge_unbound_var_is_error() {
+    let mut g = Graph::new();
+    run_mutation(&mut g, "CREATE (:Person {name: 'Alice'})").unwrap();
+
+    let err = run_mutation(
+        &mut g,
+        "MATCH (a:Person {name: 'Alice'}) CREATE (a)-[:KNOWS]->(b)",
+    );
+    assert!(err.is_err(), "unbound variable 'b' should cause error");
+}
+
 // ── Enterprise-only features still rejected ───────────────────────────────────
 
 #[test]

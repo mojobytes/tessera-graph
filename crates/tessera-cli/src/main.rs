@@ -173,6 +173,9 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    // All content (stdin or file) is loaded into memory before processing.
+    // Streaming is not possible because serde_json::from_str (JSON format)
+    // and split_gql_statements (GQL format) both require the full input.
     let content = if args.file == "-" {
         use std::io::Read;
         let mut buf = String::new();
@@ -181,6 +184,14 @@ where
             .map_err(|e| CliError::ImportExport(format!("cannot read stdin: {e}")))?;
         buf
     } else {
+        if let Ok(meta) = std::fs::metadata(&args.file) {
+            if is_large_file(meta.len()) {
+                eprintln!(
+                    "Warning: file is {:.0} MB — loading entirely into memory",
+                    meta.len() as f64 / (1024.0 * 1024.0)
+                );
+            }
+        }
         std::fs::read_to_string(&args.file)
             .map_err(|e| CliError::ImportExport(format!("cannot read {}: {e}", args.file)))?
     };
@@ -193,6 +204,7 @@ where
     let statements = match fmt {
         "gql" => import::split_gql_statements(&content),
         "csv-nodes" => import::csv_nodes_to_gql(&content)?,
+        "json" => import::json_to_gql_statements(&content)?,
         other => {
             return Err(CliError::ImportExport(format!(
                 "unsupported import format: {other}"
@@ -207,7 +219,7 @@ where
         let total = statements.len();
         for (i, stmt) in statements.iter().enumerate() {
             query::execute_query(session, stmt, "gql").await?;
-            if (i + 1) % 100 == 0 || i + 1 == total {
+            if should_report_progress(i + 1, total) {
                 eprintln!("Imported {}/{total} statements", i + 1);
             }
         }
@@ -453,13 +465,36 @@ fn dirs_history_path() -> Option<std::path::PathBuf> {
 }
 
 /// Infer import format from file extension.
-fn infer_import_format(file: &str) -> &str {
+fn infer_import_format(file: &str) -> &'static str {
     let path = std::path::Path::new(file);
     match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) if ext.eq_ignore_ascii_case("gql") || ext.eq_ignore_ascii_case("cypher") => "gql",
+        Some(ext) if ext.eq_ignore_ascii_case("gql") || ext.eq_ignore_ascii_case("cypher") => {
+            "gql"
+        }
         Some(ext) if ext.eq_ignore_ascii_case("csv") => "csv-nodes",
+        Some(ext)
+            if ext.eq_ignore_ascii_case("json")
+                || ext.eq_ignore_ascii_case("ndjson")
+                || ext.eq_ignore_ascii_case("jsonl") =>
+        {
+            "json"
+        }
         _ => "gql",
     }
+}
+
+const LARGE_FILE_THRESHOLD_BYTES: u64 = 500 * 1024 * 1024;
+
+/// Returns `true` if the file size exceeds the large-file warning threshold.
+fn is_large_file(size: u64) -> bool {
+    size >= LARGE_FILE_THRESHOLD_BYTES
+}
+
+const PROGRESS_INTERVAL: usize = 1_000;
+
+/// Returns `true` if progress should be reported at this step.
+fn should_report_progress(done: usize, total: usize) -> bool {
+    done % PROGRESS_INTERVAL == 0 || done == total
 }
 
 #[cfg(test)]
@@ -483,14 +518,62 @@ mod tests {
     }
 
     #[test]
-    fn infer_format_json_falls_back_to_gql() {
-        assert_ne!(infer_import_format("data.json"), "json");
-        assert_eq!(infer_import_format("data.json"), "gql");
+    fn infer_format_json_extension() {
+        assert_eq!(infer_import_format("data.json"), "json");
+        assert_eq!(infer_import_format("data.JSON"), "json");
+    }
+
+    #[test]
+    fn infer_format_ndjson_extension() {
+        assert_eq!(infer_import_format("data.ndjson"), "json");
+        assert_eq!(infer_import_format("data.NDJSON"), "json");
+    }
+
+    #[test]
+    fn infer_format_jsonl_extension() {
+        assert_eq!(infer_import_format("data.jsonl"), "json");
     }
 
     #[test]
     fn infer_format_unknown_defaults_to_gql() {
         assert_eq!(infer_import_format("data.txt"), "gql");
         assert_eq!(infer_import_format("data"), "gql");
+    }
+
+    #[test]
+    fn large_file_threshold_one_below() {
+        assert!(!is_large_file(LARGE_FILE_THRESHOLD_BYTES - 1));
+    }
+
+    #[test]
+    fn large_file_threshold_at_boundary() {
+        assert!(is_large_file(LARGE_FILE_THRESHOLD_BYTES));
+    }
+
+    #[test]
+    fn large_file_threshold_one_above() {
+        assert!(is_large_file(LARGE_FILE_THRESHOLD_BYTES + 1));
+    }
+
+    #[test]
+    fn progress_interval_not_at_arbitrary_count() {
+        assert!(!should_report_progress(999, 400_000));
+    }
+
+    #[test]
+    fn progress_interval_fires_at_1000() {
+        assert!(should_report_progress(1000, 400_000));
+    }
+
+    #[test]
+    fn progress_interval_fires_at_last() {
+        assert!(should_report_progress(400_000, 400_000));
+    }
+
+    #[test]
+    fn progress_interval_small_total_fires_only_at_end() {
+        assert!(!should_report_progress(1, 5));
+        assert!(!should_report_progress(4, 5));
+        assert!(should_report_progress(5, 5));
     }
 }

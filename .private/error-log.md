@@ -72,6 +72,12 @@
 - **Cómo lo solucioné:** Lo leí cuando el usuario lo señaló. Ningún error previo se repitió en esta sesión por coincidencia, pero podría haberlo hecho.
 - **Regla para evitarlo:** El error-log es lo PRIMERO que se lee al iniciar cualquier sesión de trabajo, antes de responder cualquier pregunta del usuario. Es la prioridad máxima según CLAUDE.md.
 
+### [2026-03-27] Dije que el cambio en parser GQL era "mínimo" sin verificar el código
+- **Qué hice mal:** Afirmé que añadir MATCH...CREATE al parser era "solo una línea" basándome en que el executor ya lo soportaba. No verifiqué que `parse_create_pattern_multi` requiere label obligatorio (`self.expect(&Token::Colon)?`), lo cual hace que `CREATE (a)-[:REL]->(b)` (variable references sin label) sea un error de sintaxis.
+- **Causa raíz:** Evalué el impacto leyendo solo el dispatch de `parse_statement` y el executor, sin leer la función que realmente parsea los CREATE patterns. Conclusión precipitada.
+- **Cómo lo solucioné:** Al leer `parse_create_pattern_multi` en profundidad descubrí el problema y generé un plan TDD correcto con los cambios reales necesarios.
+- **Regla para evitarlo:** Antes de afirmar que un cambio es "mínimo", leer TODAS las funciones del call path completo, no solo el punto de entrada. El dispatch puede ser trivial pero las funciones que llama no.
+
 ### [2026-03-18] cross-repo-write-guard.sh: prefix match false positive (tessera-graph vs tessera-graph-enterprise)
 - **Qué hice mal:** El guard usaba `[[ "$RESOLVED_PATH" == "$MIT_ROOT"* ]]` para detectar paths del repo MIT. Como `tessera-graph` es prefijo de `tessera-graph-enterprise`, TODOS los paths del enterprise eran bloqueados como si fueran del MIT.
 - **Causa raíz:** Comparación de string prefix sin delimitador. `/path/tessera-graph-enterprise/...` empieza con `/path/tessera-graph`, lo que produce un falso positivo.

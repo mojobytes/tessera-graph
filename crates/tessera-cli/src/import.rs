@@ -18,6 +18,11 @@ fn is_comment_line(trimmed: &str) -> bool {
     let mut i = 0;
     while i < len {
         if bytes[i] == b'\'' {
+            // GQL uses doubled single-quote escape: '' inside strings.
+            if in_quotes && i + 1 < len && bytes[i + 1] == b'\'' {
+                i += 2; // skip both quotes — stays in string
+                continue;
+            }
             in_quotes = !in_quotes;
         } else if !in_quotes && i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'-' {
             // `--` found outside quotes — rest of line is comment
@@ -200,7 +205,7 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
                 let formatted = if val.parse::<i64>().is_ok() || val.parse::<f64>().is_ok() {
                     format!("{col}: {val}")
                 } else {
-                    format!("{col}: '{}'", val.replace('\'', "\\'"))
+                    format!("{col}: '{}'", val.replace('\'', "''"))
                 };
                 props.push(formatted);
             }
@@ -220,6 +225,233 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
     }
 
     Ok(statements)
+}
+
+/// Generate GQL statements from a JSON string in tessera-import format.
+///
+/// Expected format:
+/// ```json
+/// {
+///   "nodes": [{"label": "L", "properties": {"k": "v"}}],
+///   "edges": [{"source": {"label": "L", "match": {"id": "x"}},
+///              "target": {"label": "L", "match": {"id": "y"}},
+///              "label": "REL", "properties": {}}]
+/// }
+/// ```
+///
+/// Nodes produce `CREATE (:Label {props})` statements.
+/// Edges produce `MATCH (a:L {k: 'v'}) MATCH (b:L {k: 'v'}) CREATE (a)-[:REL]->(b)`.
+///
+/// # Errors
+///
+/// Returns `CliError::ImportExport` on invalid JSON, missing fields, or empty data.
+pub fn json_to_gql_statements(json_text: &str) -> Result<Vec<String>, CliError> {
+    let root: serde_json::Value = serde_json::from_str(json_text)
+        .map_err(|e| CliError::ImportExport(format!("invalid JSON: {e}")))?;
+
+    let obj = root
+        .as_object()
+        .ok_or_else(|| CliError::ImportExport("root must be a JSON object".into()))?;
+
+    let nodes = obj
+        .get("nodes")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| CliError::ImportExport("missing 'nodes' array".into()))?;
+
+    let edges = obj
+        .get("edges")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| CliError::ImportExport("missing 'edges' array".into()))?;
+
+    if nodes.is_empty() && edges.is_empty() {
+        return Err(CliError::ImportExport("no nodes or edges in JSON".into()));
+    }
+
+    let mut statements = Vec::with_capacity(nodes.len() + edges.len());
+    let mut buf = String::with_capacity(256);
+
+    for node in nodes {
+        let label = node
+            .get("label")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CliError::ImportExport("node missing 'label'".into()))?;
+        require_valid_identifier(label, "node label")?;
+        let props = node.get("properties").and_then(|v| v.as_object());
+        buf.clear();
+        buf.push_str("CREATE (:");
+        buf.push_str(label);
+        write_json_props_to_buf(props, &mut buf)?;
+        buf.push(')');
+        statements.push(std::mem::take(&mut buf));
+    }
+
+    for edge in edges {
+        let rel_label = edge
+            .get("label")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CliError::ImportExport("edge missing 'label'".into()))?;
+        require_valid_identifier(rel_label, "edge label")?;
+
+        let source_match = format_endpoint_match(edge, "source")?;
+        let target_match = format_endpoint_match(edge, "target")?;
+
+        buf.clear();
+        buf.push_str("MATCH (a");
+        buf.push_str(&source_match);
+        buf.push_str("), (b");
+        buf.push_str(&target_match);
+        buf.push_str(") CREATE (a)-[:");
+        buf.push_str(rel_label);
+
+        let rel_props = edge.get("properties").and_then(|v| v.as_object());
+        write_json_props_to_buf(rel_props, &mut buf)?;
+
+        buf.push_str("]->(b)");
+        statements.push(std::mem::take(&mut buf));
+    }
+
+    Ok(statements)
+}
+
+/// Check whether `s` is a valid GQL identifier (safe for unquoted emission).
+///
+/// Rule: non-empty, starts with ASCII letter or `_`, every subsequent char
+/// is ASCII alphanumeric or `_`.
+fn is_valid_gql_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => false,
+        Some(c) if !(c.is_ascii_alphabetic() || c == '_') => false,
+        _ => chars.all(|c| c.is_ascii_alphanumeric() || c == '_'),
+    }
+}
+
+/// Validate that `s` is a safe GQL identifier; return `CliError` if not.
+fn require_valid_identifier(s: &str, context: &str) -> Result<(), CliError> {
+    if is_valid_gql_identifier(s) {
+        Ok(())
+    } else {
+        Err(CliError::ImportExport(format!("invalid {context}: {s:?}")))
+    }
+}
+
+/// Write a JSON properties map as a GQL property string into `buf`.
+///
+/// Produces nothing if `props` is `None` or empty, otherwise writes
+/// ` {k1: v1, k2: v2, ...}` — note the leading space.
+///
+/// Property keys are validated with [`is_valid_gql_identifier`].
+fn write_json_props_to_buf(
+    props: Option<&serde_json::Map<String, serde_json::Value>>,
+    buf: &mut String,
+) -> Result<(), CliError> {
+    let Some(props) = props else { return Ok(()) };
+    if props.is_empty() {
+        return Ok(());
+    }
+
+    buf.push_str(" {");
+    let mut first = true;
+    for (k, v) in props {
+        require_valid_identifier(k, "property key")?;
+        if !first {
+            buf.push_str(", ");
+        }
+        buf.push_str(k);
+        buf.push_str(": ");
+        write_json_value_to_buf(v, buf);
+        first = false;
+    }
+    buf.push('}');
+    Ok(())
+}
+
+/// Write a JSON value as a GQL literal into `buf`.
+fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) {
+    match v {
+        serde_json::Value::Null => buf.push_str("null"),
+        serde_json::Value::Bool(true) => buf.push_str("true"),
+        serde_json::Value::Bool(false) => buf.push_str("false"),
+        serde_json::Value::Number(n) => {
+            use std::fmt::Write as _;
+            let _ = write!(buf, "{n}");
+        }
+        serde_json::Value::String(s) => {
+            buf.push('\'');
+            for ch in s.chars() {
+                if ch == '\'' {
+                    buf.push_str("''");
+                } else {
+                    buf.push(ch);
+                }
+            }
+            buf.push('\'');
+        }
+        other => {
+            // Arrays and objects are stored as JSON strings.
+            eprintln!(
+                "Warning: property stored as JSON string \
+                 (array/object values are not natively supported)"
+            );
+            buf.push('\'');
+            let serialized = other.to_string();
+            for ch in serialized.chars() {
+                if ch == '\'' {
+                    buf.push_str("''");
+                } else {
+                    buf.push(ch);
+                }
+            }
+            buf.push('\'');
+        }
+    }
+}
+
+/// Format a MATCH clause for an edge endpoint: `:Label {matchKey: 'matchVal'}`.
+fn format_endpoint_match(
+    edge: &serde_json::Value,
+    endpoint_key: &str,
+) -> Result<String, CliError> {
+    let ep = edge
+        .get(endpoint_key)
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| {
+            CliError::ImportExport(format!("edge missing '{endpoint_key}' object"))
+        })?;
+
+    let label = ep.get("label").and_then(|v| v.as_str());
+    if let Some(l) = label {
+        require_valid_identifier(l, &format!("edge {endpoint_key} label"))?;
+    }
+
+    let match_obj =
+        ep.get("match")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| {
+                CliError::ImportExport(format!(
+                    "edge {endpoint_key} missing 'match' object"
+                ))
+            })?;
+
+    if match_obj.len() > 1 {
+        return Err(CliError::ImportExport(format!(
+            "edge {endpoint_key}.match must have exactly one key, got {}",
+            match_obj.len()
+        )));
+    }
+
+    let (match_key, match_val) = match_obj.iter().next().ok_or_else(|| {
+        CliError::ImportExport(format!("edge {endpoint_key}.match is empty"))
+    })?;
+    require_valid_identifier(match_key, &format!("edge {endpoint_key} match key"))?;
+
+    let mut val_buf = String::with_capacity(64);
+    write_json_value_to_buf(match_val, &mut val_buf);
+    if let Some(l) = label {
+        Ok(format!(":{l} {{{match_key}: {val_buf}}}"))
+    } else {
+        Ok(format!(" {{{match_key}: {val_buf}}}"))
+    }
 }
 
 /// Truncate a single-line string for display, replacing newlines.
@@ -398,7 +630,7 @@ mod tests {
     fn csv_nodes_string_value_with_quote() {
         let csv = "label,name\nPerson,O'Brien\n";
         let stmts = csv_nodes_to_gql(csv).expect("csv to gql"); // OK: test
-        assert!(stmts[0].contains("O\\'Brien"));
+        assert!(stmts[0].contains("O''Brien"));
     }
 
     #[test]
@@ -469,5 +701,263 @@ mod tests {
         let s = "αβγδεζηθ"; // 8 × 2 bytes = 16 bytes
         let result = truncate_line(s, 5);
         assert!(result.ends_with("..."));
+    }
+
+    // --- JSON → GQL ---
+
+    #[test]
+    fn json_nodes_to_gql_basic() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"name": "Alice", "age": 30}},
+            {"label": "Person", "properties": {"name": "Bob"}}
+        ], "edges": []}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        assert_eq!(stmts.len(), 2);
+        assert!(stmts[0].starts_with("CREATE (:Person"), "got: {}", stmts[0]);
+        assert!(stmts[0].contains("name: 'Alice'"), "got: {}", stmts[0]);
+        assert!(stmts[0].contains("age: 30"), "got: {}", stmts[0]);
+        assert!(stmts[1].contains("name: 'Bob'"), "got: {}", stmts[1]);
+    }
+
+    #[test]
+    fn json_empty_data_is_error() {
+        let json = r#"{"nodes": [], "edges": []}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_invalid_json_is_error() {
+        assert!(json_to_gql_statements("not json").is_err());
+    }
+
+    #[test]
+    fn json_edges_to_match_create() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"id": "1", "name": "Alice"}},
+            {"label": "Person", "properties": {"id": "2", "name": "Bob"}}
+        ], "edges": [
+            {
+                "source": {"label": "Person", "match": {"id": "1"}},
+                "target": {"label": "Person", "match": {"id": "2"}},
+                "label": "KNOWS",
+                "properties": {}
+            }
+        ]}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        assert_eq!(stmts.len(), 3); // 2 nodes + 1 edge
+        let edge_stmt = &stmts[2];
+        assert!(edge_stmt.starts_with("MATCH (a:Person"), "got: {edge_stmt}");
+        assert!(edge_stmt.contains("), (b:Person"), "got: {edge_stmt}");
+        assert!(edge_stmt.contains("CREATE (a)-[:KNOWS]->(b)"), "got: {edge_stmt}");
+    }
+
+    #[test]
+    fn json_edge_with_properties() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"id": "1"}},
+            {"label": "Person", "properties": {"id": "2"}}
+        ], "edges": [
+            {
+                "source": {"label": "Person", "match": {"id": "1"}},
+                "target": {"label": "Person", "match": {"id": "2"}},
+                "label": "KNOWS",
+                "properties": {"since": 2024}
+            }
+        ]}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        let edge_stmt = &stmts[2];
+        assert!(edge_stmt.contains("{since: 2024}"), "got: {edge_stmt}");
+    }
+
+    #[test]
+    fn json_edge_missing_source_is_error() {
+        let json = r#"{"nodes": [], "edges": [
+            {"target": {"label": "X", "match": {"id": "1"}}, "label": "R", "properties": {}}
+        ]}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_property_with_single_quotes_escaped() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"name": "O'Brien"}}
+        ], "edges": []}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        assert!(stmts[0].contains("O''Brien"), "got: {}", stmts[0]);
+    }
+
+    #[test]
+    fn json_boolean_and_null_properties() {
+        let json = r#"{"nodes": [
+            {"label": "Item", "properties": {"active": true, "deleted": false, "note": null}}
+        ], "edges": []}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        assert!(stmts[0].contains("active: true"), "got: {}", stmts[0]);
+        assert!(stmts[0].contains("deleted: false"), "got: {}", stmts[0]);
+        assert!(stmts[0].contains("note: null"), "got: {}", stmts[0]);
+    }
+
+    #[test]
+    fn json_array_property_stored_as_json_string() {
+        let json = r#"{"nodes": [
+            {"label": "X", "properties": {"tags": ["a", "b"]}}
+        ], "edges": []}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        assert!(stmts[0].contains("tags: '"), "got: {}", stmts[0]);
+    }
+
+    // --- escaped-quote in comments ---
+
+    #[test]
+    fn comment_not_skipped_when_dash_dash_follows_doubled_quote() {
+        // GQL escapes single quotes by doubling: 'it''s'
+        let line = "CREATE (:X {val: 'it''s -- tricky'});";
+        assert!(!is_comment_line(line), "line should NOT be a comment");
+        let stmts = split_gql_statements(line);
+        assert_eq!(stmts.len(), 1);
+    }
+
+    // --- GQL identifier validation ---
+
+    #[test]
+    fn gql_identifier_valid_cases() {
+        assert!(is_valid_gql_identifier("Person"));
+        assert!(is_valid_gql_identifier("_id"));
+        assert!(is_valid_gql_identifier("REL_TYPE"));
+        assert!(is_valid_gql_identifier("a1"));
+    }
+
+    #[test]
+    fn gql_identifier_invalid_cases() {
+        assert!(!is_valid_gql_identifier(""));
+        assert!(!is_valid_gql_identifier("1name"));
+        assert!(!is_valid_gql_identifier("name} ) DETACH DELETE (n:Admin"));
+        assert!(!is_valid_gql_identifier("has space"));
+        assert!(!is_valid_gql_identifier("has-hyphen"));
+        assert!(!is_valid_gql_identifier("has.dot"));
+    }
+
+    // --- Injection rejection ---
+
+    #[test]
+    fn json_node_with_invalid_label_is_error() {
+        let json = r#"{"nodes": [{"label": "1Bad", "properties": {}}], "edges": []}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_node_with_injection_label_is_error() {
+        let json = r#"{"nodes": [{"label": "X} ) DETACH DELETE (n:Admin", "properties": {}}], "edges": []}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_edge_with_invalid_rel_label_is_error() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1"}},
+            {"label": "B", "properties": {"id": "2"}}
+        ], "edges": [
+            {"source": {"label": "A", "match": {"id": "1"}},
+             "target": {"label": "B", "match": {"id": "2"}},
+             "label": "has-dash", "properties": {}}
+        ]}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_node_with_injection_property_key_is_error() {
+        let json = r#"{"nodes": [{"label": "X", "properties": {"name} ) DETACH DELETE (n:Admin": "val"}}], "edges": []}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_endpoint_with_invalid_label_is_error() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1"}}
+        ], "edges": [
+            {"source": {"label": "1Bad", "match": {"id": "1"}},
+             "target": {"label": "A", "match": {"id": "1"}},
+             "label": "R", "properties": {}}
+        ]}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    #[test]
+    fn json_match_key_with_injection_is_error() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1"}}
+        ], "edges": [
+            {"source": {"label": "A", "match": {"id} ) DETACH DELETE": "1"}},
+             "target": {"label": "A", "match": {"id": "1"}},
+             "label": "R", "properties": {}}
+        ]}"#;
+        assert!(json_to_gql_statements(json).is_err());
+    }
+
+    // --- Multi-key match rejection ---
+
+    #[test]
+    fn json_edge_endpoint_without_label() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1"}},
+            {"label": "B", "properties": {"id": "2"}}
+        ], "edges": [
+            {
+                "source": {"match": {"id": "1"}},
+                "target": {"label": "B", "match": {"id": "2"}},
+                "label": "R",
+                "properties": {}
+            }
+        ]}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        let edge_stmt = &stmts[2];
+        assert!(edge_stmt.starts_with("MATCH (a {id:"), "got: {edge_stmt}");
+    }
+
+    #[test]
+    fn json_edge_match_value_numeric_is_unquoted() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1"}}
+        ], "edges": [
+            {
+                "source": {"label": "A", "match": {"id": 1}},
+                "target": {"label": "A", "match": {"id": 1}},
+                "label": "R",
+                "properties": {}
+            }
+        ]}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        let edge_stmt = &stmts[1];
+        assert!(edge_stmt.contains("{id: 1}"), "got: {edge_stmt}");
+    }
+
+    #[test]
+    fn json_edge_match_value_string_is_quoted() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1"}}
+        ], "edges": [
+            {
+                "source": {"label": "A", "match": {"id": "1"}},
+                "target": {"label": "A", "match": {"id": "1"}},
+                "label": "R",
+                "properties": {}
+            }
+        ]}"#;
+        let stmts = json_to_gql_statements(json).unwrap(); // OK: test
+        let edge_stmt = &stmts[1];
+        assert!(edge_stmt.contains("{id: '1'}"), "got: {edge_stmt}");
+    }
+
+    #[test]
+    fn json_edge_with_multiple_match_keys_is_error() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {"id": "1", "name": "Alice"}},
+            {"label": "A", "properties": {"id": "2", "name": "Bob"}}
+        ], "edges": [
+            {"source": {"label": "A", "match": {"id": "1", "name": "Alice"}},
+             "target": {"label": "A", "match": {"id": "2"}},
+             "label": "R", "properties": {}}
+        ]}"#;
+        assert!(json_to_gql_statements(json).is_err());
     }
 }
