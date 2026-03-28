@@ -8,7 +8,7 @@
 //! | Construct                         | Status     | Notes                                         |
 //! |-----------------------------------|------------|-----------------------------------------------|
 //! | `/* block comments */`            | Stripped   | Replaced with equivalent whitespace           |
-//! | `` `backtick identifiers` ``      | Rewritten  | Spaces → underscores, backticks removed       |
+//! | `` `backtick identifiers` ``      | Rewritten  | Converted to GQL delimited identifiers (`"..."`) |
 //! | `STARTS WITH`, `ENDS WITH`        | Passed     | Parsed by core under `enterprise-helpers`     |
 //! | `CONTAINS`                        | Passed     | Parsed by core under `enterprise-helpers`     |
 //! | `IN [list]`                       | Passed     | Parsed by core under `enterprise-helpers`     |
@@ -25,7 +25,7 @@ use tessera_graph::Error;
 ///
 /// Transformations applied in order:
 /// 1. `/* block comments */` → stripped (replaced with spaces to preserve positions)
-/// 2. `` `backtick identifiers` `` → spaces replaced with underscores, backticks removed
+/// 2. `` `backtick identifiers` `` → converted to GQL delimited identifiers (`"..."`)
 /// 3. `OPTIONAL MATCH` → rewritten to `MATCH` (partial compat — no null-fill)
 /// 4. `REMOVE n.prop` → rewritten to `SET n.prop = null`
 /// 5. `WITH *` → stripped (pass-through only)
@@ -248,6 +248,18 @@ fn scan_string_literal(
             continue;
         }
         if c == quote {
+            // GQL doubled-quote escape: '' or "" inside a string.
+            if i + 1 < chars.len() && chars[i + 1] == quote {
+                if blank {
+                    result.push(' ');
+                    result.push(' ');
+                } else {
+                    result.push(c);
+                    result.push(c);
+                }
+                i += 2;
+                continue;
+            }
             result.push(c);
             i += 1;
             break;
@@ -459,9 +471,11 @@ fn strip_block_comments(input: &str) -> tessera_graph::Result<String> {
     Ok(result)
 }
 
-/// Converts backtick-quoted identifiers to standard identifiers.
+/// Converts backtick-quoted identifiers to GQL delimited identifiers.
 ///
-/// Spaces within backtick-quoted identifiers become underscores.
+/// Backtick-quoted identifiers (Cypher syntax) are converted to
+/// double-quoted delimited identifiers (GQL ISO standard).
+/// E.g. `` `Average Pyranometer` `` → `"Average Pyranometer"`.
 /// Backtick characters inside string literals are passed through unchanged.
 fn convert_backtick_idents(input: &str) -> tessera_graph::Result<String> {
     let mut result = String::with_capacity(input.len());
@@ -485,22 +499,32 @@ fn convert_backtick_idents(input: &str) -> tessera_graph::Result<String> {
                     i += 1;
                     break;
                 }
-                if chars[i] == ' ' {
-                    ident.push('_');
-                } else {
-                    ident.push(chars[i]);
-                }
+                ident.push(chars[i]);
                 i += 1;
             }
+            let byte_offset: usize = chars[..start].iter().map(|c| c.len_utf8()).sum();
             if !found_close {
-                let byte_offset: usize = chars[..start].iter().map(|c| c.len_utf8()).sum();
                 return Err(Error::GqlSyntaxError {
                     line: find_line(input, byte_offset),
                     col: find_col(input, byte_offset),
                     message: "unclosed backtick identifier".into(),
                 });
             }
-            result.push_str(&ident);
+            if ident.is_empty() {
+                return Err(Error::GqlSyntaxError {
+                    line: find_line(input, byte_offset),
+                    col: find_col(input, byte_offset),
+                    message: "empty backtick identifier".into(),
+                });
+            }
+            result.push('"');
+            for ch in ident.chars() {
+                if ch == '"' {
+                    result.push('"'); // GQL doubled-quote escape
+                }
+                result.push(ch);
+            }
+            result.push('"');
         } else {
             result.push(chars[i]);
             i += 1;
@@ -1033,5 +1057,42 @@ mod tests {
     #[test]
     fn is_standalone_with_after_ends_is_not_standalone() {
         assert!(!is_standalone_with("N.NAME ENDS WITH 'Z'", 12));
+    }
+
+    // ── backtick → delimited identifier conversion ──────────────────────
+
+    #[test]
+    fn backtick_identifier_converted_to_delimited() {
+        let input = "MATCH (n:`My Label`) RETURN n";
+        let output = cypher_to_gql(input).unwrap(); // OK: test
+        assert!(output.contains("\"My Label\""), "got: {output}");
+        assert!(!output.contains('`'), "backticks should be removed, got: {output}");
+    }
+
+    #[test]
+    fn backtick_property_key_converted_to_delimited() {
+        let input = "MATCH (n) WHERE n.`Average Pyranometer` = 'x' RETURN n";
+        let output = cypher_to_gql(input).unwrap(); // OK: test
+        assert!(output.contains("\"Average Pyranometer\""), "got: {output}");
+    }
+
+    #[test]
+    fn backtick_identifier_with_embedded_double_quote_is_escaped() {
+        let input = r#"MATCH (n:`col"name`) RETURN n"#;
+        let output = cypher_to_gql(input).unwrap(); // OK: test
+        assert!(output.contains(r#""col""name""#), "got: {output}");
+    }
+
+    #[test]
+    fn empty_backtick_identifier_is_error() {
+        let result = cypher_to_gql("MATCH (n:``) RETURN n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn backtick_inside_string_literal_not_converted() {
+        let input = "MATCH (n) WHERE n.name = 'use `backticks` here' RETURN n";
+        let output = cypher_to_gql(input).unwrap(); // OK: test
+        assert!(output.contains("`backticks`"), "got: {output}");
     }
 }
