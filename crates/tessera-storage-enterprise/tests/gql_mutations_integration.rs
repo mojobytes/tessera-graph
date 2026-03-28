@@ -330,7 +330,6 @@ fn set_unbound_variable_returns_error() {
 // ── MATCH...CREATE edge between existing nodes ────────────────────────────────
 
 #[test]
-#[ignore = "blocked: MIT core parser does not yet support MATCH...CREATE var-ref patterns (see .private/tdd-plan-match-create-json-import.md)"]
 fn match_create_edge_between_existing_nodes() {
     let mut g = Graph::new();
     run_mutation(&mut g, "CREATE (:Person {name: 'Alice'})").unwrap();
@@ -351,7 +350,6 @@ fn match_create_edge_between_existing_nodes() {
 }
 
 #[test]
-#[ignore = "blocked: MIT core parser does not yet support MATCH...CREATE var-ref patterns (see .private/tdd-plan-match-create-json-import.md)"]
 fn match_create_edge_with_properties() {
     let mut g = Graph::new();
     run_mutation(&mut g, "CREATE (:Person {name: 'Alice'})").unwrap();
