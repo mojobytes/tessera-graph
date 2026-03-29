@@ -104,6 +104,10 @@ pub struct ImportArgs {
     /// Print generated queries without executing.
     #[arg(long, default_value_t = false)]
     pub dry_run: bool,
+
+    /// Continue importing after statement errors (log errors to stderr).
+    #[arg(long, default_value_t = false)]
+    pub continue_on_error: bool,
 }
 
 /// Arguments for the `export` subcommand.
@@ -180,6 +184,22 @@ mod tests {
         assert_eq!(i.file, "data.csv");
         assert_eq!(i.format.as_deref(), Some("csv-nodes"));
         assert!(i.dry_run);
+        assert!(!i.continue_on_error);
+    }
+
+    #[test]
+    fn parse_import_continue_on_error_flag() {
+        let cli = Cli::try_parse_from([
+            "tessera-cli",
+            "import",
+            "data.json",
+            "--continue-on-error",
+        ])
+        .unwrap(); // OK: test
+        let Some(Command::Import(i)) = cli.command else {
+            panic!("expected Import command");
+        };
+        assert!(i.continue_on_error);
     }
 
     #[test]

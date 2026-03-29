@@ -1,5 +1,7 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+use std::io::BufRead as _;
+
 use crate::error::CliError;
 
 /// Check if a trimmed line is a comment (starts with `--` outside quotes).
@@ -39,33 +41,61 @@ fn is_comment_line(trimmed: &str) -> bool {
 /// - Blank lines and comment-only lines (`--` prefix) are skipped.
 /// - Each statement is trimmed and the trailing semicolon is stripped.
 /// - Multi-line statements are preserved (joined with newlines).
+///
+/// Delegates to [`stream_gql_import`] — single source of splitting logic.
 #[must_use]
 pub fn split_gql_statements(content: &str) -> Vec<String> {
-    let mut statements = Vec::new();
-    let mut current = String::new();
+    let mut out = Vec::new();
+    // The callback never fails, so the Result is always Ok.
+    let _ = stream_gql_import(std::io::Cursor::new(content), |s| {
+        out.push(s);
+        Ok(())
+    });
+    out
+}
 
-    for line in content.lines() {
+/// Stream GQL statements from a reader, calling `on_stmt` for each complete statement.
+///
+/// This is the streaming equivalent of [`split_gql_statements`]: same splitting logic
+/// (semicolons, comments, blank lines) but processes input line-by-line from a reader
+/// instead of requiring the entire content in memory.
+///
+/// Returns the number of statements emitted.
+///
+/// # Errors
+///
+/// Returns any error propagated from `on_stmt`.
+pub fn stream_gql_import<R: std::io::Read>(
+    reader: R,
+    mut on_stmt: impl FnMut(String) -> Result<(), CliError>,
+) -> Result<usize, CliError> {
+    let reader = std::io::BufReader::new(reader);
+    let mut current = String::new();
+    let mut count = 0usize;
+
+    for line_result in reader.lines() {
+        let line =
+            line_result.map_err(|e| CliError::ImportExport(format!("read error: {e}")))?;
         let trimmed = line.trim();
 
-        // Skip blank lines and comment-only lines
         if trimmed.is_empty() || is_comment_line(trimmed) {
             continue;
         }
 
         if trimmed.ends_with(';') {
-            // Complete this statement
             let stmt_part = trimmed.trim_end_matches(';').trim_end();
             if current.is_empty() {
                 if !stmt_part.is_empty() {
-                    statements.push(stmt_part.to_owned());
+                    on_stmt(stmt_part.to_owned())?;
+                    count += 1;
                 }
             } else {
                 current.push('\n');
                 current.push_str(stmt_part);
-                statements.push(std::mem::take(&mut current));
+                on_stmt(std::mem::take(&mut current))?;
+                count += 1;
             }
         } else {
-            // Accumulate
             if !current.is_empty() {
                 current.push('\n');
             }
@@ -73,12 +103,13 @@ pub fn split_gql_statements(content: &str) -> Vec<String> {
         }
     }
 
-    // If there's remaining content without a trailing semicolon, include it
+    // Flush any trailing statement without semicolon
     if !current.is_empty() {
-        statements.push(current);
+        on_stmt(current)?;
+        count += 1;
     }
 
-    statements
+    Ok(count)
 }
 
 /// Plan for importing statements in batches.
@@ -162,20 +193,60 @@ impl ImportPlan {
     }
 }
 
+/// Build a GQL `CREATE (:<label><props>)` statement for a CSV node row.
+///
+/// The label is validated via [`write_gql_identifier`], preventing injection
+/// and ensuring special characters are properly delimited.
+fn finish_csv_node_stmt(label: &str, props_str: &str) -> Result<String, CliError> {
+    let mut stmt = String::with_capacity(16 + label.len() + props_str.len());
+    stmt.push_str("CREATE (:");
+    write_gql_identifier(label, "node label", &mut stmt)?;
+    stmt.push_str(props_str);
+    stmt.push(')');
+    Ok(stmt)
+}
+
 /// Generate GQL CREATE statements from CSV rows representing nodes.
 ///
 /// First row is the header. The first column is the label.
 /// Remaining columns become properties.
 ///
+/// Delegates to [`stream_csv_import`] — single source of CSV parsing logic.
+///
 /// # Errors
 ///
 /// Returns `CliError::ImportExport` if the CSV has no rows or the label column is empty.
 pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(true)
-        .from_reader(csv_content.as_bytes());
+    let mut out = Vec::new();
+    stream_csv_import(csv_content.as_bytes(), |s| {
+        out.push(s);
+        Ok(())
+    })?;
+    Ok(out)
+}
 
-    let headers: Vec<String> = reader
+/// Stream CSV node rows from a reader, calling `on_stmt` for each generated GQL
+/// CREATE statement.
+///
+/// This is the streaming equivalent of [`csv_nodes_to_gql`]: same label/property
+/// logic but processes rows lazily from a reader instead of requiring the entire
+/// content in memory.
+///
+/// Returns the number of statements emitted.
+///
+/// # Errors
+///
+/// Returns `CliError::ImportExport` on CSV parse errors, empty labels,
+/// no data rows, or any error propagated from `on_stmt`.
+pub fn stream_csv_import<R: std::io::Read>(
+    reader: R,
+    mut on_stmt: impl FnMut(String) -> Result<(), CliError>,
+) -> Result<usize, CliError> {
+    let mut csv_reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .from_reader(reader);
+
+    let headers: Vec<String> = csv_reader
         .headers()
         .map_err(|e| CliError::ImportExport(format!("invalid CSV headers: {e}")))?
         .iter()
@@ -188,11 +259,11 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
 
     let label_col = &headers[0];
     let prop_cols = &headers[1..];
+    let mut count = 0usize;
 
-    let mut statements = Vec::new();
-
-    for result in reader.records() {
-        let record = result.map_err(|e| CliError::ImportExport(format!("invalid CSV row: {e}")))?;
+    for result in csv_reader.records() {
+        let record =
+            result.map_err(|e| CliError::ImportExport(format!("invalid CSV row: {e}")))?;
 
         let label = record.get(0).filter(|s| !s.is_empty()).ok_or_else(|| {
             CliError::ImportExport(format!("empty {label_col} (label) in CSV row"))
@@ -201,7 +272,6 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
         let mut props = Vec::new();
         for (i, col) in prop_cols.iter().enumerate() {
             if let Some(val) = record.get(i + 1).filter(|s| !s.is_empty()) {
-                // Try to parse as number, otherwise use string
                 let formatted = if val.parse::<i64>().is_ok() || val.parse::<f64>().is_ok() {
                     format!("{col}: {val}")
                 } else {
@@ -217,14 +287,15 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
             format!(" {{{}}}", props.join(", "))
         };
 
-        statements.push(format!("CREATE (:{label}{props_str})"));
+        on_stmt(finish_csv_node_stmt(label, &props_str)?)?;
+        count += 1;
     }
 
-    if statements.is_empty() {
+    if count == 0 {
         return Err(CliError::ImportExport("CSV has no data rows".to_owned()));
     }
 
-    Ok(statements)
+    Ok(count)
 }
 
 /// Generate GQL statements from a JSON string in tessera-import format.
@@ -242,72 +313,204 @@ pub fn csv_nodes_to_gql(csv_content: &str) -> Result<Vec<String>, CliError> {
 /// Nodes produce `CREATE (:Label {props})` statements.
 /// Edges produce `MATCH (a:L {k: 'v'}) MATCH (b:L {k: 'v'}) CREATE (a)-[:REL]->(b)`.
 ///
+/// Delegates to [`stream_json_import`] — single source of JSON parsing logic.
+///
 /// # Errors
 ///
 /// Returns `CliError::ImportExport` on invalid JSON, missing fields, or empty data.
 pub fn json_to_gql_statements(json_text: &str) -> Result<Vec<String>, CliError> {
-    let root: serde_json::Value = serde_json::from_str(json_text)
-        .map_err(|e| CliError::ImportExport(format!("invalid JSON: {e}")))?;
+    let mut out = Vec::new();
+    stream_json_import(json_text.as_bytes(), |s| {
+        out.push(s);
+        Ok(())
+    })?;
+    Ok(out)
+}
 
-    let obj = root
-        .as_object()
-        .ok_or_else(|| CliError::ImportExport("root must be a JSON object".into()))?;
-
-    let nodes = obj
-        .get("nodes")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| CliError::ImportExport("missing 'nodes' array".into()))?;
-
-    let edges = obj
-        .get("edges")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| CliError::ImportExport("missing 'edges' array".into()))?;
-
-    if nodes.is_empty() && edges.is_empty() {
-        return Err(CliError::ImportExport("no nodes or edges in JSON".into()));
-    }
-
-    let mut statements = Vec::with_capacity(nodes.len() + edges.len());
+/// Convert a single JSON node value to a GQL CREATE statement.
+fn node_value_to_gql_stmt(node: &serde_json::Value) -> Result<String, CliError> {
+    let label = node
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CliError::ImportExport("node missing 'label'".into()))?;
+    let props = node.get("properties").and_then(|v| v.as_object());
     let mut buf = String::with_capacity(256);
+    buf.push_str("CREATE (:");
+    write_gql_identifier(label, "node label", &mut buf)?;
+    write_json_props_to_buf(props, &mut buf)?;
+    buf.push(')');
+    Ok(buf)
+}
 
-    for node in nodes {
-        let label = node
-            .get("label")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CliError::ImportExport("node missing 'label'".into()))?;
-        let props = node.get("properties").and_then(|v| v.as_object());
-        buf.clear();
-        buf.push_str("CREATE (:");
-        write_gql_identifier(label, "node label", &mut buf)?;
-        write_json_props_to_buf(props, &mut buf)?;
-        buf.push(')');
-        statements.push(std::mem::take(&mut buf));
+/// Convert a single JSON edge value to a GQL MATCH...CREATE statement.
+fn edge_value_to_gql_stmt(edge: &serde_json::Value) -> Result<String, CliError> {
+    let rel_label = edge
+        .get("label")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CliError::ImportExport("edge missing 'label'".into()))?;
+    let mut buf = String::with_capacity(256);
+    buf.push_str("MATCH (a");
+    write_endpoint_match(edge, "source", &mut buf)?;
+    buf.push_str("), (b");
+    write_endpoint_match(edge, "target", &mut buf)?;
+    buf.push_str(") CREATE (a)-[:");
+    write_gql_identifier(rel_label, "edge label", &mut buf)?;
+
+    let rel_props = edge.get("properties").and_then(|v| v.as_object());
+    write_json_props_to_buf(rel_props, &mut buf)?;
+
+    buf.push_str("]->(b)");
+    Ok(buf)
+}
+
+// --- Streaming JSON serde types ---
+
+use serde::de::{DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
+
+/// Seed that streams array elements, converting each to a GQL statement.
+struct JsonArrayStreamSeed<'a, F> {
+    on_stmt: &'a mut F,
+    converter: fn(&serde_json::Value) -> Result<String, CliError>,
+    count: &'a mut usize,
+}
+
+impl<'de, F> DeserializeSeed<'de> for JsonArrayStreamSeed<'_, F>
+where
+    F: FnMut(String) -> Result<(), CliError>,
+{
+    type Value = ();
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
+        deserializer.deserialize_seq(self)
+    }
+}
+
+impl<'de, F> Visitor<'de> for JsonArrayStreamSeed<'_, F>
+where
+    F: FnMut(String) -> Result<(), CliError>,
+{
+    type Value = ();
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an array of JSON objects")
     }
 
-    for edge in edges {
-        let rel_label = edge
-            .get("label")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CliError::ImportExport("edge missing 'label'".into()))?;
-        let source_match = format_endpoint_match(edge, "source")?;
-        let target_match = format_endpoint_match(edge, "target")?;
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+        while let Some(elem) = seq.next_element::<serde_json::Value>()? {
+            let stmt = (self.converter)(&elem).map_err(serde::de::Error::custom)?;
+            (self.on_stmt)(stmt).map_err(serde::de::Error::custom)?;
+            *self.count += 1;
+        }
+        Ok(())
+    }
+}
 
-        buf.clear();
-        buf.push_str("MATCH (a");
-        buf.push_str(&source_match);
-        buf.push_str("), (b");
-        buf.push_str(&target_match);
-        buf.push_str(") CREATE (a)-[:");
-        write_gql_identifier(rel_label, "edge label", &mut buf)?;
+/// Top-level visitor that processes `{"nodes": [...], "edges": [...]}`.
+struct JsonRootVisitor<'a, F> {
+    on_stmt: &'a mut F,
+    count: &'a mut usize,
+}
 
-        let rel_props = edge.get("properties").and_then(|v| v.as_object());
-        write_json_props_to_buf(rel_props, &mut buf)?;
+impl<'de, F> Visitor<'de> for JsonRootVisitor<'_, F>
+where
+    F: FnMut(String) -> Result<(), CliError>,
+{
+    type Value = bool; // true if any elements were found
 
-        buf.push_str("]->(b)");
-        statements.push(std::mem::take(&mut buf));
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a JSON object with 'nodes' and/or 'edges' arrays")
     }
 
-    Ok(statements)
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<bool, A::Error> {
+        let mut found_any = false;
+
+        while let Some(key) = map.next_key::<String>()? {
+            match key.as_str() {
+                "nodes" => {
+                    let before = *self.count;
+                    map.next_value_seed(JsonArrayStreamSeed {
+                        on_stmt: self.on_stmt,
+                        converter: node_value_to_gql_stmt,
+                        count: self.count,
+                    })?;
+                    if *self.count > before {
+                        found_any = true;
+                    }
+                }
+                "edges" => {
+                    let before = *self.count;
+                    map.next_value_seed(JsonArrayStreamSeed {
+                        on_stmt: self.on_stmt,
+                        converter: edge_value_to_gql_stmt,
+                        count: self.count,
+                    })?;
+                    if *self.count > before {
+                        found_any = true;
+                    }
+                }
+                _ => {
+                    map.next_value::<serde_json::Value>()?;
+                }
+            }
+        }
+
+        Ok(found_any)
+    }
+}
+
+/// Seed wrapper to start root-level deserialization.
+struct JsonRootSeed<'a, F> {
+    on_stmt: &'a mut F,
+    count: &'a mut usize,
+}
+
+impl<'de, F> DeserializeSeed<'de> for JsonRootSeed<'_, F>
+where
+    F: FnMut(String) -> Result<(), CliError>,
+{
+    type Value = bool;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<bool, D::Error> {
+        deserializer.deserialize_map(JsonRootVisitor {
+            on_stmt: self.on_stmt,
+            count: self.count,
+        })
+    }
+}
+
+/// Stream JSON import from a reader, calling `on_stmt` for each node/edge statement.
+///
+/// This is the streaming equivalent of [`json_to_gql_statements`]: it reads a
+/// `{"nodes": [...], "edges": [...]}` document one array element at a time using
+/// serde's `DeserializeSeed` pattern, avoiding loading the entire DOM into memory.
+///
+/// Returns the number of statements emitted.
+///
+/// # Errors
+///
+/// Returns `CliError::ImportExport` on invalid JSON, missing fields, empty data,
+/// or any error propagated from `on_stmt`.
+pub fn stream_json_import<R: std::io::Read>(
+    reader: R,
+    mut on_stmt: impl FnMut(String) -> Result<(), CliError>,
+) -> Result<usize, CliError> {
+    let mut count = 0usize;
+
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let found_any = JsonRootSeed {
+        on_stmt: &mut on_stmt,
+        count: &mut count,
+    }
+    .deserialize(&mut deserializer)
+    .map_err(|e| CliError::ImportExport(format!("invalid JSON: {e}")))?;
+
+    if !found_any {
+        return Err(CliError::ImportExport(
+            "no nodes or edges in JSON".into(),
+        ));
+    }
+
+    Ok(count)
 }
 
 /// Check whether `s` is a valid simple GQL identifier (safe for unquoted emission).
@@ -387,6 +590,10 @@ fn write_json_props_to_buf(
 }
 
 /// Write a JSON value as a GQL literal into `buf`.
+///
+/// Arrays and objects are serialized as JSON strings (GQL does not have
+/// native array/object literals). Use the caller's context to surface
+/// a diagnostic if needed.
 fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) {
     match v {
         serde_json::Value::Null => buf.push_str("null"),
@@ -412,10 +619,6 @@ fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) {
             // JSON may contain backslashes (e.g. `\"` inside nested strings);
             // these are passed through as-is since GQL string literals treat
             // backslash as a literal character.
-            eprintln!(
-                "Warning: property stored as JSON string \
-                 (array/object values are not natively supported)"
-            );
             buf.push('\'');
             let serialized = other.to_string();
             for ch in serialized.chars() {
@@ -430,11 +633,12 @@ fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) {
     }
 }
 
-/// Format a MATCH clause for an edge endpoint: `:Label {matchKey: 'matchVal'}`.
-fn format_endpoint_match(
+/// Write a MATCH clause for an edge endpoint into `buf`: `:Label {matchKey: 'matchVal'}`.
+fn write_endpoint_match(
     edge: &serde_json::Value,
     endpoint_key: &str,
-) -> Result<String, CliError> {
+    buf: &mut String,
+) -> Result<(), CliError> {
     let ep = edge
         .get(endpoint_key)
         .and_then(|v| v.as_object())
@@ -464,20 +668,17 @@ fn format_endpoint_match(
         CliError::ImportExport(format!("edge {endpoint_key}.match is empty"))
     })?;
 
-    let mut result = String::with_capacity(64);
     if let Some(l) = label {
-        result.push(':');
-        write_gql_identifier(l, &format!("edge {endpoint_key} label"), &mut result)?;
-        result.push(' ');
-    } else {
-        result.push(' ');
+        buf.push(':');
+        write_gql_identifier(l, &format!("edge {endpoint_key} label"), buf)?;
     }
-    result.push('{');
-    write_gql_identifier(match_key, &format!("edge {endpoint_key} match key"), &mut result)?;
-    result.push_str(": ");
-    write_json_value_to_buf(match_val, &mut result);
-    result.push('}');
-    Ok(result)
+    buf.push(' ');
+    buf.push('{');
+    write_gql_identifier(match_key, &format!("edge {endpoint_key} match key"), buf)?;
+    buf.push_str(": ");
+    write_json_value_to_buf(match_val, buf);
+    buf.push('}');
+    Ok(())
 }
 
 /// Truncate a single-line string for display, replacing newlines.
@@ -1029,5 +1230,511 @@ mod tests {
              "label": "R", "properties": {}}
         ]}"#;
         assert!(json_to_gql_statements(json).is_err());
+    }
+
+    // --- Streaming GQL import ---
+
+    #[test]
+    fn stream_gql_single_statement() {
+        let input = std::io::Cursor::new("CREATE (:A);");
+        let mut out = Vec::new();
+        let count = stream_gql_import(input, |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 1);
+        assert_eq!(out, vec!["CREATE (:A)"]);
+    }
+
+    #[test]
+    fn stream_gql_multiple_statements() {
+        let input = std::io::Cursor::new("CREATE (:A);\nCREATE (:B);\nCREATE (:C);");
+        let mut out = Vec::new();
+        let count = stream_gql_import(input, |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn stream_gql_skips_comments_and_blanks() {
+        let input = std::io::Cursor::new("-- comment\n\n-- another\n");
+        let mut out = Vec::new();
+        let count = stream_gql_import(input, |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 0);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn stream_gql_multiline_statement() {
+        let input = std::io::Cursor::new("CREATE (:Person\n  {name: 'Alice'}\n);");
+        let mut out = Vec::new();
+        let count = stream_gql_import(input, |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 1);
+        assert!(out[0].contains("Person"));
+        assert!(out[0].contains("Alice"));
+    }
+
+    #[test]
+    fn stream_gql_no_trailing_semicolon() {
+        let input = std::io::Cursor::new("CREATE (:X)");
+        let mut out = Vec::new();
+        let count = stream_gql_import(input, |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 1);
+        assert_eq!(out[0], "CREATE (:X)");
+    }
+
+    #[test]
+    fn stream_gql_callback_error_propagates() {
+        let input = std::io::Cursor::new("CREATE (:A);\nCREATE (:B);");
+        let result = stream_gql_import(input, |_| {
+            Err(CliError::ImportExport("stop".into()))
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_gql_parity_with_batch_corpus() {
+        let corpus = "\
+            CREATE (:A {x: 1});\n\
+            CREATE (:B {y: 'hello'});\n\
+            -- comment\n\
+            \n\
+            CREATE (:C);\n\
+            CREATE (:D\n  {multi: 'line'}\n);\n\
+            CREATE (:E);\n\
+            CREATE (:F {z: 42});\n\
+            CREATE (:G);\n\
+            CREATE (:H);\n\
+            CREATE (:I);\n\
+            CREATE (:J);\n\
+        ";
+        let batch = split_gql_statements(corpus);
+        let mut streaming = Vec::new();
+        let count =
+            stream_gql_import(std::io::Cursor::new(corpus), |s| {
+                streaming.push(s);
+                Ok(())
+            })
+            .unwrap(); // OK: test
+        assert_eq!(count, batch.len());
+        assert_eq!(streaming, batch);
+    }
+
+    // --- Streaming CSV import ---
+
+    #[test]
+    fn stream_csv_basic() {
+        let csv = "label,name,age\nPerson,Alice,30\nPerson,Bob,25\n";
+        let mut out = Vec::new();
+        let count = stream_csv_import(std::io::Cursor::new(csv), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 2);
+        assert!(out[0].contains(":Person"));
+        assert!(out[0].contains("name: 'Alice'"));
+        assert!(out[0].contains("age: 30"));
+    }
+
+    #[test]
+    fn stream_csv_numeric_values() {
+        let csv = "label,score,ratio\nItem,42,3.15\n";
+        let mut out = Vec::new();
+        stream_csv_import(std::io::Cursor::new(csv), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert!(out[0].contains("score: 42"));
+        assert!(out[0].contains("ratio: 3.15"));
+    }
+
+    #[test]
+    fn stream_csv_empty_props_omitted() {
+        let csv = "label,name,age\nPerson,Alice,\n";
+        let mut out = Vec::new();
+        stream_csv_import(std::io::Cursor::new(csv), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(out.len(), 1);
+        assert!(!out[0].contains("age"));
+    }
+
+    #[test]
+    fn stream_csv_empty_label_error() {
+        let csv = "label,name\n,Alice\n";
+        let result = stream_csv_import(std::io::Cursor::new(csv), |_| Ok(()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_csv_no_data_rows_error() {
+        let csv = "label,name\n";
+        let result = stream_csv_import(std::io::Cursor::new(csv), |_| Ok(()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_csv_callback_error_propagates() {
+        let csv = "label,name\nPerson,Alice\nPerson,Bob\n";
+        let result = stream_csv_import(std::io::Cursor::new(csv), |_| {
+            Err(CliError::ImportExport("stop".into()))
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_csv_late_error_propagates_via_result() {
+        // Row 3 has a label with double quote — write_gql_identifier rejects it.
+        // The error must propagate as Err even though rows 1-2 succeeded.
+        let csv = "label,name\nPerson,Alice\nPerson,Bob\nbad\"label,Mallory\n";
+        let mut count = 0usize;
+        let result = stream_csv_import(std::io::Cursor::new(csv), |_| {
+            count += 1;
+            Ok(())
+        });
+        assert!(
+            result.is_err(),
+            "late error (row 3) must propagate; count was {count}"
+        );
+        assert_eq!(count, 2, "first 2 rows should have been emitted before error");
+    }
+
+    #[test]
+    fn stream_csv_parity_with_batch() {
+        let csv = "label,name,age,score\n\
+                    Person,Alice,30,100\n\
+                    Person,Bob,25,200\n\
+                    Person,O'Brien,40,300\n\
+                    Item,Widget,,50\n\
+                    Item,Gadget,10,\n";
+        let batch = csv_nodes_to_gql(csv).unwrap(); // OK: test
+        let mut streaming = Vec::new();
+        let count = stream_csv_import(std::io::Cursor::new(csv), |s| {
+            streaming.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, batch.len());
+        assert_eq!(streaming, batch);
+    }
+
+    // --- Streaming JSON import ---
+
+    #[test]
+    fn stream_json_nodes_only() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"name": "Alice"}},
+            {"label": "Person", "properties": {"name": "Bob"}}
+        ], "edges": []}"#;
+        let mut out = Vec::new();
+        let count = stream_json_import(std::io::Cursor::new(json), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 2);
+        assert!(out[0].contains(":Person"));
+        assert!(out[0].contains("name: 'Alice'"));
+    }
+
+    #[test]
+    fn stream_json_edges_only() {
+        // edges-only with no nodes: should produce edge stmts if edges are non-empty
+        let json = r#"{"nodes": [], "edges": [
+            {
+                "source": {"label": "A", "match": {"id": "1"}},
+                "target": {"label": "B", "match": {"id": "2"}},
+                "label": "R",
+                "properties": {}
+            }
+        ]}"#;
+        let mut out = Vec::new();
+        let count = stream_json_import(std::io::Cursor::new(json), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 1);
+        assert!(out[0].contains("MATCH"));
+    }
+
+    #[test]
+    fn stream_json_nodes_and_edges() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"id": "1", "name": "Alice"}},
+            {"label": "Person", "properties": {"id": "2", "name": "Bob"}}
+        ], "edges": [
+            {
+                "source": {"label": "Person", "match": {"id": "1"}},
+                "target": {"label": "Person", "match": {"id": "2"}},
+                "label": "KNOWS",
+                "properties": {}
+            }
+        ]}"#;
+        let mut out = Vec::new();
+        let count = stream_json_import(std::io::Cursor::new(json), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, 3);
+        assert!(out[0].starts_with("CREATE"));
+        assert!(out[1].starts_with("CREATE"));
+        assert!(out[2].starts_with("MATCH"));
+    }
+
+    #[test]
+    fn stream_json_single_quote_escaped() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"name": "O'Brien"}}
+        ], "edges": []}"#;
+        let mut out = Vec::new();
+        stream_json_import(std::io::Cursor::new(json), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert!(out[0].contains("O''Brien"), "got: {}", out[0]);
+    }
+
+    #[test]
+    fn stream_json_boolean_null() {
+        let json = r#"{"nodes": [
+            {"label": "Item", "properties": {"active": true, "deleted": false, "note": null}}
+        ], "edges": []}"#;
+        let mut out = Vec::new();
+        stream_json_import(std::io::Cursor::new(json), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert!(out[0].contains("active: true"), "got: {}", out[0]);
+        assert!(out[0].contains("deleted: false"), "got: {}", out[0]);
+        assert!(out[0].contains("note: null"), "got: {}", out[0]);
+    }
+
+    #[test]
+    fn stream_json_invalid_json_error() {
+        let result = stream_json_import(std::io::Cursor::new("not json"), |_| Ok(()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_json_empty_arrays_error() {
+        let json = r#"{"nodes": [], "edges": []}"#;
+        let result = stream_json_import(std::io::Cursor::new(json), |_| Ok(()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_json_callback_error_propagates() {
+        let json = r#"{"nodes": [
+            {"label": "A", "properties": {}},
+            {"label": "B", "properties": {}}
+        ], "edges": []}"#;
+        let result = stream_json_import(std::io::Cursor::new(json), |_| {
+            Err(CliError::ImportExport("stop".into()))
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn stream_json_parity_with_batch() {
+        let json = r#"{"nodes": [
+            {"label": "Person", "properties": {"id": "1", "name": "Alice", "age": 30}},
+            {"label": "Person", "properties": {"id": "2", "name": "Bob", "age": 25}},
+            {"label": "City", "properties": {"id": "3", "name": "Madrid"}},
+            {"label": "City", "properties": {"id": "4", "name": "London"}},
+            {"label": "Item", "properties": {"id": "5", "active": true}}
+        ], "edges": [
+            {
+                "source": {"label": "Person", "match": {"id": "1"}},
+                "target": {"label": "Person", "match": {"id": "2"}},
+                "label": "KNOWS",
+                "properties": {"since": 2024}
+            },
+            {
+                "source": {"label": "Person", "match": {"id": "1"}},
+                "target": {"label": "City", "match": {"id": "3"}},
+                "label": "LIVES_IN",
+                "properties": {}
+            }
+        ]}"#;
+        let batch = json_to_gql_statements(json).unwrap(); // OK: test
+        let mut streaming = Vec::new();
+        let count = stream_json_import(std::io::Cursor::new(json), |s| {
+            streaming.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        assert_eq!(count, batch.len());
+        assert_eq!(streaming, batch);
+    }
+
+    // --- Throughput regression guards ---
+
+    const THROUGHPUT_ELEMENT_COUNT: usize = 10_000;
+    // Generous in debug (CI runners), strict in release
+    const THROUGHPUT_TIMEOUT: std::time::Duration = if cfg!(debug_assertions) {
+        std::time::Duration::from_secs(10)
+    } else {
+        std::time::Duration::from_secs(2)
+    };
+
+    #[test]
+    fn throughput_stream_gql_10k() {
+        let mut input = String::new();
+        for i in 0..THROUGHPUT_ELEMENT_COUNT {
+            input.push_str(&format!("CREATE (:Node {{id: {i}, name: 'node_{i}'}});\n"));
+        }
+        let start = std::time::Instant::now();
+        let mut count = 0usize;
+        stream_gql_import(std::io::Cursor::new(input), |_| {
+            count += 1;
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        let elapsed = start.elapsed();
+        assert_eq!(count, THROUGHPUT_ELEMENT_COUNT);
+        assert!(
+            elapsed < THROUGHPUT_TIMEOUT,
+            "stream_gql_import took {elapsed:?} for {THROUGHPUT_ELEMENT_COUNT} elements (limit: {THROUGHPUT_TIMEOUT:?})"
+        );
+    }
+
+    #[test]
+    fn throughput_stream_csv_10k() {
+        let mut input = String::from("label,id,name,score\n");
+        for i in 0..THROUGHPUT_ELEMENT_COUNT {
+            input.push_str(&format!("Item,{i},item_{i},{}\n", i * 10));
+        }
+        let start = std::time::Instant::now();
+        let mut count = 0usize;
+        stream_csv_import(std::io::Cursor::new(input), |_| {
+            count += 1;
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        let elapsed = start.elapsed();
+        assert_eq!(count, THROUGHPUT_ELEMENT_COUNT);
+        assert!(
+            elapsed < THROUGHPUT_TIMEOUT,
+            "stream_csv_import took {elapsed:?} for {THROUGHPUT_ELEMENT_COUNT} elements (limit: {THROUGHPUT_TIMEOUT:?})"
+        );
+    }
+
+    #[test]
+    fn throughput_stream_json_10k() {
+        let mut nodes = Vec::with_capacity(THROUGHPUT_ELEMENT_COUNT);
+        for i in 0..THROUGHPUT_ELEMENT_COUNT {
+            nodes.push(format!(
+                r#"{{"label":"Node","properties":{{"id":{i},"name":"node_{i}"}}}}"#
+            ));
+        }
+        let json = format!(r#"{{"nodes":[{}],"edges":[]}}"#, nodes.join(","));
+        let start = std::time::Instant::now();
+        let mut count = 0usize;
+        stream_json_import(std::io::Cursor::new(json), |_| {
+            count += 1;
+            Ok(())
+        })
+        .unwrap(); // OK: test
+        let elapsed = start.elapsed();
+        assert_eq!(count, THROUGHPUT_ELEMENT_COUNT);
+        assert!(
+            elapsed < THROUGHPUT_TIMEOUT,
+            "stream_json_import took {elapsed:?} for {THROUGHPUT_ELEMENT_COUNT} elements (limit: {THROUGHPUT_TIMEOUT:?})"
+        );
+    }
+
+    // --- H4: CSV label must pass through write_gql_identifier ---
+
+    #[test]
+    fn csv_nodes_label_with_space_uses_delimited_identifier() {
+        let csv = "label,name\nMy Type,Alice\n";
+        let stmts = csv_nodes_to_gql(csv).expect("csv to gql"); // OK: test
+        assert!(
+            stmts[0].contains(":\"My Type\""),
+            "expected delimited identifier, got: {}",
+            stmts[0]
+        );
+    }
+
+    #[test]
+    fn csv_nodes_label_injection_attempt_uses_delimited_identifier() {
+        let csv = "label,name\nX {admin: true},Alice\n";
+        let stmts = csv_nodes_to_gql(csv).expect("csv to gql"); // OK: test
+        assert!(
+            stmts[0].contains(":\"X {admin: true}\""),
+            "expected delimited identifier to neutralize injection, got: {}",
+            stmts[0]
+        );
+        assert!(stmts[0].contains("name: 'Alice'"), "got: {}", stmts[0]);
+    }
+
+    #[test]
+    fn csv_nodes_label_with_double_quote_is_error() {
+        let csv = "label,name\nbad\"label,Alice\n";
+        let result = csv_nodes_to_gql(csv);
+        assert!(result.is_err(), "double-quote in label must be rejected");
+    }
+
+    #[test]
+    fn stream_csv_label_with_space_uses_delimited_identifier() {
+        let csv = "label,name\nMy Type,Alice\n";
+        let mut out = Vec::new();
+        stream_csv_import(std::io::Cursor::new(csv), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .expect("stream csv"); // OK: test
+        assert!(
+            out[0].contains(":\"My Type\""),
+            "expected delimited identifier, got: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn stream_csv_label_injection_attempt_uses_delimited_identifier() {
+        let csv = "label,name\nX {admin: true},Alice\n";
+        let mut out = Vec::new();
+        stream_csv_import(std::io::Cursor::new(csv), |s| {
+            out.push(s);
+            Ok(())
+        })
+        .expect("stream csv"); // OK: test
+        assert!(
+            out[0].contains(":\"X {admin: true}\""),
+            "expected delimited identifier, got: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn stream_csv_label_with_double_quote_is_error() {
+        let csv = "label,name\nbad\"label,Alice\n";
+        let result = stream_csv_import(std::io::Cursor::new(csv), |_| Ok(()));
+        assert!(result.is_err(), "double-quote in label must be rejected");
     }
 }

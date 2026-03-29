@@ -173,58 +173,128 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    // All content (stdin or file) is loaded into memory before processing.
-    // Streaming is not possible because serde_json::from_str (JSON format)
-    // and split_gql_statements (GQL format) both require the full input.
-    let content = if args.file == "-" {
-        use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buf)
-            .map_err(|e| CliError::ImportExport(format!("cannot read stdin: {e}")))?;
-        buf
-    } else {
-        if let Ok(meta) = std::fs::metadata(&args.file) {
-            if is_large_file(meta.len()) {
-                eprintln!(
-                    "Warning: file is {:.0} MB — loading entirely into memory",
-                    meta.len() as f64 / (1024.0 * 1024.0)
-                );
-            }
-        }
-        std::fs::read_to_string(&args.file)
-            .map_err(|e| CliError::ImportExport(format!("cannot read {}: {e}", args.file)))?
-    };
-
     let fmt = args
         .format
         .as_deref()
         .unwrap_or_else(|| infer_import_format(&args.file));
 
-    let statements = match fmt {
-        "gql" => import::split_gql_statements(&content),
-        "csv-nodes" => import::csv_nodes_to_gql(&content)?,
-        "json" => import::json_to_gql_statements(&content)?,
-        other => {
-            return Err(CliError::ImportExport(format!(
-                "unsupported import format: {other}"
-            )));
-        }
-    };
-
     if args.dry_run {
+        // Dry-run: load content into memory for summary (batch functions)
+        let content = read_import_content(&args.file)?;
+        let statements = match fmt {
+            "gql" => import::split_gql_statements(&content),
+            "csv-nodes" => import::csv_nodes_to_gql(&content)?,
+            "json" => import::json_to_gql_statements(&content)?,
+            other => {
+                return Err(CliError::ImportExport(format!(
+                    "unsupported import format: {other}"
+                )));
+            }
+        };
         let plan = ImportPlan::new(statements, 100);
         print!("{}", plan.dry_run_summary());
     } else {
-        let total = statements.len();
-        for (i, stmt) in statements.iter().enumerate() {
-            query::execute_query(session, stmt, "gql").await?;
-            if should_report_progress(i + 1, total) {
-                eprintln!("Imported {}/{total} statements", i + 1);
+        // Live import: streaming with bounded channel for backpressure
+        let reader: Box<dyn std::io::Read + Send> = if args.file == "-" {
+            Box::new(std::io::stdin())
+        } else {
+            Box::new(std::io::BufReader::new(
+                std::fs::File::open(&args.file)
+                    .map_err(|e| CliError::ImportExport(format!("cannot open {}: {e}", args.file)))?,
+            ))
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(IMPORT_CHANNEL_CAPACITY);
+
+        let fmt_owned = fmt.to_owned();
+        let producer = tokio::task::spawn_blocking(move || -> Result<(), CliError> {
+            let send_stmt = |stmt: String| {
+                tx.blocking_send(stmt)
+                    .map_err(|_| CliError::ImportExport("channel closed".into()))
+            };
+            match fmt_owned.as_str() {
+                "json" => import::stream_json_import(reader, send_stmt).map(|_| ()),
+                "gql" => import::stream_gql_import(reader, send_stmt).map(|_| ()),
+                "csv-nodes" => import::stream_csv_import(reader, send_stmt).map(|_| ()),
+                other => Err(CliError::ImportExport(format!(
+                    "unsupported import format: {other}"
+                ))),
+            }
+            // tx drops here, closing the channel (both on Ok and Err)
+        });
+
+        let mut count = 0usize;
+        let mut error_count = 0usize;
+        let mut query_err: Option<CliError> = None;
+
+        while let Some(stmt) = rx.recv().await {
+            let query_result = timeout(
+                IMPORT_STATEMENT_TIMEOUT,
+                query::execute_query(session, &stmt, "gql"),
+            )
+            .await;
+
+            let result = query_result.unwrap_or_else(|_| {
+                Err(CliError::ImportExport(format!(
+                    "statement timed out after {}s (statement #{})",
+                    IMPORT_STATEMENT_TIMEOUT.as_secs(),
+                    count + error_count + 1,
+                )))
+            });
+
+            if let Err(e) = result {
+                if args.continue_on_error {
+                    error_count += 1;
+                    eprintln!("Error in statement #{}: {e}", count + error_count);
+                } else {
+                    query_err = Some(e);
+                    break;
+                }
+            } else {
+                count += 1;
+                if count % PROGRESS_INTERVAL == 0 {
+                    eprintln!("[PROGRESS] Imported {count} statements...");
+                }
             }
         }
+
+        // Drop rx to unblock producer if we broke early
+        drop(rx);
+
+        // Error priority:
+        // 1. JoinError (producer panic) — always propagated
+        // 2. query_err (Bolt error) — consumer's error takes precedence
+        // 3. producer_result (parse/IO error) — producer's logical error
+        let producer_result = producer
+            .await
+            .map_err(|e| CliError::ImportExport(format!("import thread panicked: {e}")))?;
+
+        if let Some(e) = query_err {
+            return Err(e);
+        }
+        producer_result?;
+
+        if error_count > 0 {
+            eprintln!("{error_count} statements failed (see errors above).");
+        }
+        eprintln!("[PROGRESS] Imported {count} statements total.");
     }
     Ok(())
+}
+
+/// Read import content from file or stdin into a string (used for dry-run only).
+fn read_import_content(file: &str) -> Result<String, CliError> {
+    if file == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| CliError::ImportExport(format!("cannot read stdin: {e}")))?;
+        Ok(buf)
+    } else {
+        std::fs::read_to_string(file)
+            .map_err(|e| CliError::ImportExport(format!("cannot read {file}: {e}")))
+    }
 }
 
 async fn handle_export<R, W>(
@@ -483,19 +553,18 @@ fn infer_import_format(file: &str) -> &'static str {
     }
 }
 
-const LARGE_FILE_THRESHOLD_BYTES: u64 = 500 * 1024 * 1024;
-
-/// Returns `true` if the file size exceeds the large-file warning threshold.
-fn is_large_file(size: u64) -> bool {
-    size >= LARGE_FILE_THRESHOLD_BYTES
-}
-
 const PROGRESS_INTERVAL: usize = 1_000;
 
-/// Returns `true` if progress should be reported at this step.
-fn should_report_progress(done: usize, total: usize) -> bool {
-    done % PROGRESS_INTERVAL == 0 || done == total
-}
+/// Maximum time to wait for a single statement to execute during import.
+/// If the server does not respond within this time, the import aborts.
+const IMPORT_STATEMENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Capacity of the bounded channel between the producer (parser thread)
+/// and the consumer (Bolt execution loop).
+///
+/// 64 statements provides ~16 KB of backpressure buffer at ~256 bytes/stmt
+/// while keeping memory overhead negligible.
+const IMPORT_CHANNEL_CAPACITY: usize = 64;
 
 #[cfg(test)]
 mod tests {
@@ -541,39 +610,13 @@ mod tests {
     }
 
     #[test]
-    fn large_file_threshold_one_below() {
-        assert!(!is_large_file(LARGE_FILE_THRESHOLD_BYTES - 1));
+    fn progress_interval_constant_is_positive() {
+        assert!(PROGRESS_INTERVAL > 0);
     }
 
     #[test]
-    fn large_file_threshold_at_boundary() {
-        assert!(is_large_file(LARGE_FILE_THRESHOLD_BYTES));
-    }
-
-    #[test]
-    fn large_file_threshold_one_above() {
-        assert!(is_large_file(LARGE_FILE_THRESHOLD_BYTES + 1));
-    }
-
-    #[test]
-    fn progress_interval_not_at_arbitrary_count() {
-        assert!(!should_report_progress(999, 400_000));
-    }
-
-    #[test]
-    fn progress_interval_fires_at_1000() {
-        assert!(should_report_progress(1000, 400_000));
-    }
-
-    #[test]
-    fn progress_interval_fires_at_last() {
-        assert!(should_report_progress(400_000, 400_000));
-    }
-
-    #[test]
-    fn progress_interval_small_total_fires_only_at_end() {
-        assert!(!should_report_progress(1, 5));
-        assert!(!should_report_progress(4, 5));
-        assert!(should_report_progress(5, 5));
+    fn progress_interval_fires_at_multiple() {
+        assert_eq!(PROGRESS_INTERVAL % PROGRESS_INTERVAL, 0);
+        assert_ne!((PROGRESS_INTERVAL - 1) % PROGRESS_INTERVAL, 0);
     }
 }

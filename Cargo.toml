@@ -25,7 +25,7 @@ license     = "LicenseRef-Proprietary"
 rust-version = "1.85"
 
 [workspace.dependencies]
-tessera-graph              = { path = "../tessera-graph", features = ["enterprise-helpers"] }
+tessera-graph              = { path = "../tessera-graph/crates/tessera-graph", features = ["extended-gql"] }
 tessera-protocol           = { path = "crates/tessera-protocol" }
 tessera-auth               = { path = "crates/tessera-auth" }
 tessera-storage-enterprise = { path = "crates/tessera-storage-enterprise" }
