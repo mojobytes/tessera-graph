@@ -491,13 +491,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                     })?;
                     let mut secure = SecureGraph::new(&mut *graph, clearance);
                     let r = tessera_storage_enterprise::gql::execute_mut(&mut secure, m);
-                    if r.is_ok() {
-                        drop(secure);
-                        if let Err(e) = graph.flush() {
-                            drop(graph); // drop before returning
-                            return Err(ServerError::Storage(e));
-                        }
-                    }
+                    // WAL guarantees durability; flush is handled by the
+                    // background timer (see flush_task::spawn_background_flush).
+                    drop(secure);
                     drop(graph); // Explicitly drop write guard before any `.await`
                     #[allow(clippy::cast_possible_wrap)]
                     r.map(|result| {

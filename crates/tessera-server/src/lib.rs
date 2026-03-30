@@ -7,6 +7,7 @@ pub mod bolt_handler;
 pub mod config;
 pub mod context;
 pub mod error;
+pub mod flush_task;
 pub mod listener;
 pub mod shutdown;
 

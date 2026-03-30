@@ -28,7 +28,7 @@ COPY tessera-graph/ tessera-graph/
 COPY tessera-graph-enterprise/ tessera-graph-enterprise/
 
 # Remove [[bench]] blocks from Cargo manifests (bench .rs files excluded by .dockerignore)
-RUN sed -i '/^\[\[bench\]\]/,/^$/d' tessera-graph/Cargo.toml \
+RUN find tessera-graph/ -name Cargo.toml -exec sed -i '/^\[\[bench\]\]/,/^$/d' {} + \
     && sed -i '/"crates\/tessera-benchmark",/d' tessera-graph-enterprise/Cargo.toml
 
 # Build server and CLI binaries in release mode

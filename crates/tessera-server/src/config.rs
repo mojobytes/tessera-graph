@@ -5,6 +5,9 @@
 use std::path::PathBuf;
 use tessera_graph::GraphConfig;
 
+/// Default background flush interval in milliseconds.
+const DEFAULT_FLUSH_INTERVAL_MS: u64 = 50;
+
 /// Parsed persistence configuration derived from environment variables.
 #[derive(Debug)]
 pub struct PersistenceConfig {
@@ -15,6 +18,10 @@ pub struct PersistenceConfig {
     pub graph_config: GraphConfig,
     /// Default tenant name used when no `db` field is provided in HELLO.
     pub default_tenant: String,
+    /// Background flush interval in milliseconds.
+    /// `0` means synchronous flush after each mutation (legacy behaviour).
+    /// `TESSERA_FLUSH_INTERVAL_MS` (default `50`).
+    pub flush_interval_ms: u64,
 }
 
 impl PersistenceConfig {
@@ -24,6 +31,7 @@ impl PersistenceConfig {
     /// - `TESSERA_MEMORY_LIMIT_MB`: buffer pool size in megabytes (default 64).
     /// - `TESSERA_WAL_ENABLED`: `"false"` disables WAL (default enabled).
     /// - `TESSERA_DEFAULT_TENANT`: default tenant name (default `"default"`).
+    /// - `TESSERA_FLUSH_INTERVAL_MS`: background flush interval in ms (default 50, 0 = sync).
     #[must_use]
     pub fn from_env() -> Self {
         let data_dir = std::env::var("TESSERA_DATA_DIR").ok().map(PathBuf::from);
@@ -42,6 +50,10 @@ impl PersistenceConfig {
         let default_tenant =
             std::env::var("TESSERA_DEFAULT_TENANT").unwrap_or_else(|_| "default".to_owned());
 
+        let flush_interval_ms = Self::parse_flush_interval(
+            std::env::var("TESSERA_FLUSH_INTERVAL_MS").ok().as_deref(),
+        );
+
         Self {
             data_dir,
             graph_config: GraphConfig {
@@ -51,6 +63,15 @@ impl PersistenceConfig {
                 wal_enabled,
             },
             default_tenant,
+            flush_interval_ms,
         }
+    }
+
+    /// Parse flush interval from an optional string value.
+    /// Returns `DEFAULT_FLUSH_INTERVAL_MS` (50) when `None` or unparseable.
+    #[must_use]
+    pub fn parse_flush_interval(raw: Option<&str>) -> u64 {
+        raw.and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_FLUSH_INTERVAL_MS)
     }
 }

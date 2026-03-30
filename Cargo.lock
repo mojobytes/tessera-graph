@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-audit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-auth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "base64ct",
@@ -2278,7 +2278,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-benchmark"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "neo4rs",
@@ -2294,7 +2294,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "comfy-table",
@@ -2316,14 +2316,14 @@ dependencies = [
 
 [[package]]
 name = "tessera-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "tessera-cypher"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tessera-config",
  "tessera-graph",
@@ -2339,7 +2339,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-import"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2351,7 +2351,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-monitor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
  "tokio",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "rcgen",
@@ -2374,7 +2374,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-replication"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tessera-graph",
  "thiserror 2.0.18",
@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rcgen",
  "serde_json",
@@ -2405,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-storage-enterprise"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crc32fast",
  "tempfile",
@@ -2418,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-streaming"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tessera-graph",
  "thiserror 2.0.18",
@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "tessera-tenant"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "tempfile",
  "tessera-graph",

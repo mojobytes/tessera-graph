@@ -75,6 +75,7 @@ async fn main() {
 
     // --- Tenant registry (replaces single-graph approach) ---
     let persistence = PersistenceConfig::from_env();
+    let flush_interval_ms = persistence.flush_interval_ms;
     let base_dir = persistence
         .data_dir
         .unwrap_or_else(|| std::env::temp_dir().join("tessera-data"));
@@ -119,6 +120,13 @@ async fn main() {
         tracing::info!("shutting down");
         let _ = shutdown_tx.send(true);
     });
+
+    // --- Background flush (WAL ensures durability; this amortises page-file I/O) ---
+    let _flush_handle = tessera_server::flush_task::spawn_background_flush(
+        Arc::clone(&registry),
+        flush_interval_ms,
+        shutdown_rx.clone(),
+    );
 
     // --- Listen ---
     let listener = TesseraListener::bind(&bind_addr)
