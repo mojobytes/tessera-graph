@@ -17,6 +17,8 @@ use tessera_benchmark::tessera_target::TesseraTarget;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Tessera,
+    #[cfg(feature = "tessera-bolt")]
+    TesseraBolt,
     #[cfg(feature = "memgraph")]
     Memgraph,
 }
@@ -58,6 +60,16 @@ pub struct CliArgs {
     pub memgraph_user: String,
     #[cfg(feature = "memgraph")]
     pub memgraph_pass: String,
+    #[cfg(feature = "memgraph")]
+    pub memgraph_cert: Option<String>,
+    #[cfg(feature = "tessera-bolt")]
+    pub tessera_bolt_host: String,
+    #[cfg(feature = "tessera-bolt")]
+    pub tessera_bolt_port: u16,
+    #[cfg(feature = "tessera-bolt")]
+    pub tessera_bolt_user: String,
+    #[cfg(feature = "tessera-bolt")]
+    pub tessera_bolt_pass: String,
 }
 
 impl Default for CliArgs {
@@ -78,6 +90,16 @@ impl Default for CliArgs {
             memgraph_user: String::new(),
             #[cfg(feature = "memgraph")]
             memgraph_pass: String::new(),
+            #[cfg(feature = "memgraph")]
+            memgraph_cert: None,
+            #[cfg(feature = "tessera-bolt")]
+            tessera_bolt_host: "localhost".into(),
+            #[cfg(feature = "tessera-bolt")]
+            tessera_bolt_port: 7687,
+            #[cfg(feature = "tessera-bolt")]
+            tessera_bolt_user: "admin".into(),
+            #[cfg(feature = "tessera-bolt")]
+            tessera_bolt_pass: "Admin.123".into(),
         }
     }
 }
@@ -94,6 +116,8 @@ impl CliArgs {
                     i += 1;
                     if i < args.len() {
                         result.target = match args[i] {
+                            #[cfg(feature = "tessera-bolt")]
+                            "tessera-bolt" => Target::TesseraBolt,
                             #[cfg(feature = "memgraph")]
                             "memgraph" => Target::Memgraph,
                             _ => Target::Tessera,
@@ -180,6 +204,41 @@ impl CliArgs {
                         result.memgraph_pass = args[i].to_string();
                     }
                 }
+                #[cfg(feature = "memgraph")]
+                "--memgraph-cert" => {
+                    i += 1;
+                    if i < args.len() {
+                        result.memgraph_cert = Some(args[i].to_string());
+                    }
+                }
+                #[cfg(feature = "tessera-bolt")]
+                "--tessera-host" => {
+                    i += 1;
+                    if i < args.len() {
+                        result.tessera_bolt_host = args[i].to_string();
+                    }
+                }
+                #[cfg(feature = "tessera-bolt")]
+                "--tessera-port" => {
+                    i += 1;
+                    if i < args.len() {
+                        result.tessera_bolt_port = args[i].parse().unwrap_or(7687);
+                    }
+                }
+                #[cfg(feature = "tessera-bolt")]
+                "--tessera-user" => {
+                    i += 1;
+                    if i < args.len() {
+                        result.tessera_bolt_user = args[i].to_string();
+                    }
+                }
+                #[cfg(feature = "tessera-bolt")]
+                "--tessera-pass" => {
+                    i += 1;
+                    if i < args.len() {
+                        result.tessera_bolt_pass = args[i].to_string();
+                    }
+                }
                 _ => {}
             }
             i += 1;
@@ -202,10 +261,20 @@ fn result_to_entry(r: &ScenarioResult) -> ReportEntry {
 
 /// Runs the selected scenario(s) against the given target and returns a report.
 ///
+/// The `concurrent_factory` produces fresh targets for each thread in the
+/// concurrent scenario. Pass `None` to skip concurrent benchmarks.
+///
 /// # Errors
 ///
 /// Returns [`BenchmarkError`] if any scenario fails during execution.
-fn run_scenarios(args: &CliArgs, target: &mut dyn BenchmarkTarget) -> Result<Report> {
+fn run_scenarios<F>(
+    args: &CliArgs,
+    target: &mut dyn BenchmarkTarget,
+    concurrent_factory: Option<F>,
+) -> Result<Report>
+where
+    F: Fn() -> Box<dyn BenchmarkTarget + Send> + Send + Sync,
+{
     let mut report = Report::new();
 
     let run_write = matches!(args.scenario, ScenarioKind::Write | ScenarioKind::All);
@@ -239,30 +308,42 @@ fn run_scenarios(args: &CliArgs, target: &mut dyn BenchmarkTarget) -> Result<Rep
 
     if run_traversal {
         let ds = ChainDataset { length: args.nodes };
-        let dataset = ds.build(target)?;
-        let s = TraversalScenario {
-            start: dataset.nodes[0],
-            max_depth: args.depth,
-            iterations: args.iterations,
-        };
-        let r = s.run(target)?;
-        report.add(result_to_entry(&r));
+        match ds.build(target) {
+            Ok(dataset) => {
+                let s = TraversalScenario {
+                    start: dataset.nodes[0],
+                    max_depth: args.depth,
+                    iterations: args.iterations,
+                };
+                match s.run(target) {
+                    Ok(r) => report.add(result_to_entry(&r)),
+                    Err(e) => eprintln!("  [skip] traversal: {e}"),
+                }
+            }
+            Err(e) => eprintln!("  [skip] traversal dataset: {e}"),
+        }
         target.clear();
     }
 
     if run_pathfinding {
         let ds = ChainDataset { length: args.nodes };
-        let dataset = ds.build(target)?;
-        let s = PathfindingScenario {
-            from: dataset.nodes[0],
-            to: *dataset
-                .nodes
-                .last()
-                .ok_or_else(|| BenchmarkError::scenario("empty dataset for pathfinding"))?,
-            iterations: args.iterations,
-        };
-        let r = s.run(target)?;
-        report.add(result_to_entry(&r));
+        match ds.build(target) {
+            Ok(dataset) => {
+                let s = PathfindingScenario {
+                    from: dataset.nodes[0],
+                    to: *dataset
+                        .nodes
+                        .last()
+                        .ok_or_else(|| BenchmarkError::scenario("empty dataset for pathfinding"))?,
+                    iterations: args.iterations,
+                };
+                match s.run(target) {
+                    Ok(r) => report.add(result_to_entry(&r)),
+                    Err(e) => eprintln!("  [skip] pathfinding: {e}"),
+                }
+            }
+            Err(e) => eprintln!("  [skip] pathfinding dataset: {e}"),
+        }
         target.clear();
     }
 
@@ -277,13 +358,17 @@ fn run_scenarios(args: &CliArgs, target: &mut dyn BenchmarkTarget) -> Result<Rep
     }
 
     if run_concurrent {
-        let s = ConcurrentScenario {
-            thread_count: args.threads,
-            ops_per_thread: args.iterations,
-            write_ratio: args.write_ratio,
-        };
-        let r = s.run_with_factory(|| Box::new(TesseraTarget::new()))?;
-        report.add(result_to_entry(&r));
+        if let Some(factory) = concurrent_factory {
+            let s = ConcurrentScenario {
+                thread_count: args.threads,
+                ops_per_thread: args.iterations,
+                write_ratio: args.write_ratio,
+            };
+            let r = s.run_with_factory(factory)?;
+            report.add(result_to_entry(&r));
+        } else {
+            eprintln!("  [skip] concurrent: not supported for this target");
+        }
     }
 
     Ok(report)
@@ -298,7 +383,27 @@ pub fn run_scenario(args: &CliArgs) -> Result<Report> {
     match args.target {
         Target::Tessera => {
             let mut target = TesseraTarget::new();
-            run_scenarios(args, &mut target)
+            let factory = || -> Box<dyn BenchmarkTarget + Send> {
+                Box::new(TesseraTarget::new())
+            };
+            run_scenarios(args, &mut target, Some(factory))
+        }
+        #[cfg(feature = "tessera-bolt")]
+        Target::TesseraBolt => {
+            let mut target =
+                tessera_benchmark::tessera_bolt_target::TesseraBoltTarget::connect(
+                    &args.tessera_bolt_host,
+                    args.tessera_bolt_port,
+                    &args.tessera_bolt_user,
+                    &args.tessera_bolt_pass,
+                )?;
+            // Concurrent not supported for Bolt targets (each thread would
+            // need its own TCP connection, which is a different benchmark).
+            run_scenarios(
+                args,
+                &mut target,
+                None::<fn() -> Box<dyn BenchmarkTarget + Send>>,
+            )
         }
         #[cfg(feature = "memgraph")]
         Target::Memgraph => {
@@ -306,13 +411,23 @@ pub fn run_scenario(args: &CliArgs) -> Result<Report> {
                 &args.memgraph_uri,
                 &args.memgraph_user,
                 &args.memgraph_pass,
+                args.memgraph_cert.as_deref(),
             )?;
-            run_scenarios(args, &mut target)
+            // Concurrent not supported for Memgraph Bolt target.
+            run_scenarios(
+                args,
+                &mut target,
+                None::<fn() -> Box<dyn BenchmarkTarget + Send>>,
+            )
         }
     }
 }
 
 fn main() {
+    // Install a default crypto provider for TLS (needed by both tessera-bolt and neo4rs).
+    #[cfg(any(feature = "tessera-bolt", feature = "memgraph"))]
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let raw_args: Vec<String> = std::env::args().collect();
     let args_refs: Vec<&str> = raw_args.iter().map(String::as_str).collect();
     let args = CliArgs::parse_from(&args_refs);
@@ -456,5 +571,32 @@ mod tests {
         assert_eq!(args.memgraph_uri, "bolt://localhost:7687");
         assert!(args.memgraph_user.is_empty());
         assert!(args.memgraph_pass.is_empty());
+    }
+
+    #[cfg(feature = "tessera-bolt")]
+    #[test]
+    fn cli_args_parse_tessera_bolt_target() {
+        let args = CliArgs::parse_from(&[
+            "tessera-bench",
+            "--target",
+            "tessera-bolt",
+            "--tessera-host",
+            "db.example.com",
+            "--tessera-port",
+            "7688",
+        ]);
+        assert_eq!(args.target, Target::TesseraBolt);
+        assert_eq!(args.tessera_bolt_host, "db.example.com");
+        assert_eq!(args.tessera_bolt_port, 7688);
+    }
+
+    #[cfg(feature = "tessera-bolt")]
+    #[test]
+    fn cli_args_tessera_bolt_defaults() {
+        let args = CliArgs::parse_from(&["tessera-bench", "--target", "tessera-bolt"]);
+        assert_eq!(args.tessera_bolt_host, "localhost");
+        assert_eq!(args.tessera_bolt_port, 7687);
+        assert_eq!(args.tessera_bolt_user, "admin");
+        assert_eq!(args.tessera_bolt_pass, "Admin.123");
     }
 }

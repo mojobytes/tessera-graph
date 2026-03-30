@@ -14,3 +14,6 @@ pub mod tessera_target;
 
 #[cfg(feature = "memgraph")]
 pub mod memgraph_target;
+
+#[cfg(feature = "tessera-bolt")]
+pub mod tessera_bolt_target;

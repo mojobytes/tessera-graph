@@ -5,6 +5,9 @@
 //!
 //! Gated behind the `memgraph` feature flag. Requires a running Memgraph
 //! instance reachable at the configured URI.
+//!
+//! Memgraph uses `id()` (returning `i64`) instead of Neo4j 5+'s `elementId()`
+//! (returning `String`), so all queries use the integer-based identity function.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,8 +23,8 @@ use crate::target::{BenchmarkTarget, EdgeData, EdgeHandle, NodeData, NodeHandle}
 pub struct MemgraphTarget {
     rt: Runtime,
     graph: Graph,
-    node_ids: HashMap<u64, String>,
-    edge_ids: HashMap<u64, String>,
+    node_ids: HashMap<u64, i64>,
+    edge_ids: HashMap<u64, i64>,
     next_handle: AtomicU64,
 }
 
@@ -31,15 +34,20 @@ impl MemgraphTarget {
     /// # Errors
     ///
     /// Returns [`BenchmarkError::External`] if the connection cannot be established.
-    pub fn connect(uri: &str, user: &str, pass: &str) -> Result<Self> {
+    pub fn connect(uri: &str, user: &str, pass: &str, cert_path: Option<&str>) -> Result<Self> {
         let rt = Runtime::new().map_err(|e| {
             BenchmarkError::external(format!("failed to create tokio runtime: {e}"))
         })?;
 
         let graph = rt.block_on(async {
-            let mut config = ConfigBuilder::default().uri(uri).fetch_size(500);
-            if !user.is_empty() {
-                config = config.user(user).password(pass);
+            let mut config = ConfigBuilder::default()
+                .uri(uri)
+                .user(if user.is_empty() { "neo4j" } else { user })
+                .password(if pass.is_empty() { "neo4j" } else { pass })
+                .db("memgraph")
+                .fetch_size(500);
+            if let Some(path) = cert_path {
+                config = config.with_client_certificate(path);
             }
             Graph::connect(
                 config
@@ -72,7 +80,8 @@ impl MemgraphTarget {
         let uri = std::env::var("MEMGRAPH_URI").unwrap_or_else(|_| "bolt://localhost:7687".into());
         let user = std::env::var("MEMGRAPH_USER").unwrap_or_default();
         let pass = std::env::var("MEMGRAPH_PASS").unwrap_or_default();
-        Self::connect(&uri, &user, &pass)
+        let cert = std::env::var("MEMGRAPH_CERT").ok();
+        Self::connect(&uri, &user, &pass, cert.as_deref())
     }
 
     fn next_handle(&self) -> u64 {
@@ -90,10 +99,10 @@ impl BenchmarkTarget for MemgraphTarget {
     }
 
     fn create_node(&mut self, label: &str, _props: Properties) -> Result<NodeHandle> {
-        let q = query(&format!("CREATE (n:{label}) RETURN elementId(n) AS eid"));
+        let q = query(&format!("CREATE (n:{label}) RETURN id(n) AS nid"));
         let handle_id = self.next_handle();
 
-        let eid: String = self.rt.block_on(async {
+        let nid: i64 = self.rt.block_on(async {
             let mut result = self
                 .graph
                 .execute(q)
@@ -104,11 +113,11 @@ impl BenchmarkTarget for MemgraphTarget {
                 .await
                 .map_err(|e| Self::bolt_err(&e))?
                 .ok_or_else(|| BenchmarkError::external("no row returned from CREATE"))?;
-            row.get::<String>("eid")
-                .map_err(|e| BenchmarkError::external(format!("failed to get eid: {e}")))
+            row.get::<i64>("nid")
+                .map_err(|e| BenchmarkError::external(format!("failed to get nid: {e}")))
         })?;
 
-        self.node_ids.insert(handle_id, eid);
+        self.node_ids.insert(handle_id, nid);
         Ok(NodeHandle(handle_id))
     }
 
@@ -119,29 +128,27 @@ impl BenchmarkTarget for MemgraphTarget {
         to: NodeHandle,
         _props: Properties,
     ) -> Result<EdgeHandle> {
-        let from_eid = self
+        let from_nid = *self
             .node_ids
             .get(&from.0)
-            .ok_or_else(|| BenchmarkError::external("unknown source node handle"))?
-            .clone();
-        let to_eid = self
+            .ok_or_else(|| BenchmarkError::external("unknown source node handle"))?;
+        let to_nid = *self
             .node_ids
             .get(&to.0)
-            .ok_or_else(|| BenchmarkError::external("unknown target node handle"))?
-            .clone();
+            .ok_or_else(|| BenchmarkError::external("unknown target node handle"))?;
 
         let q = query(&format!(
-            "MATCH (a) WHERE elementId(a) = $from \
-             MATCH (b) WHERE elementId(b) = $to \
+            "MATCH (a) WHERE id(a) = $from \
+             MATCH (b) WHERE id(b) = $to \
              CREATE (a)-[r:{label}]->(b) \
-             RETURN elementId(r) AS eid"
+             RETURN id(r) AS rid"
         ))
-        .param("from", from_eid)
-        .param("to", to_eid);
+        .param("from", from_nid)
+        .param("to", to_nid);
 
         let handle_id = self.next_handle();
 
-        let eid: String = self.rt.block_on(async {
+        let rid: i64 = self.rt.block_on(async {
             let mut result = self
                 .graph
                 .execute(q)
@@ -152,23 +159,21 @@ impl BenchmarkTarget for MemgraphTarget {
                 .await
                 .map_err(|e| Self::bolt_err(&e))?
                 .ok_or_else(|| BenchmarkError::external("no row returned from CREATE edge"))?;
-            row.get::<String>("eid")
-                .map_err(|e| BenchmarkError::external(format!("failed to get edge eid: {e}")))
+            row.get::<i64>("rid")
+                .map_err(|e| BenchmarkError::external(format!("failed to get edge rid: {e}")))
         })?;
 
-        self.edge_ids.insert(handle_id, eid);
+        self.edge_ids.insert(handle_id, rid);
         Ok(EdgeHandle(handle_id))
     }
 
     fn get_node(&self, handle: NodeHandle) -> Result<NodeData> {
-        let eid = self
+        let nid = *self
             .node_ids
             .get(&handle.0)
-            .ok_or_else(|| BenchmarkError::external("unknown node handle"))?
-            .clone();
+            .ok_or_else(|| BenchmarkError::external("unknown node handle"))?;
 
-        let q =
-            query("MATCH (n) WHERE elementId(n) = $eid RETURN labels(n) AS lbls").param("eid", eid);
+        let q = query("MATCH (n) WHERE id(n) = $nid RETURN labels(n) AS lbls").param("nid", nid);
 
         self.rt.block_on(async {
             let mut result = self
@@ -192,14 +197,13 @@ impl BenchmarkTarget for MemgraphTarget {
     }
 
     fn get_edge(&self, handle: EdgeHandle) -> Result<EdgeData> {
-        let eid = self
+        let rid = *self
             .edge_ids
             .get(&handle.0)
-            .ok_or_else(|| BenchmarkError::external("unknown edge handle"))?
-            .clone();
+            .ok_or_else(|| BenchmarkError::external("unknown edge handle"))?;
 
-        let q = query("MATCH ()-[r]->() WHERE elementId(r) = $eid RETURN type(r) AS t")
-            .param("eid", eid);
+        let q =
+            query("MATCH ()-[r]->() WHERE id(r) = $rid RETURN type(r) AS t").param("rid", rid);
 
         self.rt.block_on(async {
             let mut result = self
@@ -223,39 +227,37 @@ impl BenchmarkTarget for MemgraphTarget {
     }
 
     fn traverse_bfs(&self, start: NodeHandle, max_depth: u32) -> Result<Vec<NodeHandle>> {
-        let start_eid = self
+        let start_nid = *self
             .node_ids
             .get(&start.0)
-            .ok_or_else(|| BenchmarkError::external("unknown start node handle"))?
-            .clone();
+            .ok_or_else(|| BenchmarkError::external("unknown start node handle"))?;
 
         let q = query(&format!(
-            "MATCH (s) WHERE elementId(s) = $eid \
+            "MATCH (s) WHERE id(s) = $nid \
              MATCH p=(s)-[*1..{max_depth}]->(n) \
-             RETURN DISTINCT elementId(n) AS eid"
+             RETURN DISTINCT id(n) AS nid"
         ))
-        .param("eid", start_eid.clone());
+        .param("nid", start_nid);
 
-        let eids: Vec<String> = self.rt.block_on(async {
+        let nids: Vec<i64> = self.rt.block_on(async {
             let mut result = self
                 .graph
                 .execute(q)
                 .await
                 .map_err(|e| Self::bolt_err(&e))?;
-            let mut eids = vec![start_eid];
+            let mut nids = vec![start_nid];
             while let Some(row) = result.next().await.map_err(|e| Self::bolt_err(&e))? {
-                let eid: String = row
-                    .get("eid")
-                    .map_err(|e| BenchmarkError::external(format!("bfs eid: {e}")))?;
-                if !eids.contains(&eid) {
-                    eids.push(eid);
+                let nid: i64 = row
+                    .get("nid")
+                    .map_err(|e| BenchmarkError::external(format!("bfs nid: {e}")))?;
+                if !nids.contains(&nid) {
+                    nids.push(nid);
                 }
             }
-            Ok::<_, BenchmarkError>(eids)
+            Ok::<_, BenchmarkError>(nids)
         })?;
 
-        // Map back to handles — use lookup or synthetic handles
-        let handles: Vec<NodeHandle> = eids
+        let handles: Vec<NodeHandle> = nids
             .iter()
             .enumerate()
             .map(|(i, _)| NodeHandle(start.0 + i as u64))
@@ -270,25 +272,23 @@ impl BenchmarkTarget for MemgraphTarget {
     }
 
     fn shortest_path(&self, from: NodeHandle, to: NodeHandle) -> Result<Option<Vec<NodeHandle>>> {
-        let from_eid = self
+        let from_nid = *self
             .node_ids
             .get(&from.0)
-            .ok_or_else(|| BenchmarkError::external("unknown from node handle"))?
-            .clone();
-        let to_eid = self
+            .ok_or_else(|| BenchmarkError::external("unknown from node handle"))?;
+        let to_nid = *self
             .node_ids
             .get(&to.0)
-            .ok_or_else(|| BenchmarkError::external("unknown to node handle"))?
-            .clone();
+            .ok_or_else(|| BenchmarkError::external("unknown to node handle"))?;
 
         let q = query(
-            "MATCH (a) WHERE elementId(a) = $from \
-             MATCH (b) WHERE elementId(b) = $to \
+            "MATCH (a) WHERE id(a) = $from \
+             MATCH (b) WHERE id(b) = $to \
              MATCH p=shortestPath((a)-[*]->(b)) \
-             RETURN [n IN nodes(p) | elementId(n)] AS path_eids",
+             RETURN [n IN nodes(p) | id(n)] AS path_nids",
         )
-        .param("from", from_eid)
-        .param("to", to_eid);
+        .param("from", from_nid)
+        .param("to", to_nid);
 
         self.rt.block_on(async {
             let mut result = self
@@ -298,10 +298,10 @@ impl BenchmarkTarget for MemgraphTarget {
                 .map_err(|e| Self::bolt_err(&e))?;
             match result.next().await.map_err(|e| Self::bolt_err(&e))? {
                 Some(row) => {
-                    let path_eids: Vec<String> = row
-                        .get("path_eids")
-                        .map_err(|e| BenchmarkError::external(format!("path eids: {e}")))?;
-                    let handles: Vec<NodeHandle> = path_eids
+                    let path_nids: Vec<i64> = row
+                        .get("path_nids")
+                        .map_err(|e| BenchmarkError::external(format!("path nids: {e}")))?;
+                    let handles: Vec<NodeHandle> = path_nids
                         .iter()
                         .enumerate()
                         .map(|(i, _)| NodeHandle(from.0 + i as u64))

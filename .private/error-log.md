@@ -83,3 +83,27 @@
 - **Causa raíz:** Comparación de string prefix sin delimitador. `/path/tessera-graph-enterprise/...` empieza con `/path/tessera-graph`, lo que produce un falso positivo.
 - **Cómo lo solucioné:** Cambié la comparación a `"$MIT_ROOT/"*` (con `/` trailing) para que solo match paths que realmente están DENTRO del directorio MIT.
 - **Regla para evitarlo:** Cuando se comparan paths por prefix en bash, SIEMPRE añadir `/` al final del directorio base: `"$DIR/"*` en vez de `"$DIR"*`. Esto evita falsos positivos cuando un directorio es prefijo de otro.
+
+### [2026-03-30] MemgraphTarget usaba elementId() (Neo4j 5+) — Memgraph usa id() (i64)
+- **Qué hice mal:** El código de `MemgraphTarget` usaba `elementId(n)` que es una función de Neo4j 5+ que retorna String. Memgraph no la soporta.
+- **Causa raíz:** Se implementó el target basándose en la API de Neo4j sin verificar compatibilidad con Memgraph.
+- **Cómo lo solucioné:** Reemplacé `elementId()` por `id()` y cambié los maps de `HashMap<u64, String>` a `HashMap<u64, i64>`.
+- **Regla para evitarlo:** Verificar la documentación del DBMS target antes de asumir compatibilidad de funciones Cypher entre Neo4j y Memgraph.
+
+### [2026-03-30] neo4rs ConfigBuilder requiere user/pass y db — Memgraph no usa db="neo4j"
+- **Qué hice mal:** El `ConfigBuilder::default()` de neo4rs exige user/pass para que `build()` sea válido, y usa `db="neo4j"` por defecto, que Memgraph rechaza.
+- **Causa raíz:** No leí la API de neo4rs para entender los defaults obligatorios.
+- **Cómo lo solucioné:** Siempre paso user="neo4j", pass="neo4j" como fallback, y `db("memgraph")` explícitamente.
+- **Regla para evitarlo:** Al usar libraries externas, verificar qué campos son obligatorios en `build()` y qué defaults usa.
+
+### [2026-03-30] TesseraGraph requiere TLS — TesseraBoltTarget conectaba con TCP plano
+- **Qué hice mal:** Implementé el target Bolt sin TLS, pero el servidor TesseraGraph siempre escucha con TLS.
+- **Causa raíz:** No verifiqué los logs del servidor ni cómo el CLI existente se conecta.
+- **Cómo lo solucioné:** Añadí rustls + tokio-rustls con NoCertVerifier para benchmarks.
+- **Regla para evitarlo:** SIEMPRE revisar cómo el código existente (CLI) se conecta al servidor antes de implementar un nuevo cliente.
+
+### [2026-03-30] neo4rs with_client_certificate requiere CA cert, no self-signed end-entity
+- **Qué hice mal:** Pasé el cert auto-firmado de Memgraph como `with_client_certificate` a neo4rs. rustls lo rechazó con `CaUsedAsEndEntity` porque el cert no tenía `basicConstraints: CA:TRUE`.
+- **Causa raíz:** Asumí que `with_client_certificate` haría trust del cert sin verificar que fuera un CA cert válido. El nombre del método es engañoso — realmente añade el cert al root CA store.
+- **Cómo lo solucioné:** Generé un par CA+cert firmado dedicado para benchmarks. CA con `basicConstraints=critical,CA:TRUE`, cert end-entity firmado por el CA.
+- **Regla para evitarlo:** Para TLS con certs auto-firmados en tests/benchmarks, SIEMPRE generar un CA propio y firmar los certs end-entity con él. No usar el cert self-signed directamente como raíz de confianza.
