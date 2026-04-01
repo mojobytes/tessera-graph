@@ -11,6 +11,7 @@ use tessera_auth::rate_limit::{LoginAttemptTracker, LoginPolicy};
 use tessera_auth::rbac::Permission;
 use tessera_auth::session::{SessionManager, SessionToken};
 use tessera_auth::user::{UserId, UserStoreHandle};
+use tessera_cypher::cache::QueryCache;
 use tessera_monitor::MetricsRegistry;
 use tessera_protocol::tls::TlsConfig;
 use tessera_tenant::TenantRegistry;
@@ -29,6 +30,7 @@ pub struct ServerContext {
     group_mapping: Arc<HashMap<String, String>>,
     metrics: Arc<MetricsRegistry>,
     tenant_registry: Arc<TenantRegistry>,
+    query_cache: Arc<QueryCache>,
     login_tracker: Arc<LoginAttemptTracker>,
     login_policy: LoginPolicy,
 }
@@ -47,6 +49,7 @@ impl ServerContext {
         user_store: Arc<UserStoreHandle>,
         metrics: Arc<MetricsRegistry>,
         tenant_registry: Arc<TenantRegistry>,
+        query_cache_capacity: usize,
     ) -> Self {
         Self {
             auth_policy,
@@ -58,6 +61,7 @@ impl ServerContext {
             group_mapping: Arc::new(HashMap::new()),
             metrics,
             tenant_registry,
+            query_cache: Arc::new(QueryCache::new(query_cache_capacity)),
             login_tracker: Arc::new(LoginAttemptTracker::new()),
             // Default: lock after 5 failures for 300 seconds.
             login_policy: LoginPolicy::new(5, 300),
@@ -137,6 +141,12 @@ impl ServerContext {
     #[must_use]
     pub const fn tenant_registry(&self) -> &Arc<TenantRegistry> {
         &self.tenant_registry
+    }
+
+    /// Access the server-wide parsed query cache.
+    #[must_use]
+    pub fn query_cache(&self) -> &Arc<QueryCache> {
+        &self.query_cache
     }
 
     /// Access the login attempt tracker.

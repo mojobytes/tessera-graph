@@ -769,6 +769,69 @@ fn detect_unsupported_clauses(input: &str) -> tessera_graph::Result<()> {
     Ok(())
 }
 
+// ── GQL-native fast-path detection ───────────────────────────────────────────
+
+/// Returns `true` if `input` contains any Cypher-specific construct that
+/// requires preprocessing before parsing as GQL.
+///
+/// Conservative: returns `true` on doubt. A `false` return guarantees
+/// the input is pure GQL and can bypass the preprocessor entirely.
+///
+/// Detected constructs:
+/// - Block comments (`/* ... */`)
+/// - Backtick identifiers (`` `ident` ``)
+/// - `OPTIONAL MATCH`
+/// - `REMOVE` clause
+/// - `WITH *` pass-through
+#[must_use]
+pub fn contains_cypher_constructs(input: &str) -> bool {
+    let masked = blank_string_literals(input);
+    let upper = masked.to_ascii_uppercase();
+
+    // Fast byte-level checks first (cheapest).
+    if masked.contains('`') || masked.contains("/*") {
+        return true;
+    }
+
+    // Word-boundary keyword checks.
+    if find_word(&upper, "OPTIONAL").is_some() || find_word(&upper, "REMOVE").is_some() {
+        return true;
+    }
+
+    contains_with_star(&upper)
+}
+
+/// Checks for `WITH *` (not `STARTS WITH` / `ENDS WITH`).
+fn contains_with_star(upper: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(idx) = upper[search_from..].find("WITH") {
+        let abs = search_from + idx;
+        // Ensure word boundary before WITH.
+        if abs > 0 && upper.as_bytes()[abs - 1].is_ascii_alphanumeric() {
+            search_from = abs + 4;
+            continue;
+        }
+        // Ensure word boundary after WITH.
+        let after = abs + 4;
+        if after < upper.len() && upper.as_bytes()[after].is_ascii_alphanumeric() {
+            search_from = abs + 4;
+            continue;
+        }
+        // Skip if it's part of STARTS WITH or ENDS WITH.
+        if !is_standalone_with(upper, abs) {
+            search_from = abs + 4;
+            continue;
+        }
+        // Check for * after optional whitespace.
+        let rest = upper[after..].trim_start();
+        if rest.starts_with('*') {
+            return true;
+        }
+        search_from = abs + 4;
+    }
+    false
+}
+
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1094,5 +1157,66 @@ mod tests {
         let input = "MATCH (n) WHERE n.name = 'use `backticks` here' RETURN n";
         let output = cypher_to_gql(input).unwrap(); // OK: test
         assert!(output.contains("`backticks`"), "got: {output}");
+    }
+
+    // ── contains_cypher_constructs ──────────────────────────────────────────
+
+    #[test]
+    fn detects_backtick_identifier() {
+        assert!(contains_cypher_constructs("MATCH (`n`) RETURN n"));
+    }
+
+    #[test]
+    fn detects_block_comment() {
+        assert!(contains_cypher_constructs("/* comment */ RETURN 1"));
+    }
+
+    #[test]
+    fn detects_optional_match() {
+        assert!(contains_cypher_constructs("OPTIONAL MATCH (n) RETURN n"));
+    }
+
+    #[test]
+    fn detects_remove_clause() {
+        assert!(contains_cypher_constructs("MATCH (n) REMOVE n.prop RETURN n"));
+    }
+
+    #[test]
+    fn detects_with_star() {
+        assert!(contains_cypher_constructs("MATCH (n) WITH * RETURN n"));
+    }
+
+    #[test]
+    fn pure_gql_match_return_is_not_cypher() {
+        assert!(!contains_cypher_constructs("MATCH (n) RETURN n"));
+    }
+
+    #[test]
+    fn pure_gql_create_is_not_cypher() {
+        assert!(!contains_cypher_constructs("CREATE (n {name: 'Alice'}) RETURN n"));
+    }
+
+    #[test]
+    fn with_star_in_string_literal_no_false_positive() {
+        assert!(!contains_cypher_constructs("RETURN 'WITH *' AS x"));
+    }
+
+    #[test]
+    fn backtick_in_string_literal_no_false_positive() {
+        assert!(!contains_cypher_constructs("RETURN 'use `backtick` here'"));
+    }
+
+    #[test]
+    fn starts_with_operator_no_false_positive() {
+        assert!(!contains_cypher_constructs(
+            "MATCH (n) WHERE n.name STARTS WITH 'A' RETURN n"
+        ));
+    }
+
+    #[test]
+    fn ends_with_operator_no_false_positive() {
+        assert!(!contains_cypher_constructs(
+            "MATCH (n) WHERE n.name ENDS WITH 'z' RETURN n"
+        ));
     }
 }

@@ -440,10 +440,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                 .await;
         };
 
-        // --- Parse ---
-        let stmt = match tessera_cypher::parse_with_mode(
+        // --- Parse (server-wide LRU cache) ---
+        let stmt = match tessera_cypher::parse_with_mode_cached(
             query,
             tessera_config::QueryLanguage::CypherCompat,
+            self.ctx.query_cache(),
         ) {
             Ok(s) => s,
             Err(e) => {

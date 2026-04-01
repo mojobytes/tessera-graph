@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 tessera-graph  = { workspace = true }
 tessera-config = { workspace = true }
+lru            = { workspace = true }
 
 [lints]
 workspace = true

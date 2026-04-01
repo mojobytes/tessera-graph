@@ -285,6 +285,7 @@ where
     let run_concurrent = matches!(args.scenario, ScenarioKind::Concurrent | ScenarioKind::All);
 
     if run_write {
+        target.clear();
         let s = WriteScenario {
             node_count: args.nodes,
             edge_count: args.edges,
@@ -295,6 +296,7 @@ where
     }
 
     if run_read {
+        target.clear();
         let ds = ChainDataset { length: args.nodes };
         let dataset = ds.build(target)?;
         let s = ReadScenario {
@@ -307,6 +309,7 @@ where
     }
 
     if run_traversal {
+        target.clear();
         let ds = ChainDataset { length: args.nodes };
         match ds.build(target) {
             Ok(dataset) => {
@@ -326,6 +329,7 @@ where
     }
 
     if run_pathfinding {
+        target.clear();
         let ds = ChainDataset { length: args.nodes };
         match ds.build(target) {
             Ok(dataset) => {
@@ -348,6 +352,7 @@ where
     }
 
     if run_mixed {
+        target.clear();
         let s = MixedScenario {
             write_ratio: args.write_ratio,
             total_ops: args.iterations,
@@ -358,6 +363,7 @@ where
     }
 
     if run_concurrent {
+        target.clear();
         if let Some(factory) = concurrent_factory {
             let s = ConcurrentScenario {
                 thread_count: args.threads,

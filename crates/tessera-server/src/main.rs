@@ -76,6 +76,7 @@ async fn main() {
     // --- Tenant registry (replaces single-graph approach) ---
     let persistence = PersistenceConfig::from_env();
     let flush_interval_ms = persistence.flush_interval_ms;
+    let query_cache_capacity = persistence.query_cache_capacity;
     let base_dir = persistence
         .data_dir
         .unwrap_or_else(|| std::env::temp_dir().join("tessera-data"));
@@ -108,6 +109,7 @@ async fn main() {
         user_store,
         metrics,
         Arc::clone(&registry),
+        query_cache_capacity,
     ));
 
     // --- Shutdown signal ---

@@ -81,7 +81,7 @@ pub fn test_context_with_registry(registry: Arc<TenantRegistry>) -> Arc<ServerCo
 
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
     Arc::new(ServerContext::new(
-        policy, sessions, audit, tls, user_store, metrics, registry,
+        policy, sessions, audit, tls, user_store, metrics, registry, 64,
     ))
 }
 

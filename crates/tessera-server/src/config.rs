@@ -8,6 +8,9 @@ use tessera_graph::GraphConfig;
 /// Default background flush interval in milliseconds.
 const DEFAULT_FLUSH_INTERVAL_MS: u64 = 50;
 
+/// Default query cache capacity (number of parsed ASTs to keep).
+const DEFAULT_QUERY_CACHE_CAPACITY: usize = 1024;
+
 /// Parsed persistence configuration derived from environment variables.
 #[derive(Debug)]
 pub struct PersistenceConfig {
@@ -22,6 +25,9 @@ pub struct PersistenceConfig {
     /// `0` means synchronous flush after each mutation (legacy behaviour).
     /// `TESSERA_FLUSH_INTERVAL_MS` (default `50`).
     pub flush_interval_ms: u64,
+    /// Maximum number of parsed query ASTs to cache server-wide.
+    /// `TESSERA_QUERY_CACHE_CAPACITY` (default `1024`).
+    pub query_cache_capacity: usize,
 }
 
 impl PersistenceConfig {
@@ -32,6 +38,7 @@ impl PersistenceConfig {
     /// - `TESSERA_WAL_ENABLED`: `"false"` disables WAL (default enabled).
     /// - `TESSERA_DEFAULT_TENANT`: default tenant name (default `"default"`).
     /// - `TESSERA_FLUSH_INTERVAL_MS`: background flush interval in ms (default 50, 0 = sync).
+    /// - `TESSERA_QUERY_CACHE_CAPACITY`: parsed query cache size (default 1024).
     #[must_use]
     pub fn from_env() -> Self {
         let data_dir = std::env::var("TESSERA_DATA_DIR").ok().map(PathBuf::from);
@@ -54,6 +61,11 @@ impl PersistenceConfig {
             std::env::var("TESSERA_FLUSH_INTERVAL_MS").ok().as_deref(),
         );
 
+        let query_cache_capacity = std::env::var("TESSERA_QUERY_CACHE_CAPACITY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_QUERY_CACHE_CAPACITY);
+
         Self {
             data_dir,
             graph_config: GraphConfig {
@@ -64,6 +76,7 @@ impl PersistenceConfig {
             },
             default_tenant,
             flush_interval_ms,
+            query_cache_capacity,
         }
     }
 

@@ -47,7 +47,7 @@ fn permission_check_propagates_through_context() {
     let (_dir2, registry) = test_registry();
 
     let metrics = Arc::new(tessera_monitor::MetricsRegistry::new(256));
-    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store, metrics, registry);
+    let ctx2 = ServerContext::new(policy, sessions, audit, tls, user_store, metrics, registry, 64);
     assert!(
         ctx2.check_permission(&token, Permission::NodeCreate)
             .is_ok()
