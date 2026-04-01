@@ -2169,7 +2169,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-audit"
+name = "tessera-graph"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tessera-graph-audit"
 version = "0.2.0"
 dependencies = [
  "serde",
@@ -2180,7 +2188,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-auth"
+name = "tessera-graph-auth"
 version = "0.2.0"
 dependencies = [
  "argon2",
@@ -2200,23 +2208,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-benchmark"
+name = "tessera-graph-benchmark"
 version = "0.2.0"
 dependencies = [
  "criterion",
  "neo4rs",
  "rustls",
- "tessera-config",
- "tessera-cypher",
  "tessera-graph",
- "tessera-protocol",
+ "tessera-graph-config",
+ "tessera-graph-cypher",
+ "tessera-graph-protocol",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
 ]
 
 [[package]]
-name = "tessera-cli"
+name = "tessera-graph-cli"
 version = "0.2.0"
 dependencies = [
  "clap",
@@ -2230,7 +2238,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "tessera-protocol",
+ "tessera-graph-protocol",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
@@ -2238,43 +2246,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-config"
+name = "tessera-graph-config"
 version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "tessera-cypher"
+name = "tessera-graph-cypher"
 version = "0.2.0"
 dependencies = [
  "lru",
- "tessera-config",
  "tessera-graph",
+ "tessera-graph-config",
 ]
 
 [[package]]
-name = "tessera-graph"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "tessera-import"
+name = "tessera-graph-import"
 version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
- "tessera-auth",
  "tessera-graph",
- "tessera-storage-enterprise",
+ "tessera-graph-auth",
+ "tessera-graph-storage",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "tessera-monitor"
+name = "tessera-graph-monitor"
 version = "0.2.0"
 dependencies = [
  "thiserror 2.0.18",
@@ -2282,7 +2282,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-protocol"
+name = "tessera-graph-protocol"
 version = "0.2.0"
 dependencies = [
  "bytes",
@@ -2297,7 +2297,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-replication"
+name = "tessera-graph-replication"
 version = "0.2.0"
 dependencies = [
  "tessera-graph",
@@ -2305,21 +2305,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-server"
+name = "tessera-graph-server"
 version = "0.2.0"
 dependencies = [
  "rcgen",
  "serde_json",
  "tempfile",
- "tessera-audit",
- "tessera-auth",
- "tessera-config",
- "tessera-cypher",
  "tessera-graph",
- "tessera-monitor",
- "tessera-protocol",
- "tessera-storage-enterprise",
- "tessera-tenant",
+ "tessera-graph-audit",
+ "tessera-graph-auth",
+ "tessera-graph-config",
+ "tessera-graph-cypher",
+ "tessera-graph-monitor",
+ "tessera-graph-protocol",
+ "tessera-graph-storage",
+ "tessera-graph-tenant",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
@@ -2328,20 +2328,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-storage-enterprise"
+name = "tessera-graph-storage"
 version = "0.2.0"
 dependencies = [
  "crc32fast",
  "tempfile",
- "tessera-auth",
- "tessera-config",
- "tessera-cypher",
  "tessera-graph",
+ "tessera-graph-auth",
+ "tessera-graph-config",
+ "tessera-graph-cypher",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "tessera-streaming"
+name = "tessera-graph-streaming"
 version = "0.2.0"
 dependencies = [
  "tessera-graph",
@@ -2349,7 +2349,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tessera-tenant"
+name = "tessera-graph-tenant"
 version = "0.2.0"
 dependencies = [
  "tempfile",

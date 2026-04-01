@@ -29,15 +29,15 @@ COPY tessera-graph-enterprise/ tessera-graph-enterprise/
 
 # Remove [[bench]] blocks from Cargo manifests (bench .rs files excluded by .dockerignore)
 RUN find tessera-graph/ -name Cargo.toml -exec sed -i '/^\[\[bench\]\]/,/^$/d' {} + \
-    && sed -i '/"crates\/tessera-benchmark",/d' tessera-graph-enterprise/Cargo.toml
+    && sed -i '/"crates\/tessera-graph-benchmark",/d' tessera-graph-enterprise/Cargo.toml
 
 # Build server and CLI binaries in release mode
 RUN cd tessera-graph-enterprise \
-    && cargo build --release -p tessera-server -p tessera-cli
+    && cargo build --release -p tessera-graph-server -p tessera-graph-cli
 
 # Verify binaries
-RUN ls -lh tessera-graph-enterprise/target/release/tessera-server \
-           tessera-graph-enterprise/target/release/tessera-cli
+RUN ls -lh tessera-graph-enterprise/target/release/tessera-graph-server \
+           tessera-graph-enterprise/target/release/tessera-graph-cli
 
 # Generate self-signed TLS certificate for development
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/* \
@@ -65,8 +65,8 @@ RUN useradd -m -u 1001 tessera \
     && chown -R tessera:tessera /var/lib/tessera /etc/tessera /var/log/tessera
 
 # Copy binaries
-COPY --from=builder /build/tessera-graph-enterprise/target/release/tessera-server /usr/local/bin/tessera-server
-COPY --from=builder /build/tessera-graph-enterprise/target/release/tessera-cli /usr/local/bin/tessera-cli
+COPY --from=builder /build/tessera-graph-enterprise/target/release/tessera-graph-server /usr/local/bin/tessera-graph-server
+COPY --from=builder /build/tessera-graph-enterprise/target/release/tessera-graph-cli /usr/local/bin/tessera-graph-cli
 
 # Copy TLS certificates
 COPY --from=builder /build/certs/server.pem /etc/tessera/certs/server.pem
@@ -95,9 +95,9 @@ ENV TESSERA_IDLE_TIMEOUT_SECS=300
 ENV TESSERA_AUDIT_PATH=/var/log/tessera/audit.ndjson
 ENV TESSERA_AUDIT_ROTATION_MAX_MB=100
 ENV TESSERA_METRICS_BIND=0.0.0.0:9090
-ENV RUST_LOG=tessera_server=info,tessera_audit=info
+ENV RUST_LOG=tessera_graph_server=info,tessera_graph_audit=info
 
 # Data and log volumes
 VOLUME ["/var/lib/tessera/data", "/var/log/tessera"]
 
-ENTRYPOINT ["/usr/local/bin/tessera-server"]
+ENTRYPOINT ["/usr/local/bin/tessera-graph-server"]

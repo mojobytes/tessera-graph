@@ -1,0 +1,22 @@
+[package]
+name        = "tessera-graph-storage"
+description = "MVCC, transactions, snapshots and concurrent access for tessera-graph-enterprise"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license.workspace     = true
+rust-version.workspace = true
+
+[dependencies]
+tessera-graph  = { workspace = true }
+tessera-graph-auth = { workspace = true }
+tessera-graph-config = { workspace = true }
+tessera-graph-cypher = { workspace = true }
+thiserror      = { workspace = true }
+crc32fast      = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
