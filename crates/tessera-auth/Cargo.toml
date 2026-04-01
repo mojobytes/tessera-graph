@@ -17,7 +17,7 @@ rand           = "0.9"
 zeroize        = { version = "1", features = ["derive"] }
 base64ct       = { version = "1", features = ["std"] }
 constant_time_eq = "0.3"
-ldap3            = { version = "0.11", default-features = false, features = ["tls-rustls"] }
+ldap3            = { version = "0.12", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 tokio            = { workspace = true, features = ["rt", "sync"] }
 jsonwebtoken     = "9"
 tracing          = "0.1"

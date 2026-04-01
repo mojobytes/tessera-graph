@@ -43,7 +43,7 @@ async fn background_flush_task_flushes_dirty_graph() {
 
     // Spawn the background flush task with a short interval.
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let handle = spawn_background_flush(Arc::clone(&registry), 10, shutdown_rx);
+    let handle = spawn_background_flush(Arc::clone(&registry), 10, shutdown_rx, tessera_monitor::AtomicHealthFlag::new());
 
     // Give the task time to tick at least once.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -66,7 +66,7 @@ async fn background_flush_task_exits_on_shutdown() {
     let registry = test_registry(&tmp);
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let handle = spawn_background_flush(Arc::clone(&registry), 10, shutdown_rx);
+    let handle = spawn_background_flush(Arc::clone(&registry), 10, shutdown_rx, tessera_monitor::AtomicHealthFlag::new());
 
     // Signal shutdown immediately.
     let _ = shutdown_tx.send(true);
@@ -85,7 +85,7 @@ async fn background_flush_zero_interval_returns_noop() {
     let registry = test_registry(&tmp);
 
     let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let handle = spawn_background_flush(Arc::clone(&registry), 0, shutdown_rx);
+    let handle = spawn_background_flush(Arc::clone(&registry), 0, shutdown_rx, tessera_monitor::AtomicHealthFlag::new());
 
     // With interval=0 (sync mode), the task should complete immediately.
     let result = tokio::time::timeout(

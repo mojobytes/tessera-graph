@@ -7,9 +7,13 @@
 //! per-operation.
 
 use std::sync::Arc;
+use tessera_monitor::AtomicHealthFlag;
 use tessera_tenant::TenantRegistry;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
+
+/// Maximum consecutive flush errors before the health flag is set to degraded.
+const MAX_CONSECUTIVE_ERRORS: u32 = 3;
 
 /// Spawns a background tokio task that calls
 /// [`TenantRegistry::flush_all`] every `interval_ms` milliseconds.
@@ -18,10 +22,14 @@ use tokio::task::JoinHandle;
 /// immediately (sync-mode: caller is responsible for per-mutation flush).
 ///
 /// The task exits cleanly when `shutdown_rx` receives `true`.
+///
+/// The `health` flag is set to degraded after [`MAX_CONSECUTIVE_ERRORS`]
+/// flush failures and reset to healthy on the next successful flush.
 pub fn spawn_background_flush(
     registry: Arc<TenantRegistry>,
     interval_ms: u64,
     mut shutdown_rx: watch::Receiver<bool>,
+    health: Arc<AtomicHealthFlag>,
 ) -> JoinHandle<()> {
     if interval_ms == 0 {
         return tokio::spawn(async {});
@@ -31,13 +39,14 @@ pub fn spawn_background_flush(
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(period);
+        let mut consecutive_errors: u32 = 0;
         // First tick completes immediately — skip it.
         interval.tick().await;
 
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match registry.flush_all() {
+                    let failed = match registry.flush_all() {
                         Ok(errors) if !errors.is_empty() => {
                             for (addr, err) in &errors {
                                 tracing::warn!(
@@ -47,11 +56,25 @@ pub fn spawn_background_flush(
                                     "background flush failed for graph",
                                 );
                             }
+                            true
                         }
                         Err(err) => {
                             tracing::error!(error = %err, "background flush_all failed");
+                            true
                         }
-                        _ => {}
+                        _ => false,
+                    };
+
+                    if failed {
+                        consecutive_errors = consecutive_errors.saturating_add(1);
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            health.set_degraded();
+                        }
+                    } else {
+                        if consecutive_errors > 0 {
+                            health.set_healthy();
+                        }
+                        consecutive_errors = 0;
                     }
                 }
                 _ = shutdown_rx.changed() => {

@@ -89,12 +89,16 @@ async fn main() {
         max_connections as u64,
     ));
 
+    // --- Health flag (shared with flush task and metrics server) ---
+    let health = tessera_monitor::AtomicHealthFlag::new();
+
     // --- Metrics HTTP server (optional) ---
     if let Ok(metrics_bind) = std::env::var("TESSERA_METRICS_BIND") {
-        tracing::info!("Prometheus metrics on {metrics_bind}");
+        tracing::info!("Prometheus metrics + health on {metrics_bind}");
         let m = Arc::clone(&metrics);
+        let h = Arc::clone(&health);
         tokio::spawn(async move {
-            if let Err(e) = tessera_monitor::serve_metrics(&metrics_bind, m).await {
+            if let Err(e) = tessera_monitor::serve_metrics(&metrics_bind, m, h).await {
                 tracing::error!("metrics server failed: {e}");
             }
         });
@@ -128,6 +132,7 @@ async fn main() {
         Arc::clone(&registry),
         flush_interval_ms,
         shutdown_rx.clone(),
+        Arc::clone(&health),
     );
 
     // --- Listen ---

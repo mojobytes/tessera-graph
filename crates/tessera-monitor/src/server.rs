@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::health::HealthProvider;
 use crate::registry::MetricsRegistry;
 use crate::render::render_prometheus;
 
@@ -24,21 +25,30 @@ const MAX_REQUEST_SIZE: usize = 8192;
 /// # Errors
 ///
 /// Returns `io::Error` if the address cannot be bound.
-pub async fn serve_metrics(addr: &str, registry: Arc<MetricsRegistry>) -> std::io::Result<()> {
+pub async fn serve_metrics(
+    addr: &str,
+    registry: Arc<MetricsRegistry>,
+    health: Arc<dyn HealthProvider>,
+) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
-    serve_metrics_on(listener, registry).await;
+    serve_metrics_on(listener, registry, health).await;
     Ok(())
 }
 
 /// Serve metrics on a pre-bound listener (useful for testing with port 0).
-pub async fn serve_metrics_on(listener: TcpListener, registry: Arc<MetricsRegistry>) {
+pub async fn serve_metrics_on(
+    listener: TcpListener,
+    registry: Arc<MetricsRegistry>,
+    health: Arc<dyn HealthProvider>,
+) {
     loop {
         let Ok((stream, _addr)) = listener.accept().await else {
             continue;
         };
         let reg = Arc::clone(&registry);
+        let h = Arc::clone(&health);
         tokio::spawn(async move {
-            let _ = handle_connection(stream, &reg).await;
+            let _ = handle_connection(stream, &reg, h.as_ref()).await;
         });
     }
 }
@@ -46,6 +56,7 @@ pub async fn serve_metrics_on(listener: TcpListener, registry: Arc<MetricsRegist
 async fn handle_connection(
     mut stream: TcpStream,
     registry: &MetricsRegistry,
+    health: &dyn HealthProvider,
 ) -> std::io::Result<()> {
     // Read request headers (up to MAX_REQUEST_SIZE)
     let mut buf = vec![0u8; MAX_REQUEST_SIZE];
@@ -79,6 +90,17 @@ async fn handle_connection(
             body,
         );
         stream.write_all(response.as_bytes()).await?;
+    } else if first_line.starts_with("GET /health") {
+        let (status, body) = if health.is_healthy() {
+            ("200 OK", r#"{"status":"healthy","version":"0.2.0"}"#)
+        } else {
+            ("503 Service Unavailable", r#"{"status":"degraded","version":"0.2.0"}"#)
+        };
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len(),
+        );
+        stream.write_all(response.as_bytes()).await?;
     } else {
         let response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         stream.write_all(response.as_bytes()).await?;
@@ -91,28 +113,44 @@ async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::health::StaticHealth;
     use std::time::Duration;
+
+    fn healthy() -> Arc<dyn HealthProvider> {
+        Arc::new(StaticHealth::new(true))
+    }
+
+    fn degraded() -> Arc<dyn HealthProvider> {
+        Arc::new(StaticHealth::new(false))
+    }
+
+    async fn spawn_server(
+        registry: Arc<MetricsRegistry>,
+        health: Arc<dyn HealthProvider>,
+    ) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind"); // OK: test
+        let addr = listener.local_addr().expect("addr"); // OK: test
+        tokio::spawn(async move {
+            serve_metrics_on(listener, registry, health).await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        addr
+    }
+
+    async fn http_get(addr: std::net::SocketAddr, path: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
+        let req = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        stream.write_all(req.as_bytes()).await.expect("write"); // OK: test
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.expect("read"); // OK: test
+        String::from_utf8(buf).expect("utf8") // OK: test
+    }
 
     #[tokio::test]
     async fn get_metrics_returns_200_with_prometheus_content_type() {
         let registry = Arc::new(MetricsRegistry::new(256));
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind"); // OK: test
-        let addr = listener.local_addr().expect("addr"); // OK: test
-        let reg = Arc::clone(&registry);
-        tokio::spawn(async move {
-            serve_metrics_on(listener, reg).await;
-        });
-        tokio::time::sleep(Duration::from_millis(20)).await;
-
-        let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
-        stream
-            .write_all(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .expect("write"); // OK: test
-
-        let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await.expect("read"); // OK: test
-        let response = String::from_utf8(buf).expect("utf8"); // OK: test
+        let addr = spawn_server(Arc::clone(&registry), healthy()).await;
+        let response = http_get(addr, "/metrics").await;
 
         assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
         assert!(response.contains("Content-Type: text/plain; version=0.0.4\r\n"));
@@ -120,25 +158,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_metrics_path_returns_404() {
+    async fn non_known_path_returns_404() {
         let registry = Arc::new(MetricsRegistry::new(256));
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind"); // OK: test
-        let addr = listener.local_addr().expect("addr"); // OK: test
-        let reg = Arc::clone(&registry);
-        tokio::spawn(async move {
-            serve_metrics_on(listener, reg).await;
-        });
-        tokio::time::sleep(Duration::from_millis(20)).await;
-
-        let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
-        stream
-            .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .expect("write"); // OK: test
-
-        let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await.expect("read"); // OK: test
-        let response = String::from_utf8(buf).expect("utf8"); // OK: test
+        let addr = spawn_server(registry, healthy()).await;
+        let response = http_get(addr, "/unknown").await;
 
         assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
     }
@@ -146,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn serve_metrics_invalid_address_returns_error() {
         let registry = Arc::new(MetricsRegistry::new(64));
-        let result = serve_metrics("not-a-valid-address:99999", registry).await;
+        let result = serve_metrics("not-a-valid-address:99999", registry, healthy()).await;
         assert!(result.is_err());
     }
 
@@ -156,25 +179,34 @@ mod tests {
         registry
             .connections_accepted
             .fetch_add(42, std::sync::atomic::Ordering::Relaxed);
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind"); // OK: test
-        let addr = listener.local_addr().expect("addr"); // OK: test
-        let reg = Arc::clone(&registry);
-        tokio::spawn(async move {
-            serve_metrics_on(listener, reg).await;
-        });
-        tokio::time::sleep(Duration::from_millis(20)).await;
-
-        let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
-        stream
-            .write_all(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            .await
-            .expect("write"); // OK: test
-
-        let mut buf = Vec::new();
-        stream.read_to_end(&mut buf).await.expect("read"); // OK: test
-        let response = String::from_utf8(buf).expect("utf8"); // OK: test
+        let addr = spawn_server(Arc::clone(&registry), healthy()).await;
+        let response = http_get(addr, "/metrics").await;
 
         assert!(response.contains("tessera_connections_accepted_total 42"));
+    }
+
+    // --- Health endpoint tests ---
+
+    #[tokio::test]
+    async fn get_health_returns_200_when_healthy() {
+        let registry = Arc::new(MetricsRegistry::new(64));
+        let addr = spawn_server(registry, healthy()).await;
+        let response = http_get(addr, "/health").await;
+
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(response.contains("Content-Type: application/json\r\n"));
+        assert!(response.contains(r#""status":"healthy""#));
+        assert!(response.contains(r#""version":"0.2.0""#));
+    }
+
+    #[tokio::test]
+    async fn get_health_returns_503_when_degraded() {
+        let registry = Arc::new(MetricsRegistry::new(64));
+        let addr = spawn_server(registry, degraded()).await;
+        let response = http_get(addr, "/health").await;
+
+        assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
+        assert!(response.contains("Content-Type: application/json\r\n"));
+        assert!(response.contains(r#""status":"degraded""#));
     }
 }
