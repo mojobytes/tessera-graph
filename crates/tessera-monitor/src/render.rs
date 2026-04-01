@@ -9,6 +9,7 @@ use crate::registry::{HISTOGRAM_BUCKETS, MetricsRegistry};
 
 /// Render all metrics in Prometheus text exposition format (version 0.0.4).
 #[must_use]
+#[allow(clippy::too_many_lines)] // Single render function — splitting would hurt readability.
 pub fn render_prometheus(registry: &MetricsRegistry) -> String {
     let mut buf = String::with_capacity(4096);
 

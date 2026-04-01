@@ -22,6 +22,7 @@ use tessera_server::listener::TesseraListener;
 use tessera_tenant::TenantRegistry;
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)] // Server bootstrap — splitting would obscure the startup sequence.
 async fn main() {
     tracing_subscriber::fmt::init();
 

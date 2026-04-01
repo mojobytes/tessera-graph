@@ -314,7 +314,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         self.session_token
             .as_ref()
             .and_then(|t| self.ctx.sessions().validate(t).ok())
-            .map(|uid| uid.raw())
+            .map(tessera_auth::user::UserId::raw)
     }
 
     /// Authenticate the client and return the `UserId`.

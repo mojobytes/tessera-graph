@@ -196,7 +196,7 @@ impl AuditLog {
 
     /// Construct an `AuditLog` with an externally provided sender (for testing).
     #[must_use]
-    pub fn new_with_sender(sender: mpsc::Sender<AuditEntry>) -> Self {
+    pub const fn new_with_sender(sender: mpsc::Sender<AuditEntry>) -> Self {
         Self { sender }
     }
 
@@ -343,10 +343,11 @@ impl AuditWriterTask {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn unix_timestamp_ms() -> u64 {
-    std::time::SystemTime::now()
+    #[allow(clippy::cast_possible_truncation)] // u128 millis won't overflow u64 until year 584 million.
+    { std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock is before epoch") // OK: fundamental invariant
-        .as_millis() as u64
+        .as_millis() as u64 }
 }
 
 fn chrono_timestamp() -> String {

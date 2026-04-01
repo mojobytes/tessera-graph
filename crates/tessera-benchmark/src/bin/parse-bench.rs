@@ -1,10 +1,15 @@
 // Copyright (c) 2026 BelowZero Security OU. All rights reserved.
 // SPDX-License-Identifier: LicenseRef-BelowZero-Enterprise
 
-//! Micro-benchmark comparing GQL-direct vs CypherCompat parsing overhead.
+//! Micro-benchmark comparing GQL-direct vs `CypherCompat` parsing overhead.
 //!
 //! Measures `parse_with_mode` for identical semantics expressed in GQL syntax
 //! vs Cypher syntax (which requires the preprocessor step).
+#![allow(
+    clippy::cast_precision_loss,     // Intentional: benchmark stats don't need exact precision.
+    clippy::cast_lossless,           // u32→f64 is lossless but clippy suggests From.
+    clippy::doc_markdown,            // Benchmark binary, not a library.
+)]
 
 use std::time::Instant;
 

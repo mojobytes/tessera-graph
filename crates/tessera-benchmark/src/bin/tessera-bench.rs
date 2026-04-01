@@ -107,6 +107,7 @@ impl Default for CliArgs {
 impl CliArgs {
     /// Parses arguments from an iterator of string slices (for testability).
     #[must_use]
+    #[allow(clippy::too_many_lines)] // CLI arg parser — splitting would reduce readability.
     pub fn parse_from(args: &[&str]) -> Self {
         let mut result = Self::default();
         let mut i = 1; // skip binary name
