@@ -15,6 +15,77 @@ use tokio::task::JoinHandle;
 /// Maximum consecutive flush errors before the health flag is set to degraded.
 const MAX_CONSECUTIVE_ERRORS: u32 = 3;
 
+/// Updates health state based on flush outcome. Returns the new consecutive error count.
+fn update_health_state(
+    failed: bool,
+    consecutive_errors: u32,
+    health: &AtomicHealthFlag,
+) -> u32 {
+    if failed {
+        let new_count = consecutive_errors.saturating_add(1);
+        if new_count >= MAX_CONSECUTIVE_ERRORS {
+            health.set_degraded();
+        }
+        new_count
+    } else {
+        health.set_healthy();
+        0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tessera_graph_monitor::HealthProvider;
+
+    #[test]
+    fn health_stays_healthy_on_success() {
+        let flag = AtomicHealthFlag::new();
+        let count = update_health_state(false, 0, &flag);
+        assert_eq!(count, 0);
+        assert!(flag.is_healthy());
+    }
+
+    #[test]
+    fn health_stays_healthy_under_threshold() {
+        let flag = AtomicHealthFlag::new();
+        let count = update_health_state(true, 0, &flag);
+        assert_eq!(count, 1);
+        assert!(flag.is_healthy()); // not yet at threshold (3)
+
+        let count = update_health_state(true, count, &flag);
+        assert_eq!(count, 2);
+        assert!(flag.is_healthy()); // still under threshold
+    }
+
+    #[test]
+    fn health_degrades_at_threshold() {
+        let flag = AtomicHealthFlag::new();
+        let mut count = 0;
+        for _ in 0..MAX_CONSECUTIVE_ERRORS {
+            count = update_health_state(true, count, &flag);
+        }
+        assert_eq!(count, MAX_CONSECUTIVE_ERRORS);
+        assert!(!flag.is_healthy(), "must be degraded after {MAX_CONSECUTIVE_ERRORS} errors");
+    }
+
+    #[test]
+    fn health_recovers_after_success() {
+        let flag = AtomicHealthFlag::new();
+        // Drive to degraded
+        let mut count = 0;
+        for _ in 0..MAX_CONSECUTIVE_ERRORS {
+            count = update_health_state(true, count, &flag);
+        }
+        assert!(!flag.is_healthy());
+
+        // One success recovers
+        let count = update_health_state(false, count, &flag);
+        assert_eq!(count, 0);
+        assert!(flag.is_healthy(), "must recover after successful flush");
+    }
+}
+
 /// Spawns a background tokio task that calls
 /// [`TenantRegistry::flush_all`] every `interval_ms` milliseconds.
 ///
@@ -65,15 +136,11 @@ pub fn spawn_background_flush(
                         _ => false,
                     };
 
-                    if failed {
-                        consecutive_errors = consecutive_errors.saturating_add(1);
-                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                            health.set_degraded();
-                        }
-                    } else {
-                        consecutive_errors = 0;
-                        health.set_healthy();
-                    }
+                    consecutive_errors = update_health_state(
+                        failed,
+                        consecutive_errors,
+                        &health,
+                    );
                 }
                 _ = shutdown_rx.changed() => {
                     break;

@@ -91,7 +91,7 @@ async fn main() {
     ));
 
     // --- Health flag (shared with flush task and metrics server) ---
-    let health = tessera_graph_monitor::AtomicHealthFlag::new();
+    let health = Arc::new(tessera_graph_monitor::AtomicHealthFlag::new());
 
     // --- Metrics HTTP server (optional) ---
     if let Ok(metrics_bind) = std::env::var("TESSERA_METRICS_BIND") {

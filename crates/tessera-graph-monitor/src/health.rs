@@ -6,7 +6,6 @@
 //! Tests use [`StaticHealth`] for deterministic assertions.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 /// Reports whether the server is healthy.
 ///
@@ -28,10 +27,10 @@ pub struct AtomicHealthFlag {
 impl AtomicHealthFlag {
     /// Create a new flag in the healthy state.
     #[must_use]
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+    pub const fn new() -> Self {
+        Self {
             flag: AtomicBool::new(true),
-        })
+        }
     }
 
     /// Mark the server as healthy.
@@ -42,6 +41,12 @@ impl AtomicHealthFlag {
     /// Mark the server as degraded (unhealthy).
     pub fn set_degraded(&self) {
         self.flag.store(false, Ordering::Relaxed);
+    }
+}
+
+impl Default for AtomicHealthFlag {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

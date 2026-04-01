@@ -14,8 +14,8 @@ integration-tests  = []
 
 [dependencies]
 tessera-graph    = { workspace = true, features = ["benchmarks"] }
-tessera-graph-cypher = { path = "../tessera-graph-cypher" }
-tessera-graph-config = { path = "../tessera-graph-config" }
+tessera-graph-cypher = { workspace = true }
+tessera-graph-config = { workspace = true }
 thiserror        = { workspace = true }
 
 # Memgraph / Bolt target (optional)
@@ -23,7 +23,7 @@ neo4rs = { version = "0.8", optional = true }
 tokio  = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util"], optional = true }
 
 # TesseraGraph Bolt target (optional)
-tessera-graph-protocol = { path = "../tessera-graph-protocol", optional = true }
+tessera-graph-protocol = { workspace = true, optional = true }
 rustls           = { version = "0.23", optional = true }
 tokio-rustls     = { version = "0.26", optional = true }
 

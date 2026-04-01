@@ -17,6 +17,9 @@ use crate::render::render_prometheus;
 /// Maximum request size (8 KiB) — security guard against memory exhaustion.
 const MAX_REQUEST_SIZE: usize = 8192;
 
+/// Maximum time to wait for a complete HTTP request header.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Start the metrics HTTP server on the given address.
 ///
 /// This function binds a TCP listener and serves forever (until the task is cancelled).
@@ -58,25 +61,30 @@ async fn handle_connection(
     registry: &MetricsRegistry,
     health: &dyn HealthProvider,
 ) -> std::io::Result<()> {
-    // Read request headers (up to MAX_REQUEST_SIZE)
+    // Read request headers (up to MAX_REQUEST_SIZE, within READ_TIMEOUT).
     let mut buf = vec![0u8; MAX_REQUEST_SIZE];
     let mut total = 0;
 
-    loop {
-        if total >= MAX_REQUEST_SIZE {
-            // Request too large — drop connection
-            return Ok(());
+    let headers_complete = tokio::time::timeout(READ_TIMEOUT, async {
+        loop {
+            if total >= MAX_REQUEST_SIZE {
+                return Ok::<bool, std::io::Error>(false);
+            }
+            let n = stream.read(&mut buf[total..]).await?;
+            if n == 0 {
+                return Ok(false);
+            }
+            total += n;
+            if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
+                return Ok(true);
+            }
         }
-        let n = stream.read(&mut buf[total..]).await?;
-        if n == 0 {
-            return Ok(());
-        }
-        total += n;
+    })
+    .await;
 
-        // Check if we've received the full header (ends with \r\n\r\n)
-        if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
+    match headers_complete {
+        Ok(Ok(true)) => {}                       // headers received
+        Ok(Ok(false) | Err(_)) | Err(_) => return Ok(()), // oversize, EOF, I/O error, or timeout
     }
 
     let request = String::from_utf8_lossy(&buf[..total]);
@@ -209,5 +217,32 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 503 Service Unavailable\r\n"));
         assert!(response.contains("Content-Type: application/json\r\n"));
         assert!(response.contains(r#""status":"degraded""#));
+    }
+
+    // --- Timeout tests ---
+
+    #[tokio::test]
+    async fn slow_client_is_disconnected_within_timeout() {
+        let registry = Arc::new(MetricsRegistry::new(64));
+        let addr = spawn_server(registry, healthy()).await;
+
+        // Connect but send only a partial request (no \r\n\r\n terminator).
+        let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
+        stream
+            .write_all(b"GET /metrics HTTP/1.1\r\n")
+            .await
+            .expect("write"); // OK: test
+
+        // Server should close the connection within READ_TIMEOUT (5s) + margin.
+        let mut buf = Vec::new();
+        let result = tokio::time::timeout(
+            Duration::from_secs(7),
+            stream.read_to_end(&mut buf),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "server must close connection within 7s (5s timeout + margin)"
+        );
     }
 }
