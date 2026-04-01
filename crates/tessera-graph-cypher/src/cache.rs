@@ -15,13 +15,12 @@ use tessera_graph::GqlStatement;
 /// Wraps an `lru::LruCache` behind a `RwLock` so that concurrent Bolt
 /// connections can share a single cache instance via `Arc<QueryCache>`.
 ///
-/// # Safety note on `lru` crate (RUSTSEC-2024-0376)
+/// # Note on `lru` crate advisory (RUSTSEC-2026-0002)
 ///
-/// `lru 0.12.x` has a known unsoundness in `LruCache::iter_mut()` /
-/// `IterMut` which can violate Stacked Borrows. **This code only uses
-/// `LruCache::get` and `LruCache::put`** — the unsound `IterMut` type
-/// is never constructed. If a future change needs iteration, switch to
-/// `quick_cache` or `moka` first.
+/// The `IterMut` unsoundness was reported against `lru 0.12.x`. This code
+/// only uses `LruCache::get` and `LruCache::put` — `IterMut` is never
+/// constructed. If a future change needs iteration, migrate to `moka` or
+/// `quick_cache` first.
 pub struct QueryCache {
     inner: RwLock<lru::LruCache<String, GqlStatement>>,
 }

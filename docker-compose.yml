@@ -33,7 +33,7 @@ services:
       - TESSERA_METRICS_BIND=0.0.0.0:9090
       - TESSERA_FLUSH_INTERVAL_MS=${TESSERA_FLUSH_INTERVAL_MS:-50}
       - TESSERA_AUDIT_ENABLED=false
-      - RUST_LOG=tessera_graph_server=info
+      - RUST_LOG=tessera_graph_server=info,tessera_graph_audit=info
     volumes:
       - graphdb-data:/var/lib/tessera/data
       - graphdb-logs:/var/log/tessera
