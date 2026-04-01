@@ -41,6 +41,7 @@ impl ServerContext {
     /// All parameters are mandatory — there is no way to construct a context
     /// without authentication and TLS.
     #[must_use]
+    #[allow(clippy::too_many_arguments)] // Builder pattern planned for Phase 2.
     pub fn new(
         auth_policy: Arc<AuthPolicy>,
         sessions: Arc<SessionManager>,
@@ -145,7 +146,7 @@ impl ServerContext {
 
     /// Access the server-wide parsed query cache.
     #[must_use]
-    pub fn query_cache(&self) -> &Arc<QueryCache> {
+    pub const fn query_cache(&self) -> &Arc<QueryCache> {
         &self.query_cache
     }
 
@@ -189,7 +190,7 @@ impl ServerContext {
                     .sessions
                     .validate(token)
                     .ok()
-                    .map(|uid| uid.raw());
+                    .map(UserId::raw);
                 let event = AuditEvent::PermissionDenied {
                     permission: required.to_string(),
                 };

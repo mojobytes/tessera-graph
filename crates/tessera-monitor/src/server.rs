@@ -91,10 +91,11 @@ async fn handle_connection(
         );
         stream.write_all(response.as_bytes()).await?;
     } else if first_line.starts_with("GET /health") {
+        let version = env!("CARGO_PKG_VERSION");
         let (status, body) = if health.is_healthy() {
-            ("200 OK", r#"{"status":"healthy","version":"0.2.0"}"#)
+            ("200 OK", format!(r#"{{"status":"healthy","version":"{version}"}}"#))
         } else {
-            ("503 Service Unavailable", r#"{"status":"degraded","version":"0.2.0"}"#)
+            ("503 Service Unavailable", format!(r#"{{"status":"degraded","version":"{version}"}}"#))
         };
         let response = format!(
             "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -196,7 +197,7 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
         assert!(response.contains("Content-Type: application/json\r\n"));
         assert!(response.contains(r#""status":"healthy""#));
-        assert!(response.contains(r#""version":"0.2.0""#));
+        assert!(response.contains(&format!(r#""version":"{}""#, env!("CARGO_PKG_VERSION"))));
     }
 
     #[tokio::test]

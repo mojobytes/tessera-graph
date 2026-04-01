@@ -71,10 +71,8 @@ pub fn spawn_background_flush(
                             health.set_degraded();
                         }
                     } else {
-                        if consecutive_errors > 0 {
-                            health.set_healthy();
-                        }
                         consecutive_errors = 0;
+                        health.set_healthy();
                     }
                 }
                 _ = shutdown_rx.changed() => {
