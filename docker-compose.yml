@@ -1,0 +1,80 @@
+# TesseraGraph Enterprise — Development & Benchmark Docker Compose
+# =================================================================
+# Usage:
+#   docker compose up -d                          # Start both DBs
+#   docker compose up -d graphdb                  # TesseraGraph only
+#   docker compose up -d memgraph                 # Memgraph only
+#   docker compose logs -f                        # Watch logs
+#   docker compose exec graphdb tessera-graph-cli ...   # TesseraGraph CLI
+#   docker compose exec memgraph mgconsole        # Memgraph console
+#
+# Build TesseraGraph (from tessera-ecosystem/ root):
+#   docker build -t tesseraio/tessera-graph-enterprise:latest \
+#     -f tessera-graph-enterprise/Dockerfile .
+#
+# Benchmark: both services are resource-limited to 2 CPUs + 2 GB RAM
+# for fair comparison.
+
+services:
+  # ── TesseraGraph Enterprise ──────────────────────────────────────
+  graphdb:
+    image: tesseraio/tessera-graph-enterprise:latest
+    container_name: tessera-graphdb
+    ports:
+      - "7687:7687"   # Bolt 4.4
+      - "9090:9090"   # Prometheus metrics
+    environment:
+      - TESSERA_ADMIN_PASSWORD=${TESSERA_ADMIN_PASSWORD:-Admin.123}
+      - TESSERA_BIND=0.0.0.0:7687
+      - TESSERA_DATA_DIR=/var/lib/tessera/data
+      - TESSERA_DEFAULT_TENANT=default
+      - TESSERA_MEMORY_LIMIT_MB=2048
+      - TESSERA_MAX_CONNECTIONS=256
+      - TESSERA_METRICS_BIND=0.0.0.0:9090
+      - TESSERA_FLUSH_INTERVAL_MS=${TESSERA_FLUSH_INTERVAL_MS:-50}
+      - TESSERA_AUDIT_ENABLED=false
+      - RUST_LOG=tessera_graph_server=info,tessera_graph_audit=info
+    volumes:
+      - graphdb-data:/var/lib/tessera/data
+      - graphdb-logs:/var/log/tessera
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: unless-stopped
+    networks:
+      - tessera-net
+
+  # ── Memgraph (baseline for comparison) ───────────────────────────
+  memgraph:
+    image: memgraph/memgraph:latest
+    container_name: tessera-memgraph
+    ports:
+      - "7688:7687"   # Bolt on 7688 externally, 7687 internally
+    command:
+      - "--memory-limit=1024"
+      - "--log-level=WARNING"
+      - "--bolt-cert-file=/ssl/memgraph.pem"
+      - "--bolt-key-file=/ssl/memgraph.key"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    volumes:
+      - memgraph-data:/var/lib/memgraph
+      - ./.private/ssl/memgraph.pem:/ssl/memgraph.pem:ro
+      - ./.private/ssl/memgraph.key:/ssl/memgraph.key:ro
+    restart: unless-stopped
+    networks:
+      - tessera-net
+
+networks:
+  tessera-net:
+    driver: bridge
+
+volumes:
+  graphdb-data:
+  graphdb-logs:
+  memgraph-data:

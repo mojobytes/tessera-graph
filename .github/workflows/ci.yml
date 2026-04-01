@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  ci:
+    name: Test, Lint & Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout enterprise repo
+        uses: actions/checkout@v4
+
+      # MIT core lives at ../tessera-graph relative to the workspace.
+      - name: Checkout tessera-graph (MIT core)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/tessera-graph
+          path: ../tessera-graph
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: clippy, rustfmt
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Security audit
+        run: cargo audit --deny warnings
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Tests (workspace)
+        run: cargo test --workspace
+
+      - name: Build Docker image
+        if: hashFiles('Dockerfile') != ''
+        run: docker build -t tessera-graph-enterprise:ci -f Dockerfile ..

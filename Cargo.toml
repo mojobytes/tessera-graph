@@ -1,46 +1,51 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tessera-server",
-    "crates/tessera-protocol",
-    "crates/tessera-auth",
-    "crates/tessera-storage-enterprise",
-    "crates/tessera-import",
-    "crates/tessera-streaming",
-    "crates/tessera-monitor",
-    "crates/tessera-audit",
-    "crates/tessera-config",
-    "crates/tessera-replication",
-    "crates/tessera-tenant",
-    "crates/tessera-cypher",
-    "crates/tessera-benchmark",
-    "crates/tessera-cli",
+    "crates/tessera-graph-server",
+    "crates/tessera-graph-protocol",
+    "crates/tessera-graph-auth",
+    "crates/tessera-graph-storage",
+    "crates/tessera-graph-import",
+    "crates/tessera-graph-streaming",
+    "crates/tessera-graph-monitor",
+    "crates/tessera-graph-audit",
+    "crates/tessera-graph-config",
+    "crates/tessera-graph-replication",
+    "crates/tessera-graph-tenant",
+    "crates/tessera-graph-cypher",
+    "crates/tessera-graph-benchmark",
+    "crates/tessera-graph-cli",
 ]
 
 [workspace.package]
-version     = "0.1.0"
+version     = "0.2.0"
 edition     = "2024"
 authors     = ["BelowZero Security OU <info@belowzerosecurity.io>"]
 license     = "LicenseRef-Proprietary"
 rust-version = "1.85"
 
 [workspace.dependencies]
-tessera-graph              = { path = "../tessera-graph", features = ["enterprise-helpers"] }
-tessera-protocol           = { path = "crates/tessera-protocol" }
-tessera-auth               = { path = "crates/tessera-auth" }
-tessera-storage-enterprise = { path = "crates/tessera-storage-enterprise" }
-tessera-import             = { path = "crates/tessera-import" }
-tessera-streaming          = { path = "crates/tessera-streaming" }
-tessera-monitor            = { path = "crates/tessera-monitor" }
-tessera-audit              = { path = "crates/tessera-audit" }
-tessera-config             = { path = "crates/tessera-config" }
-tessera-cypher             = { path = "crates/tessera-cypher" }
-tessera-replication        = { path = "crates/tessera-replication" }
-tessera-tenant             = { path = "crates/tessera-tenant" }
+tessera-graph              = { path = "../tessera-graph/crates/tessera-graph", features = ["extended-gql"] }
+tessera-graph-protocol     = { path = "crates/tessera-graph-protocol" }
+tessera-graph-auth         = { path = "crates/tessera-graph-auth" }
+tessera-graph-storage      = { path = "crates/tessera-graph-storage" }
+tessera-graph-import       = { path = "crates/tessera-graph-import" }
+tessera-graph-streaming    = { path = "crates/tessera-graph-streaming" }
+tessera-graph-monitor      = { path = "crates/tessera-graph-monitor" }
+tessera-graph-audit        = { path = "crates/tessera-graph-audit" }
+tessera-graph-config       = { path = "crates/tessera-graph-config" }
+tessera-graph-cypher       = { path = "crates/tessera-graph-cypher" }
+tessera-graph-replication  = { path = "crates/tessera-graph-replication" }
+tessera-graph-tenant       = { path = "crates/tessera-graph-tenant" }
+# default-features = false: each crate must declare the tokio features it needs.
+# See: https://doc.rust-lang.org/cargo/reference/features.html#feature-unification
+tokio        = { version = "1", default-features = false }
+tokio-rustls = { version = "0.26" }
 thiserror  = "2"
 crc32fast  = "1"
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
+moka       = { version = "0.12", default-features = false, features = ["sync"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

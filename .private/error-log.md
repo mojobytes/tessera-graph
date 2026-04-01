@@ -72,8 +72,38 @@
 - **Cómo lo solucioné:** Lo leí cuando el usuario lo señaló. Ningún error previo se repitió en esta sesión por coincidencia, pero podría haberlo hecho.
 - **Regla para evitarlo:** El error-log es lo PRIMERO que se lee al iniciar cualquier sesión de trabajo, antes de responder cualquier pregunta del usuario. Es la prioridad máxima según CLAUDE.md.
 
+### [2026-03-27] Dije que el cambio en parser GQL era "mínimo" sin verificar el código
+- **Qué hice mal:** Afirmé que añadir MATCH...CREATE al parser era "solo una línea" basándome en que el executor ya lo soportaba. No verifiqué que `parse_create_pattern_multi` requiere label obligatorio (`self.expect(&Token::Colon)?`), lo cual hace que `CREATE (a)-[:REL]->(b)` (variable references sin label) sea un error de sintaxis.
+- **Causa raíz:** Evalué el impacto leyendo solo el dispatch de `parse_statement` y el executor, sin leer la función que realmente parsea los CREATE patterns. Conclusión precipitada.
+- **Cómo lo solucioné:** Al leer `parse_create_pattern_multi` en profundidad descubrí el problema y generé un plan TDD correcto con los cambios reales necesarios.
+- **Regla para evitarlo:** Antes de afirmar que un cambio es "mínimo", leer TODAS las funciones del call path completo, no solo el punto de entrada. El dispatch puede ser trivial pero las funciones que llama no.
+
 ### [2026-03-18] cross-repo-write-guard.sh: prefix match false positive (tessera-graph vs tessera-graph-enterprise)
 - **Qué hice mal:** El guard usaba `[[ "$RESOLVED_PATH" == "$MIT_ROOT"* ]]` para detectar paths del repo MIT. Como `tessera-graph` es prefijo de `tessera-graph-enterprise`, TODOS los paths del enterprise eran bloqueados como si fueran del MIT.
 - **Causa raíz:** Comparación de string prefix sin delimitador. `/path/tessera-graph-enterprise/...` empieza con `/path/tessera-graph`, lo que produce un falso positivo.
 - **Cómo lo solucioné:** Cambié la comparación a `"$MIT_ROOT/"*` (con `/` trailing) para que solo match paths que realmente están DENTRO del directorio MIT.
 - **Regla para evitarlo:** Cuando se comparan paths por prefix en bash, SIEMPRE añadir `/` al final del directorio base: `"$DIR/"*` en vez de `"$DIR"*`. Esto evita falsos positivos cuando un directorio es prefijo de otro.
+
+### [2026-03-30] MemgraphTarget usaba elementId() (Neo4j 5+) — Memgraph usa id() (i64)
+- **Qué hice mal:** El código de `MemgraphTarget` usaba `elementId(n)` que es una función de Neo4j 5+ que retorna String. Memgraph no la soporta.
+- **Causa raíz:** Se implementó el target basándose en la API de Neo4j sin verificar compatibilidad con Memgraph.
+- **Cómo lo solucioné:** Reemplacé `elementId()` por `id()` y cambié los maps de `HashMap<u64, String>` a `HashMap<u64, i64>`.
+- **Regla para evitarlo:** Verificar la documentación del DBMS target antes de asumir compatibilidad de funciones Cypher entre Neo4j y Memgraph.
+
+### [2026-03-30] neo4rs ConfigBuilder requiere user/pass y db — Memgraph no usa db="neo4j"
+- **Qué hice mal:** El `ConfigBuilder::default()` de neo4rs exige user/pass para que `build()` sea válido, y usa `db="neo4j"` por defecto, que Memgraph rechaza.
+- **Causa raíz:** No leí la API de neo4rs para entender los defaults obligatorios.
+- **Cómo lo solucioné:** Siempre paso user="neo4j", pass="neo4j" como fallback, y `db("memgraph")` explícitamente.
+- **Regla para evitarlo:** Al usar libraries externas, verificar qué campos son obligatorios en `build()` y qué defaults usa.
+
+### [2026-03-30] TesseraGraph requiere TLS — TesseraBoltTarget conectaba con TCP plano
+- **Qué hice mal:** Implementé el target Bolt sin TLS, pero el servidor TesseraGraph siempre escucha con TLS.
+- **Causa raíz:** No verifiqué los logs del servidor ni cómo el CLI existente se conecta.
+- **Cómo lo solucioné:** Añadí rustls + tokio-rustls con NoCertVerifier para benchmarks.
+- **Regla para evitarlo:** SIEMPRE revisar cómo el código existente (CLI) se conecta al servidor antes de implementar un nuevo cliente.
+
+### [2026-03-30] neo4rs with_client_certificate requiere CA cert, no self-signed end-entity
+- **Qué hice mal:** Pasé el cert auto-firmado de Memgraph como `with_client_certificate` a neo4rs. rustls lo rechazó con `CaUsedAsEndEntity` porque el cert no tenía `basicConstraints: CA:TRUE`.
+- **Causa raíz:** Asumí que `with_client_certificate` haría trust del cert sin verificar que fuera un CA cert válido. El nombre del método es engañoso — realmente añade el cert al root CA store.
+- **Cómo lo solucioné:** Generé un par CA+cert firmado dedicado para benchmarks. CA con `basicConstraints=critical,CA:TRUE`, cert end-entity firmado por el CA.
+- **Regla para evitarlo:** Para TLS con certs auto-firmados en tests/benchmarks, SIEMPRE generar un CA propio y firmar los certs end-entity con él. No usar el cert self-signed directamente como raíz de confianza.

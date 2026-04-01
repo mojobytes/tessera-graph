@@ -1,0 +1,9 @@
+target/
+.git/
+.private/
+.claude/
+*.csv
+*.json
+graph.json
+nodes.csv
+edges.csv
