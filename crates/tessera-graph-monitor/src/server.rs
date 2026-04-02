@@ -21,7 +21,10 @@ const MAX_REQUEST_SIZE: usize = 8192;
 fn check_bearer_auth(request: &str, expected_token: &str) -> bool {
     request
         .lines()
-        .find(|l| l.len() > 14 && l[..14].eq_ignore_ascii_case("authorization:"))
+        .find(|l| {
+            l.get(..14)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("authorization:"))
+        })
         .and_then(|l| l.split_once(':').map(|(_, v)| v.trim()))
         .and_then(|v| v.strip_prefix("Bearer "))
         .is_some_and(|t| {

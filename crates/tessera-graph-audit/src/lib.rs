@@ -16,6 +16,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
@@ -139,8 +140,6 @@ pub struct AuditLog {
     /// Expose via `/metrics` as `tessera_audit_entries_dropped_total`.
     dropped_count: Arc<std::sync::atomic::AtomicU64>,
 }
-
-use std::sync::Arc;
 
 impl AuditLog {
     /// Open (or create) an audit log and return the log handle + writer task.

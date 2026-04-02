@@ -335,6 +335,11 @@ impl TenantRegistry {
             guard.remove(addr)
         };
 
+        // Keep access_order in sync with graphs to prevent LRU divergence.
+        if let Ok(mut order) = self.access_order.write() {
+            order.retain(|a| a != addr);
+        }
+
         let arc = arc.ok_or_else(|| TenantError::DatabaseNotLoaded {
             tenant: addr.tenant.to_string(),
             database: addr.database.to_string(),
