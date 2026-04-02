@@ -1856,3 +1856,91 @@ desproporcionado. La mitigación correcta es la combinación de:
 - PULL paginado (Cycle 1)
 - RSS metrics (Cycle 14) para visibilidad
 Se documenta el gap residual en un issue de tracking.
+
+---
+
+## Hallazgos pendientes de quality review (2026-04-02)
+
+1. **Materialización completa de filas en `gql::execute()`** — `bolt_handler.rs:491-492`.
+   `gql::execute()` en el MIT core retorna `Vec<HashMap<String, GqlValue>>` completo.
+   `compile_match` recolecta todos los `PatternMatch` antes de filtrar/proyectar.
+   Con 1M nodos y `MATCH (n) RETURN n`, acumula ~1GB en memoria del servidor antes
+   de que el cliente vea la primera fila. El cursor PULL solo pagina el envío, no
+   reduce el consumo. Opciones: streaming desde `compile_match` (MIT core), iterador
+   lazy enterprise-only, o LIMIT hard configurable.
+
+2. **Health flag disco/flush mezclados** — `flush_task.rs:182-194`.
+   `set_degraded()` por disco lleno es sobreescrito por `set_healthy()` del flush
+   exitoso en el mismo tick. Las dos causas de degradación comparten un solo flag
+   sin diferenciación de causa.
+
+3. **`TESSERA_MAX_LOADED_TENANTS` no usa `parse_env_or_warn`** — `main.rs:89-92`.
+   Valor inválido cae silenciosamente al default 0 sin advertir al operador.
+
+4. **`TESSERA_MIN_FREE_DISK_MB` no usa `parse_env_or_warn`** — `flush_task.rs:147-151`.
+   Valor inválido silencioso.
+
+5. **`TESSERA_AUDIT_SYNC` sin warning y semántica sorprendente** — `main.rs:63-65`.
+   `"treu"` o `""` resultan en `true` (sync activado) sin log. Inconsistente con
+   el patrón de las otras variables.
+
+6. **`eprintln!` en `AuditWriterTask::run`** — `audit/lib.rs:283-298`.
+   Errores de escritura y sync usan `eprintln!` en vez de `tracing::error!`. Pérdida
+   de audit trail no aparece en el sistema de logging estructurado.
+
+7. **`touch_access_order` adquiere write-lock en el fast-path** — `tenant/registry.rs`.
+   Cada cache hit en `get_or_load` toma `access_order.write()`, introduciendo
+   contención entre lectores concurrentes.
+
+8. **Lecturas de `/proc` bloqueantes en contexto async** — `main.rs` (background task).
+   `std::fs::read_to_string("/proc/self/status")` y `std::fs::read_dir("/proc/self/fd")`
+   son llamadas bloqueantes dentro de `tokio::spawn`.
+
+9. **Sin test de `DISCARD` después de PULL parcial con cursor** — `bolt_handler_test.rs`.
+   Los tests cubren PULL paginado y PULL all, pero no `DISCARD` tras PULL parcial
+   para verificar que `pending_result` se limpia y no hay cursor residual.
+
+---
+
+## Benchmarks pendientes — Query execution con resultados grandes
+
+Los escenarios actuales de `tessera-bench` (write, read, traversal, pathfinding, mixed,
+concurrent) no miden query execution con resultados grandes. Esto es necesario para
+medir el impacto de las optimizaciones de proyección temprana e iterador lazy en MIT core.
+
+### Benchmark 1: Query pequeña sin LIMIT (baseline, no debe regresar)
+
+- Dataset: 100 nodos Person con 5 propiedades cada uno
+- Query: `MATCH (n:Person) RETURN n.name`
+- Mide: latencia y throughput de query completa vía Bolt
+- Objetivo: establecer baseline y detectar regresiones en queries normales
+- Threshold: debe mantener rendimiento actual ±10%
+
+### Benchmark 2: Query grande con LIMIT (debe mejorar con proyección temprana)
+
+- Dataset: 100K nodos Person con 50 propiedades cada uno
+- Query: `MATCH (n:Person) RETURN n.name LIMIT 100`
+- Mide: latencia end-to-end incluyendo materialización en el server
+- Objetivo: con proyección temprana, el server solo debería cargar 1 propiedad
+  por nodo en vez de 50 para el filtrado. Con iterador lazy, solo 100 nodos.
+- Threshold: mejora significativa respecto a baseline pre-optimización
+
+### Benchmark 3: Query grande sin LIMIT, consume todo (no debe regresar más de X%)
+
+- Dataset: 100K nodos Person con 50 propiedades cada uno
+- Query: `MATCH (n:Person) RETURN n.name`
+- Mide: latencia total de materialización + envío completo vía Bolt
+- Objetivo: verificar que el overhead del iterador lazy no penaliza el caso
+  donde se consumen todos los resultados
+- Threshold: no más de 15% regresión respecto a baseline pre-optimización
+
+### Implementación
+
+Requiere un nuevo escenario `QueryScenario` en `crates/tessera-graph-benchmark/src/scenario.rs`
+que use `TesseraBoltTarget` para ejecutar queries GQL arbitrarias y medir latencia.
+El trait `BenchmarkTarget` necesitaría un método `execute_query(gql: &str) -> Result<usize>`
+que retorne el número de filas recibidas.
+
+Alternativa: implementar los benchmarks como integration tests en
+`crates/tessera-graph-server/tests/` usando el harness de `spawn_bolt_handler` que
+ya existe, sin modificar el trait `BenchmarkTarget`.

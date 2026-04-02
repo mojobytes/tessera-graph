@@ -60,9 +60,8 @@ async fn main() {
     // --- Audit ---
     let audit_config = AuditConfig::from_env();
     let audit = if audit_config.enabled {
-        let audit_sync = std::env::var("TESSERA_AUDIT_SYNC")
-            .map(|v| v != "false" && v != "0")
-            .unwrap_or(true);
+        let audit_sync =
+            tessera_graph_server::config::parse_bool_env_or_warn("TESSERA_AUDIT_SYNC", true);
         let (log, writer_task) = AuditLog::open_with_sync(
             &audit_config.log_path,
             audit_config.rotation_max_size_bytes,
@@ -82,14 +81,13 @@ async fn main() {
     let persistence = PersistenceConfig::from_env();
     let flush_interval_ms = persistence.flush_interval_ms;
     let query_cache_capacity = persistence.query_cache_capacity;
+    let min_free_disk_bytes = persistence.min_free_disk_bytes;
     let base_dir = persistence
         .data_dir
         .unwrap_or_else(|| std::env::temp_dir().join("tessera-data"));
     tracing::info!("tenant data dir: {}", base_dir.display());
-    let max_loaded_tenants: usize = std::env::var("TESSERA_MAX_LOADED_TENANTS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let max_loaded_tenants: usize =
+        tessera_graph_server::config::parse_env_or_warn("TESSERA_MAX_LOADED_TENANTS", 0_usize);
     let registry = Arc::new(TenantRegistry::new_with_cap(
         &base_dir,
         persistence.graph_config,
@@ -160,6 +158,7 @@ async fn main() {
         shutdown_rx.clone(),
         Arc::clone(&health),
         base_dir.clone(),
+        min_free_disk_bytes,
     );
 
     // --- Background metrics + session cleanup (30s interval) ---
@@ -190,24 +189,33 @@ async fn main() {
                             std::sync::atomic::Ordering::Relaxed,
                         );
 
-                        // RSS and FD count (platform-specific, best-effort)
+                        // RSS and FD count (platform-specific, best-effort).
+                        // spawn_blocking: prevents blocking the Tokio executor.
                         #[cfg(target_os = "linux")]
                         {
-                            if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
-                                if let Some(line) = status.lines().find(|l| l.starts_with("VmRSS:")) {
-                                    let kb: u64 = line.split_whitespace()
-                                        .nth(1)
-                                        .and_then(|v| v.parse().ok())
-                                        .unwrap_or(0);
-                                    metrics_bg.process_rss_bytes.store(
-                                        kb * 1024,
-                                        std::sync::atomic::Ordering::Relaxed,
-                                    );
-                                }
-                            }
-                            if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+                            if let Ok((rss, fds)) = tokio::task::spawn_blocking(|| {
+                                let rss = std::fs::read_to_string("/proc/self/status")
+                                    .ok()
+                                    .and_then(|s| {
+                                        s.lines()
+                                            .find(|l| l.starts_with("VmRSS:"))
+                                            .and_then(|l| l.split_whitespace().nth(1))
+                                            .and_then(|v| v.parse::<u64>().ok())
+                                    })
+                                    .map_or(0, |kb| kb * 1024);
+                                let fds = std::fs::read_dir("/proc/self/fd")
+                                    .map(|e| e.count() as u64)
+                                    .unwrap_or(0);
+                                (rss, fds)
+                            })
+                            .await
+                            {
+                                metrics_bg.process_rss_bytes.store(
+                                    rss,
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
                                 metrics_bg.open_fds.store(
-                                    entries.count() as u64,
+                                    fds,
                                     std::sync::atomic::Ordering::Relaxed,
                                 );
                             }

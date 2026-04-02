@@ -279,22 +279,22 @@ impl AuditWriterTask {
             };
 
             if let Err(e) = self.write_entry_no_flush(&first) {
-                eprintln!("audit write error: {e}");
+                tracing::warn!(error = %e, "audit write error");
             }
 
             // Drain all immediately available entries (non-blocking).
             while let Ok(entry) = self.receiver.try_recv() {
                 if let Err(e) = self.write_entry_no_flush(&entry) {
-                    eprintln!("audit write error: {e}");
+                    tracing::warn!(error = %e, "audit write error");
                 }
             }
 
             // Single flush after the batch.
             if let Err(e) = self.writer.flush() {
-                eprintln!("audit flush error: {e}");
+                tracing::warn!(error = %e, "audit flush error");
             } else if self.sync_data {
                 if let Err(e) = self.writer.get_ref().sync_data() {
-                    eprintln!("audit sync_data error: {e}");
+                    tracing::warn!(error = %e, "audit sync_data error");
                 }
             }
         }

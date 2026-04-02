@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use tessera_graph::{Graph, GraphConfig};
 
@@ -29,7 +29,9 @@ pub struct TenantRegistry {
     /// Maximum number of loaded graphs. 0 = no limit (default).
     max_loaded: usize,
     /// LRU access order — front is least recently used.
-    access_order: RwLock<VecDeque<DatabaseAddress>>,
+    /// Uses `Mutex` instead of `RwLock` because every access is a write
+    /// (retain + push_back), so RwLock's reader-count overhead is wasted.
+    access_order: Mutex<VecDeque<DatabaseAddress>>,
 }
 
 impl TenantRegistry {
@@ -53,7 +55,7 @@ impl TenantRegistry {
             graphs: RwLock::new(HashMap::new()),
             graph_config,
             max_loaded,
-            access_order: RwLock::new(VecDeque::new()),
+            access_order: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -117,7 +119,7 @@ impl TenantRegistry {
 
         // LRU eviction: if cap is exceeded, evict the least recently used.
         if self.max_loaded > 0 && guard.len() >= self.max_loaded {
-            if let Ok(mut order) = self.access_order.write() {
+            if let Ok(mut order) = self.access_order.lock() {
                 if let Some(victim) = order.pop_front() {
                     if let Some(evicted) = guard.remove(&victim) {
                         // Best-effort flush before eviction.
@@ -137,7 +139,7 @@ impl TenantRegistry {
 
     /// Move `addr` to the back of the access order (most recently used).
     fn touch_access_order(&self, addr: &DatabaseAddress) {
-        if let Ok(mut order) = self.access_order.write() {
+        if let Ok(mut order) = self.access_order.lock() {
             order.retain(|a| a != addr);
             order.push_back(addr.clone());
         }
@@ -336,7 +338,7 @@ impl TenantRegistry {
         };
 
         // Keep access_order in sync with graphs to prevent LRU divergence.
-        if let Ok(mut order) = self.access_order.write() {
+        if let Ok(mut order) = self.access_order.lock() {
             order.retain(|a| a != addr);
         }
 

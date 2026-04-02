@@ -922,6 +922,99 @@ async fn pull_n_then_pull_all_returns_remaining() {
     assert_eq!(remaining.len(), 3, "remaining rows after PULL n=2 from 5 total");
 }
 
+// ── DISCARD tests ────────────────────────────────────────────────────────────
+
+/// Regression guard: DISCARD after partial PULL must clean up pending_result.
+#[tokio::test]
+async fn discard_after_partial_pull_clears_cursor_and_next_run_works() {
+    let (mut writer, mut reader, _shutdown, _dir) = setup_5_nodes().await;
+
+    // RUN
+    bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // PULL n=2 — consume 2 records
+    bolt_send(&mut writer, &pull_n(2)).await;
+    let mut count = 0;
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { .. } => count += 1,
+            BoltResponse::Success { .. } => {
+                assert!(
+                    dict_bool(&resp, "has_more").unwrap_or(false),
+                    "has_more must be true after partial PULL"
+                );
+                break;
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(count, 2);
+
+    // DISCARD — must clear pending_result
+    bolt_send(
+        &mut writer,
+        &BoltRequest::Discard { extra: vec![] },
+    )
+    .await;
+    let discard_resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(discard_resp, BoltResponse::Success { .. }),
+        "DISCARD must return SUCCESS, got {discard_resp:?}"
+    );
+
+    // Second RUN+PULL must work cleanly on a fresh result
+    bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    bolt_send(&mut writer, &pull_n(-1)).await;
+    let mut total = 0;
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { .. } => total += 1,
+            BoltResponse::Success { .. } => {
+                let has_more = dict_bool(&resp, "has_more").unwrap_or(true);
+                assert!(!has_more, "final PULL must have has_more=false");
+                break;
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(total, 5, "second RUN must return all 5 rows (no stale cursor)");
+}
+
+#[tokio::test]
+async fn discard_without_pending_result_returns_success() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // DISCARD immediately after HELLO — no RUN preceding it
+    bolt_send(
+        &mut writer,
+        &BoltRequest::Discard { extra: vec![] },
+    )
+    .await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "DISCARD without pending result must return SUCCESS, got {resp:?}"
+    );
+}
+
 #[tokio::test]
 async fn pull_without_n_returns_all_rows_backward_compat() {
     let (mut writer, mut reader, _shutdown, _dir) = setup_5_nodes().await;

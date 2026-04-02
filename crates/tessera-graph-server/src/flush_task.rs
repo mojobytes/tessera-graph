@@ -139,15 +139,17 @@ pub fn spawn_background_flush(
     mut shutdown_rx: watch::Receiver<bool>,
     health: Arc<AtomicHealthFlag>,
     base_dir: PathBuf,
+    min_free_disk_bytes: u64,
 ) -> JoinHandle<()> {
     if interval_ms == 0 {
         return tokio::spawn(async {});
     }
 
-    let min_free = std::env::var("TESSERA_MIN_FREE_DISK_MB")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .map_or(MIN_FREE_DISK_BYTES, |mb| mb.saturating_mul(1024 * 1024));
+    let min_free = if min_free_disk_bytes > 0 {
+        min_free_disk_bytes
+    } else {
+        MIN_FREE_DISK_BYTES
+    };
 
     let period = std::time::Duration::from_millis(interval_ms);
 
@@ -187,7 +189,9 @@ pub fn spawn_background_flush(
                                 threshold_mb = min_free / (1024 * 1024),
                                 "low disk space — marking server degraded",
                             );
-                            health.set_degraded();
+                            health.set_disk_degraded();
+                        } else {
+                            health.clear_disk_degraded();
                         }
                     }
 

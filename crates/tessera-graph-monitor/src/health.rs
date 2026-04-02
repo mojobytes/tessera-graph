@@ -21,7 +21,10 @@ pub trait HealthProvider: Send + Sync {
 /// Defaults to healthy (`true`). The flush task sets it to `false` after
 /// consecutive errors and resets it on success.
 pub struct AtomicHealthFlag {
+    /// Flush health — set to `false` after consecutive flush errors.
     flag: AtomicBool,
+    /// Disk space health — `true` when free space is below threshold.
+    disk_degraded: AtomicBool,
 }
 
 impl AtomicHealthFlag {
@@ -30,17 +33,28 @@ impl AtomicHealthFlag {
     pub const fn new() -> Self {
         Self {
             flag: AtomicBool::new(true),
+            disk_degraded: AtomicBool::new(false),
         }
     }
 
-    /// Mark the server as healthy.
+    /// Mark flush health as healthy.
     pub fn set_healthy(&self) {
         self.flag.store(true, Ordering::Relaxed);
     }
 
-    /// Mark the server as degraded (unhealthy).
+    /// Mark flush health as degraded (unhealthy).
     pub fn set_degraded(&self) {
         self.flag.store(false, Ordering::Relaxed);
+    }
+
+    /// Mark disk space as degraded (below threshold).
+    pub fn set_disk_degraded(&self) {
+        self.disk_degraded.store(true, Ordering::Relaxed);
+    }
+
+    /// Clear disk space degradation (space recovered above threshold).
+    pub fn clear_disk_degraded(&self) {
+        self.disk_degraded.store(false, Ordering::Relaxed);
     }
 }
 
@@ -52,7 +66,7 @@ impl Default for AtomicHealthFlag {
 
 impl HealthProvider for AtomicHealthFlag {
     fn is_healthy(&self) -> bool {
-        self.flag.load(Ordering::Relaxed)
+        self.flag.load(Ordering::Relaxed) && !self.disk_degraded.load(Ordering::Relaxed)
     }
 }
 
@@ -90,6 +104,44 @@ mod tests {
         assert!(!flag.is_healthy());
         flag.set_healthy();
         assert!(flag.is_healthy());
+    }
+
+    #[test]
+    fn disk_degraded_not_overridden_by_flush_success() {
+        let flag = AtomicHealthFlag::new();
+        flag.set_disk_degraded();
+        flag.set_healthy(); // flush success must NOT clear disk degradation
+        assert!(!flag.is_healthy(), "disk degradation must persist after flush success");
+    }
+
+    #[test]
+    fn disk_degraded_clears_when_space_recovers() {
+        let flag = AtomicHealthFlag::new();
+        flag.set_disk_degraded();
+        assert!(!flag.is_healthy());
+        flag.clear_disk_degraded();
+        assert!(flag.is_healthy());
+    }
+
+    #[test]
+    fn flush_errors_degrade_independent_of_disk() {
+        let flag = AtomicHealthFlag::new();
+        flag.set_degraded(); // flush failure
+        assert!(!flag.is_healthy());
+        flag.clear_disk_degraded(); // no-op — disk was never degraded
+        assert!(!flag.is_healthy(), "flush degradation must persist");
+    }
+
+    #[test]
+    fn both_degraded_both_must_clear_for_healthy() {
+        let flag = AtomicHealthFlag::new();
+        flag.set_degraded();
+        flag.set_disk_degraded();
+        assert!(!flag.is_healthy());
+        flag.set_healthy(); // clear flush
+        assert!(!flag.is_healthy(), "disk still degraded");
+        flag.clear_disk_degraded();
+        assert!(flag.is_healthy(), "both cleared — healthy");
     }
 
     #[test]

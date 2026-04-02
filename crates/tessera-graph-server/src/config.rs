@@ -11,15 +11,34 @@ const DEFAULT_FLUSH_INTERVAL_MS: u64 = 50;
 /// Default query cache capacity (number of parsed ASTs to keep).
 const DEFAULT_QUERY_CACHE_CAPACITY: usize = 1024;
 
+/// Default minimum free disk space in megabytes.
+const DEFAULT_MIN_FREE_DISK_MB: u64 = 100;
+
 /// Parse an environment variable, logging a warning if the value is present but
 /// cannot be parsed. Returns `default` if the variable is unset or invalid.
-pub(crate) fn parse_env_or_warn<T: std::str::FromStr>(name: &str, default: T) -> T {
+pub fn parse_env_or_warn<T: std::str::FromStr>(name: &str, default: T) -> T {
     match std::env::var(name) {
         Err(_) => default, // not set
         Ok(v) => v.parse().unwrap_or_else(|_| {
             tracing::warn!("{name} has invalid value '{v}' — using default");
             default
         }),
+    }
+}
+
+/// Parse a boolean environment variable. Accepts `"true"/"1"` for true,
+/// `"false"/"0"` for false. Warns and returns `default` on any other value.
+pub fn parse_bool_env_or_warn(name: &str, default: bool) -> bool {
+    match std::env::var(name) {
+        Err(_) => default,
+        Ok(v) => match v.to_ascii_lowercase().as_str() {
+            "true" | "1" => true,
+            "false" | "0" => false,
+            _ => {
+                tracing::warn!("{name} has invalid value '{v}' — using default ({default})");
+                default
+            }
+        },
     }
 }
 
@@ -40,6 +59,9 @@ pub struct PersistenceConfig {
     /// Maximum number of parsed query ASTs to cache server-wide.
     /// `TESSERA_QUERY_CACHE_CAPACITY` (default `1024`).
     pub query_cache_capacity: usize,
+    /// Minimum free disk space in bytes before marking the server degraded.
+    /// `TESSERA_MIN_FREE_DISK_MB` (default `100`).
+    pub min_free_disk_bytes: u64,
 }
 
 impl PersistenceConfig {
@@ -71,6 +93,10 @@ impl PersistenceConfig {
         let query_cache_capacity =
             parse_env_or_warn("TESSERA_QUERY_CACHE_CAPACITY", DEFAULT_QUERY_CACHE_CAPACITY);
 
+        let min_free_disk_bytes =
+            parse_env_or_warn("TESSERA_MIN_FREE_DISK_MB", DEFAULT_MIN_FREE_DISK_MB)
+                .saturating_mul(1024 * 1024);
+
         Self {
             data_dir,
             graph_config: GraphConfig {
@@ -82,6 +108,7 @@ impl PersistenceConfig {
             default_tenant,
             flush_interval_ms,
             query_cache_capacity,
+            min_free_disk_bytes,
         }
     }
 
