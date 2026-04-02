@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tessera_graph_auth::lbac::{Clearance, SecurityLabel, SecurityPolicy};
 use tessera_graph::{GraphConfig, props};
 use tessera_graph_protocol::PackStreamValue;
+use tessera_graph_protocol::bolt_frame::{BoltChunkedReader, BoltChunkedWriter};
 use tessera_graph_protocol::bolt_message::{BoltRequest, BoltResponse};
 use tessera_graph_tenant::{DatabaseAddress, DatabaseName, TenantId, TenantRegistry};
 
@@ -67,12 +68,37 @@ fn pull() -> BoltRequest {
     BoltRequest::Pull { extra: vec![] }
 }
 
+/// PULL with Bolt 4.4 `n` parameter — fetch at most `n` records.
+fn pull_n(n: i64) -> BoltRequest {
+    BoltRequest::Pull {
+        extra: vec![("n".to_owned(), PackStreamValue::Int(n))],
+    }
+}
+
 fn dict_str(resp: &BoltResponse, key: &str) -> Option<String> {
     if let BoltResponse::Success { metadata } | BoltResponse::Failure { metadata } = resp {
         metadata.iter().find_map(|(k, v)| {
             if k == key {
                 if let PackStreamValue::String(s) = v {
                     Some(s.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+    } else {
+        None
+    }
+}
+
+fn dict_bool(resp: &BoltResponse, key: &str) -> Option<bool> {
+    if let BoltResponse::Success { metadata } = resp {
+        metadata.iter().find_map(|(k, v)| {
+            if k == key {
+                if let PackStreamValue::Bool(b) = v {
+                    Some(*b)
                 } else {
                     None
                 }
@@ -784,4 +810,143 @@ async fn bolt_shutdown_signal_closes_handler() {
         tokio::time::timeout(std::time::Duration::from_secs(3), reader.read_message()).await;
     assert!(result.is_ok(), "timed out waiting for handler to close");
     // Either EOF or an error is acceptable — the handler exited.
+}
+
+// ── PULL pagination tests (CRITICAL #1 — OOM mitigation) ────────────────────
+
+/// Helper: create 5 Person nodes and return a connected, authenticated handler.
+async fn setup_5_nodes() -> (
+    BoltChunkedWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
+    BoltChunkedReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    tokio::sync::watch::Sender<bool>,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::tempdir().unwrap(); // OK: test
+    let registry = Arc::new(TenantRegistry::new(dir.path(), GraphConfig::new()));
+
+    {
+        let addr = DatabaseAddress {
+            tenant: TenantId::new("default").unwrap(), // OK: test
+            database: DatabaseName::default_name(),
+        };
+        let g = registry.get_or_load(&addr).unwrap(); // OK: test
+        let mut graph = g.write().unwrap(); // OK: test
+        for i in 0..5 {
+            graph
+                .add_node("Person", props! { "name" => format!("P{i}") })
+                .unwrap(); // OK: test
+        }
+    }
+
+    let ctx = test_context_with_registry(registry);
+    let (mut writer, mut reader, shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    (writer, reader, shutdown, dir)
+}
+
+#[tokio::test]
+async fn pull_n_returns_batch_and_has_more_true() {
+    let (mut writer, mut reader, _shutdown, _dir) = setup_5_nodes().await;
+
+    bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // PULL n=2 — should get exactly 2 records, then SUCCESS with has_more=true.
+    bolt_send(&mut writer, &pull_n(2)).await;
+
+    let mut records = Vec::new();
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { fields } => records.push(fields),
+            BoltResponse::Success { .. } => {
+                let has_more = dict_bool(&resp, "has_more")
+                    .expect("SUCCESS must include has_more");
+                assert!(has_more, "has_more must be true when rows remain");
+                break;
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(records.len(), 2, "PULL n=2 must return exactly 2 records");
+}
+
+#[tokio::test]
+async fn pull_n_then_pull_all_returns_remaining() {
+    let (mut writer, mut reader, _shutdown, _dir) = setup_5_nodes().await;
+
+    bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // First PULL n=2
+    bolt_send(&mut writer, &pull_n(2)).await;
+    let mut count = 0;
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { .. } => count += 1,
+            BoltResponse::Success { .. } => break,
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(count, 2);
+
+    // Second PULL n=-1 (all remaining)
+    bolt_send(&mut writer, &pull_n(-1)).await;
+    let mut remaining = Vec::new();
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { fields } => remaining.push(fields),
+            BoltResponse::Success { .. } => {
+                let has_more = dict_bool(&resp, "has_more")
+                    .expect("SUCCESS must include has_more");
+                assert!(!has_more, "has_more must be false after draining all rows");
+                break;
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(remaining.len(), 3, "remaining rows after PULL n=2 from 5 total");
+}
+
+#[tokio::test]
+async fn pull_without_n_returns_all_rows_backward_compat() {
+    let (mut writer, mut reader, _shutdown, _dir) = setup_5_nodes().await;
+
+    bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // Legacy PULL without n — must return all 5 rows and has_more=false.
+    bolt_send(&mut writer, &pull()).await;
+    let mut records = Vec::new();
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { fields } => records.push(fields),
+            BoltResponse::Success { .. } => {
+                let has_more = dict_bool(&resp, "has_more")
+                    .expect("SUCCESS must include has_more");
+                assert!(!has_more, "legacy PULL must drain all rows");
+                break;
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(records.len(), 5, "legacy PULL must return all 5 records");
 }

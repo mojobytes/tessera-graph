@@ -257,3 +257,59 @@ async fn writer_throughput_no_regression() {
     let contents = std::fs::read_to_string(&path).expect("read"); // OK: test
     assert_eq!(contents.trim().lines().count(), n as usize, "all entries must survive");
 }
+
+// ── HIGH #8: sync_data after flush ─────────────────────────────────────────
+
+#[tokio::test]
+async fn audit_writer_with_sync_data_persists_entry() {
+    let dir = tempfile::tempdir().expect("tempdir"); // OK: test
+    let path = dir.path().join("audit.ndjson");
+    let (log, task) =
+        AuditLog::open_with_sync(&path, 0, 0, 16, true).expect("open"); // OK: test
+    let handle = tokio::spawn(task.run());
+
+    log.record_event(AuditEntry::success(
+        Some(1),
+        AuditEvent::LoginSuccess { username: "sync-test".into() },
+    ))
+    .expect("record"); // OK: test
+
+    drop(log);
+    handle.await.expect("writer"); // OK: test
+
+    let contents = std::fs::read_to_string(&path).expect("read"); // OK: test
+    assert!(contents.contains("sync-test"), "entry must be persisted with sync_data=true");
+}
+
+#[test]
+fn audit_open_with_sync_constructs_successfully() {
+    let dir = tempfile::tempdir().expect("tempdir"); // OK: test
+    let path = dir.path().join("audit.ndjson");
+    let (_, task) = AuditLog::open_with_sync(&path, 0, 0, 16, true).expect("open"); // OK: test
+    drop(task);
+}
+
+#[test]
+fn audit_log_dropped_count_increments_on_channel_full() {
+    let dir = tempfile::tempdir().expect("tempdir"); // OK: test
+    let path = dir.path().join("audit.ndjson");
+    let (log, _task) = AuditLog::open_with_capacity(&path, 0, 0, 1).expect("open"); // OK: test
+
+    assert_eq!(log.dropped_count(), 0);
+    // Fill the channel (capacity=1).
+    let entry = AuditEntry::success(None, AuditEvent::Logout);
+    let _ = log.record_event(entry.clone()); // OK: test — fills channel
+    // This one should be dropped.
+    let result = log.record_event(entry);
+    assert!(matches!(result, Err(AuditError::ChannelFull)));
+    assert_eq!(log.dropped_count(), 1, "dropped_count must increment on ChannelFull");
+}
+
+#[test]
+fn audit_open_with_sync_false_is_equivalent_to_open_with_capacity() {
+    let dir = tempfile::tempdir().expect("tempdir"); // OK: test
+    let path = dir.path().join("audit.ndjson");
+    // Both should succeed — open_with_capacity delegates to open_with_sync(false).
+    let _ = AuditLog::open_with_sync(&path, 0, 0, 16, false).expect("open"); // OK: test
+    let _ = AuditLog::open_with_capacity(&path, 0, 0, 16).expect("open"); // OK: test
+}

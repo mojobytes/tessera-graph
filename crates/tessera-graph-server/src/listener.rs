@@ -120,7 +120,9 @@ impl TesseraListener {
                 .await
                 {
                     Ok(mut handler) => {
-                        let _ = handler.run().await;
+                        if let Err(e) = handler.run().await {
+                            tracing::warn!("connection handler error: {e}");
+                        }
                     }
                     Err(e) => {
                         tracing::warn!("Bolt handshake failed: {e}");
@@ -204,7 +206,9 @@ impl TesseraListener {
                         .await
                         {
                             Ok(mut handler) => {
-                                let _ = handler.run().await;
+                                if let Err(e) = handler.run().await {
+                            tracing::warn!("connection handler error: {e}");
+                        }
                             }
                             Err(e) => {
                                 tracing::warn!("Bolt handshake failed on TLS stream: {e}");

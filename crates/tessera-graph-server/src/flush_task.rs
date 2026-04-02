@@ -6,6 +6,7 @@
 //! cost of page-file flush across many mutations instead of paying it
 //! per-operation.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use tessera_graph_monitor::AtomicHealthFlag;
 use tessera_graph_tenant::TenantRegistry;
@@ -14,6 +15,17 @@ use tokio::task::JoinHandle;
 
 /// Maximum consecutive flush errors before the health flag is set to degraded.
 const MAX_CONSECUTIVE_ERRORS: u32 = 3;
+
+/// Default minimum free disk space (100 MB) before marking the server degraded.
+/// Override with `TESSERA_MIN_FREE_DISK_MB`.
+pub const MIN_FREE_DISK_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Return available bytes on the filesystem containing `path`, or `None`
+/// if the check fails (non-existent path, permission denied, etc.).
+#[must_use]
+pub fn check_available_disk_bytes(path: &std::path::Path) -> Option<u64> {
+    fs2::available_space(path).ok()
+}
 
 /// Updates health state based on flush outcome. Returns the new consecutive error count.
 fn update_health_state(
@@ -70,6 +82,31 @@ mod tests {
     }
 
     #[test]
+    fn disk_space_threshold_constant_is_positive() {
+        assert!(
+            MIN_FREE_DISK_BYTES > 0,
+            "threshold must be positive"
+        );
+    }
+
+    #[test]
+    fn available_space_check_does_not_panic_on_nonexistent_path() {
+        let result = check_available_disk_bytes(std::path::Path::new("/nonexistent/path/xyz"));
+        // Must not panic. Result may be None.
+        let _ = result;
+    }
+
+    #[test]
+    fn available_space_returns_some_for_existing_path() {
+        let result = check_available_disk_bytes(std::path::Path::new("/tmp"));
+        assert!(result.is_some(), "expected Some for /tmp");
+        assert!(
+            result.expect("already checked is_some") > 0, // OK: test
+            "expected positive free space on /tmp"
+        );
+    }
+
+    #[test]
     fn health_recovers_after_success() {
         let flag = AtomicHealthFlag::new();
         // Drive to degraded
@@ -101,10 +138,16 @@ pub fn spawn_background_flush(
     interval_ms: u64,
     mut shutdown_rx: watch::Receiver<bool>,
     health: Arc<AtomicHealthFlag>,
+    base_dir: PathBuf,
 ) -> JoinHandle<()> {
     if interval_ms == 0 {
         return tokio::spawn(async {});
     }
+
+    let min_free = std::env::var("TESSERA_MIN_FREE_DISK_MB")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(MIN_FREE_DISK_BYTES, |mb| mb.saturating_mul(1024 * 1024));
 
     let period = std::time::Duration::from_millis(interval_ms);
 
@@ -135,6 +178,18 @@ pub fn spawn_background_flush(
                         }
                         _ => false,
                     };
+
+                    // Disk space check (HIGH #7).
+                    if let Some(available) = check_available_disk_bytes(&base_dir) {
+                        if available < min_free {
+                            tracing::warn!(
+                                available_mb = available / (1024 * 1024),
+                                threshold_mb = min_free / (1024 * 1024),
+                                "low disk space — marking server degraded",
+                            );
+                            health.set_degraded();
+                        }
+                    }
 
                     consecutive_errors = update_health_state(
                         failed,

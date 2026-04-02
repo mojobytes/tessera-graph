@@ -43,9 +43,18 @@ static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 
 // ── Pending result ────────────────────────────────────────────────────────────
 
-/// Stores the result of a RUN command until a PULL (or DISCARD) arrives.
+/// Stores the result of a RUN command until PULL (or DISCARD) arrives.
+///
+/// # Memory note
+///
+/// All rows are currently materialized eagerly in `handle_run`. A future
+/// improvement is to replace `rows` with a streaming channel fed directly
+/// from the query engine, which would allow incremental PULL without ever
+/// holding more than `n` rows in memory (see resilience audit CRITICAL #1).
 struct PendingResult {
     rows: Vec<Vec<PackStreamValue>>,
+    /// Index of the next row to send (for paginated PULL via Bolt 4.4 `n`).
+    cursor: usize,
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -561,7 +570,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         }
 
         // --- Store result for PULL ---
-        self.pending_result = Some(PendingResult { rows });
+        self.pending_result = Some(PendingResult { rows, cursor: 0 });
 
         self.send_response(&BoltResponse::Success {
             metadata: vec![(
@@ -579,8 +588,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
 
     // ── PULL ──────────────────────────────────────────────────────────────────
 
-    async fn handle_pull(&mut self, _extra: &BoltDict) -> Result<()> {
-        let Some(result) = self.pending_result.take() else {
+    async fn handle_pull(&mut self, extra: &BoltDict) -> Result<()> {
+        let Some(result) = self.pending_result.as_mut() else {
             return self
                 .send_response(&BoltResponse::Success {
                     metadata: vec![("has_more".to_owned(), PackStreamValue::Bool(false))],
@@ -588,13 +597,43 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                 .await;
         };
 
-        for row in result.rows {
+        // Bolt 4.4: `n` = number of records to fetch. -1 means "all".
+        let n: i64 = extra
+            .iter()
+            .find(|(k, _)| k == "n")
+            .and_then(|(_, v)| {
+                if let PackStreamValue::Int(val) = v {
+                    Some(*val)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(-1);
+
+        let batch_end = if n < 0 {
+            result.rows.len()
+        } else {
+            let count = usize::try_from(n).unwrap_or(usize::MAX);
+            result.cursor.saturating_add(count).min(result.rows.len())
+        };
+
+        // Collect the batch to avoid holding a mutable borrow on self across await.
+        let batch: Vec<Vec<PackStreamValue>> =
+            result.rows[result.cursor..batch_end].to_vec();
+        result.cursor = batch_end;
+        let has_more = result.cursor < result.rows.len();
+
+        if !has_more {
+            self.pending_result = None;
+        }
+
+        for row in batch {
             self.send_response(&BoltResponse::Record { fields: row })
                 .await?;
         }
 
         self.send_response(&BoltResponse::Success {
-            metadata: vec![("has_more".to_owned(), PackStreamValue::Bool(false))],
+            metadata: vec![("has_more".to_owned(), PackStreamValue::Bool(has_more))],
         })
         .await
     }

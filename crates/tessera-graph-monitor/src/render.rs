@@ -101,6 +101,32 @@ pub fn render_prometheus(registry: &MetricsRegistry) -> String {
         registry.tls_handshake_failures.load(Ordering::Relaxed),
     );
 
+    // --- System metrics ---
+    write_gauge(
+        &mut buf,
+        "tessera_process_rss_bytes",
+        "Resident Set Size of the server process in bytes",
+        registry.process_rss_bytes.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut buf,
+        "tessera_open_file_descriptors",
+        "Number of open file descriptors",
+        registry.open_fds.load(Ordering::Relaxed),
+    );
+    write_counter(
+        &mut buf,
+        "tessera_audit_entries_dropped_total",
+        "Audit entries dropped due to channel overflow",
+        registry.audit_entries_dropped.load(Ordering::Relaxed),
+    );
+    write_gauge(
+        &mut buf,
+        "tessera_tenants_loaded",
+        "Number of tenant graphs currently loaded in memory",
+        registry.tenants_loaded.load(Ordering::Relaxed),
+    );
+
     // --- Histogram: query duration ---
     let _ = writeln!(
         buf,

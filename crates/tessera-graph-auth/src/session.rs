@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use base64ct::{Base64UrlUnpadded, Encoding};
 use rand::RngCore;
@@ -9,7 +10,6 @@ use rand::RngCore;
 use crate::error::{AuthError, Result};
 use crate::rbac::RoleId;
 use crate::user::UserId;
-use crate::utils::unix_timestamp;
 
 /// Opaque session token. Does not implement `Debug` to prevent leaking in logs.
 /// Uses constant-time comparison to prevent timing oracle attacks.
@@ -43,7 +43,8 @@ impl SessionToken {
 /// Internal session state.
 struct Session {
     user_id: UserId,
-    expires_at: u64,
+    /// Monotonic deadline — immune to NTP clock adjustments (HIGH #9).
+    expires_at: Instant,
     /// Roles assigned to this session, primarily for external auth users whose
     /// roles are mapped from provider groups rather than stored in `UserStore`.
     roles: Vec<RoleId>,
@@ -95,10 +96,9 @@ impl SessionManager {
         let encoded = Base64UrlUnpadded::encode_string(&raw);
         let token = SessionToken(encoded);
 
-        let now = unix_timestamp();
         let session = Session {
             user_id,
-            expires_at: now + self.ttl_seconds,
+            expires_at: Instant::now() + Duration::from_secs(self.ttl_seconds),
             roles,
         };
 
@@ -153,7 +153,7 @@ impl SessionManager {
         };
 
         // --- Check expiry without holding any lock ---
-        if unix_timestamp() > expires_at {
+        if Instant::now() > expires_at {
             // Write-lock only for the removal of the expired token.
             let mut sessions = self
                 .sessions
@@ -179,6 +179,32 @@ impl SessionManager {
         sessions.remove(token);
         drop(sessions);
         Ok(())
+    }
+
+    /// Remove all expired sessions and return the count of removed entries.
+    ///
+    /// Call this periodically from a background task to prevent unbounded
+    /// `HashMap` growth under high connection churn (CRITICAL #4).
+    ///
+    /// Returns `0` if the lock is poisoned (conservative: do not crash the
+    /// server on a cleanup task failure).
+    #[must_use]
+    pub fn purge_expired(&self) -> usize {
+        let now = Instant::now();
+        let Ok(mut sessions) = self.sessions.write() else {
+            return 0;
+        };
+        let before = sessions.len();
+        sessions.retain(|_, s| s.expires_at > now);
+        before - sessions.len()
+    }
+
+    /// Return the current number of live sessions (for metrics/monitoring).
+    ///
+    /// Returns `0` if the lock is poisoned.
+    #[must_use]
+    pub fn session_count(&self) -> usize {
+        self.sessions.read().map(|s| s.len()).unwrap_or(0)
     }
 
     /// Revoke all sessions for a given user (e.g. on password change or deletion).

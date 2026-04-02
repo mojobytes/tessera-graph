@@ -143,3 +143,47 @@ fn concurrent_validates_of_valid_token_all_succeed() {
         );
     }
 }
+
+// ── Session cleanup tests (CRITICAL #4 + HIGH #9) ───────────────────────────
+
+#[test]
+fn session_count_returns_current_size() {
+    let mgr = SessionManager::new(3600);
+    assert_eq!(mgr.session_count(), 0);
+    let _t1 = mgr.create_session(UserId::new(1)).unwrap(); // OK: test
+    let _t2 = mgr.create_session(UserId::new(2)).unwrap(); // OK: test
+    assert_eq!(mgr.session_count(), 2);
+}
+
+#[test]
+fn purge_expired_removes_expired_sessions() {
+    let mgr = SessionManager::new(1); // TTL 1 second
+    let _t1 = mgr.create_session(UserId::new(1)).unwrap(); // OK: test
+    let _t2 = mgr.create_session(UserId::new(2)).unwrap(); // OK: test
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let removed = mgr.purge_expired();
+    assert_eq!(removed, 2, "both expired sessions must be purged");
+    assert_eq!(mgr.session_count(), 0);
+}
+
+#[test]
+fn purge_expired_keeps_live_sessions() {
+    let mgr = SessionManager::new(3600);
+    let t1 = mgr.create_session(UserId::new(1)).unwrap(); // OK: test
+    let removed = mgr.purge_expired();
+    assert_eq!(removed, 0, "live session must not be purged");
+    assert!(mgr.validate(&t1).is_ok());
+}
+
+#[test]
+fn purge_expired_mixed_live_and_expired() {
+    let mgr = SessionManager::new(1); // TTL 1 second
+    let _expired = mgr.create_session(UserId::new(1)).unwrap(); // OK: test
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    // Create a fresh session AFTER the sleep — this one is still live.
+    let live = mgr.create_session(UserId::new(2)).unwrap(); // OK: test
+    let removed = mgr.purge_expired();
+    assert_eq!(removed, 1, "only the expired session should be purged");
+    assert_eq!(mgr.session_count(), 1);
+    assert!(mgr.validate(&live).is_ok());
+}

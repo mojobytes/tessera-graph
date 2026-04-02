@@ -51,6 +51,16 @@ pub struct MetricsRegistry {
     pub query_duration_sum: AtomicU64,
     /// Total number of observed query durations.
     pub query_duration_count: AtomicU64,
+
+    // --- System metrics (updated by background task) ---
+    /// Resident Set Size of the process in bytes.
+    pub process_rss_bytes: AtomicU64,
+    /// Current number of open file descriptors.
+    pub open_fds: AtomicU64,
+    /// Audit entries dropped due to channel overflow.
+    pub audit_entries_dropped: AtomicU64,
+    /// Number of loaded tenant graphs.
+    pub tenants_loaded: AtomicU64,
 }
 
 impl MetricsRegistry {
@@ -73,6 +83,10 @@ impl MetricsRegistry {
             query_duration_buckets: std::array::from_fn(|_| AtomicU64::new(0)),
             query_duration_sum: AtomicU64::new(0),
             query_duration_count: AtomicU64::new(0),
+            process_rss_bytes: AtomicU64::new(0),
+            open_fds: AtomicU64::new(0),
+            audit_entries_dropped: AtomicU64::new(0),
+            tenants_loaded: AtomicU64::new(0),
         }
     }
 

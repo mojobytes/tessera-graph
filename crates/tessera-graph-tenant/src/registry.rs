@@ -1,6 +1,6 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
@@ -16,26 +16,51 @@ use crate::{DatabaseAddress, DatabaseName, TenantError, TenantId};
 /// guarded by an `RwLock<HashMap<…>>` so reads (cache hits) never block each
 /// other.
 ///
+/// When `max_loaded > 0`, the registry enforces an LRU eviction policy:
+/// the least recently used graph is flushed and unloaded when the cap is
+/// exceeded (HIGH #6 — unbounded memory growth).
+///
 /// All disk I/O (`Graph::open`) is performed **outside** any lock to avoid
 /// blocking unrelated tenants.
 pub struct TenantRegistry {
     base_dir: PathBuf,
     graphs: RwLock<HashMap<DatabaseAddress, Arc<RwLock<Graph>>>>,
     graph_config: GraphConfig,
+    /// Maximum number of loaded graphs. 0 = no limit (default).
+    max_loaded: usize,
+    /// LRU access order — front is least recently used.
+    access_order: RwLock<VecDeque<DatabaseAddress>>,
 }
 
 impl TenantRegistry {
-    /// Creates a new registry backed by `base_dir`.
+    /// Creates a new registry backed by `base_dir` with no eviction limit.
     ///
     /// No directories are created and no disk I/O is performed at construction
     /// time — everything is lazy.
     #[must_use]
     pub fn new(base_dir: impl Into<PathBuf>, graph_config: GraphConfig) -> Self {
+        Self::new_with_cap(base_dir, graph_config, 0)
+    }
+
+    /// Creates a new registry with an LRU eviction cap.
+    ///
+    /// When `max_loaded > 0`, loading a new graph beyond the cap evicts
+    /// (flushes + removes) the least recently used entry. `0` = no limit.
+    #[must_use]
+    pub fn new_with_cap(base_dir: impl Into<PathBuf>, graph_config: GraphConfig, max_loaded: usize) -> Self {
         Self {
             base_dir: base_dir.into(),
             graphs: RwLock::new(HashMap::new()),
             graph_config,
+            max_loaded,
+            access_order: RwLock::new(VecDeque::new()),
         }
+    }
+
+    /// Number of graphs currently loaded in memory.
+    #[must_use]
+    pub fn loaded_count(&self) -> usize {
+        self.graphs.read().map(|g| g.len()).unwrap_or(0)
     }
 
     /// Returns the on-disk path for a given database address.
@@ -67,6 +92,7 @@ impl TenantRegistry {
                 .read()
                 .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
             if let Some(arc) = guard.get(addr) {
+                self.touch_access_order(addr);
                 return Ok(Arc::clone(arc));
             }
         }
@@ -85,10 +111,36 @@ impl TenantRegistry {
             .write()
             .map_err(|_| TenantError::LockPoisoned("TenantRegistry graphs"))?;
         if let Some(existing) = guard.get(addr) {
+            self.touch_access_order(addr);
             return Ok(Arc::clone(existing));
         }
+
+        // LRU eviction: if cap is exceeded, evict the least recently used.
+        if self.max_loaded > 0 && guard.len() >= self.max_loaded {
+            if let Ok(mut order) = self.access_order.write() {
+                if let Some(victim) = order.pop_front() {
+                    if let Some(evicted) = guard.remove(&victim) {
+                        // Best-effort flush before eviction.
+                        if let Ok(mut g) = evicted.write() {
+                            let _ = g.flush();
+                        }
+                    }
+                }
+            }
+        }
+
         guard.insert(addr.clone(), Arc::clone(&new_arc));
+        drop(guard);
+        self.touch_access_order(addr);
         Ok(new_arc)
+    }
+
+    /// Move `addr` to the back of the access order (most recently used).
+    fn touch_access_order(&self, addr: &DatabaseAddress) {
+        if let Ok(mut order) = self.access_order.write() {
+            order.retain(|a| a != addr);
+            order.push_back(addr.clone());
+        }
     }
 
     /// Creates a new database at `addr`, failing if it already exists on disk.

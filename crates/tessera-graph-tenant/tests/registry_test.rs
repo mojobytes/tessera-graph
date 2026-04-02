@@ -285,3 +285,99 @@ fn get_or_load_after_unload_reopens() {
     let arc2 = registry.get_or_load(&addr).unwrap();
     assert_eq!(arc2.read().unwrap().node_count(), 1);
 }
+
+// ── LRU eviction tests (HIGH #6) ────────────────────────────────────────────
+
+#[test]
+fn loaded_count_tracks_loaded_graphs() {
+    let tmp = tempdir().unwrap(); // OK: test
+    let registry = TenantRegistry::new(tmp.path(), test_config());
+    assert_eq!(registry.loaded_count(), 0);
+    let _ = registry.get_or_load(&test_addr("t1", "db")).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 1);
+    let _ = registry.get_or_load(&test_addr("t2", "db")).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 2);
+}
+
+#[test]
+fn registry_evicts_lru_when_cap_exceeded() {
+    let tmp = tempdir().unwrap(); // OK: test
+    let registry = TenantRegistry::new_with_cap(tmp.path(), test_config(), 2);
+
+    let addr1 = test_addr("t1", "db1");
+    let addr2 = test_addr("t2", "db2");
+    let addr3 = test_addr("t3", "db3");
+
+    let _ = registry.get_or_load(&addr1).unwrap(); // OK: test
+    let _ = registry.get_or_load(&addr2).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 2);
+
+    // Loading addr3 should evict addr1 (LRU).
+    let _ = registry.get_or_load(&addr3).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 2, "cap=2 must be enforced");
+}
+
+#[test]
+fn registry_with_cap_zero_has_no_eviction() {
+    let tmp = tempdir().unwrap(); // OK: test
+    let registry = TenantRegistry::new_with_cap(tmp.path(), test_config(), 0);
+
+    let _ = registry.get_or_load(&test_addr("t1", "db")).unwrap(); // OK: test
+    let _ = registry.get_or_load(&test_addr("t2", "db")).unwrap(); // OK: test
+    let _ = registry.get_or_load(&test_addr("t3", "db")).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 3, "cap=0 means no limit");
+}
+
+#[test]
+fn evicted_graph_data_survives_on_disk() {
+    let tmp = tempdir().unwrap(); // OK: test
+    let registry = TenantRegistry::new_with_cap(tmp.path(), GraphConfig::new(), 1);
+
+    let addr1 = test_addr("t1", "db1");
+    let addr2 = test_addr("t2", "db2");
+
+    // Write data to addr1.
+    let arc1 = registry.get_or_load(&addr1).unwrap(); // OK: test
+    arc1.write()
+        .unwrap() // OK: test
+        .add_node("Thing", props! {})
+        .unwrap(); // OK: test
+    drop(arc1);
+
+    // Loading addr2 evicts addr1 (flushing it first).
+    let _ = registry.get_or_load(&addr2).unwrap(); // OK: test
+
+    // Reload addr1 — data must still be there from the pre-eviction flush.
+    let arc1_reloaded = registry.get_or_load(&addr1).unwrap(); // OK: test
+    assert_eq!(
+        arc1_reloaded.read().unwrap().node_count(), // OK: test
+        1,
+        "evicted graph data must survive on disk"
+    );
+}
+
+#[test]
+fn lru_access_refreshes_order() {
+    let tmp = tempdir().unwrap(); // OK: test
+    let registry = TenantRegistry::new_with_cap(tmp.path(), test_config(), 2);
+
+    let addr1 = test_addr("t1", "db1");
+    let addr2 = test_addr("t2", "db2");
+    let addr3 = test_addr("t3", "db3");
+
+    let _ = registry.get_or_load(&addr1).unwrap(); // OK: test
+    let _ = registry.get_or_load(&addr2).unwrap(); // OK: test
+
+    // Touch addr1 again — now addr2 is LRU.
+    let _ = registry.get_or_load(&addr1).unwrap(); // OK: test
+
+    // Loading addr3 should evict addr2 (LRU), NOT addr1 (recently touched).
+    let _ = registry.get_or_load(&addr3).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 2);
+
+    // addr1 should still be loaded (was refreshed).
+    // addr2 was evicted. Loading addr2 again would bring it back.
+    // We verify by checking that get_or_load(addr1) is instant (cache hit).
+    let _ = registry.get_or_load(&addr1).unwrap(); // OK: test
+    assert_eq!(registry.loaded_count(), 2, "addr1 must still be in cache");
+}

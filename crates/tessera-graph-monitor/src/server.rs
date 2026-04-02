@@ -17,6 +17,18 @@ use crate::render::render_prometheus;
 /// Maximum request size (8 KiB) — security guard against memory exhaustion.
 const MAX_REQUEST_SIZE: usize = 8192;
 
+/// Check `Authorization: Bearer <token>` header using constant-time comparison.
+fn check_bearer_auth(request: &str, expected_token: &str) -> bool {
+    request
+        .lines()
+        .find(|l| l.len() > 14 && l[..14].eq_ignore_ascii_case("authorization:"))
+        .and_then(|l| l.split_once(':').map(|(_, v)| v.trim()))
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .is_some_and(|t| {
+            constant_time_eq::constant_time_eq(t.as_bytes(), expected_token.as_bytes())
+        })
+}
+
 /// Maximum time to wait for a complete HTTP request header.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -32,9 +44,10 @@ pub async fn serve_metrics(
     addr: &str,
     registry: Arc<MetricsRegistry>,
     health: Arc<dyn HealthProvider>,
+    metrics_token: Option<String>,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
-    serve_metrics_on(listener, registry, health).await;
+    serve_metrics_on(listener, registry, health, metrics_token).await;
     Ok(())
 }
 
@@ -43,15 +56,18 @@ pub async fn serve_metrics_on(
     listener: TcpListener,
     registry: Arc<MetricsRegistry>,
     health: Arc<dyn HealthProvider>,
+    metrics_token: Option<String>,
 ) {
+    let token: Arc<Option<String>> = Arc::new(metrics_token);
     loop {
         let Ok((stream, _addr)) = listener.accept().await else {
             continue;
         };
         let reg = Arc::clone(&registry);
         let h = Arc::clone(&health);
+        let tok = Arc::clone(&token);
         tokio::spawn(async move {
-            let _ = handle_connection(stream, &reg, h.as_ref()).await;
+            let _ = handle_connection(stream, &reg, h.as_ref(), tok.as_deref()).await;
         });
     }
 }
@@ -60,6 +76,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     registry: &MetricsRegistry,
     health: &dyn HealthProvider,
+    metrics_token: Option<&str>,
 ) -> std::io::Result<()> {
     // Read request headers (up to MAX_REQUEST_SIZE, within READ_TIMEOUT).
     let mut buf = vec![0u8; MAX_REQUEST_SIZE];
@@ -89,6 +106,16 @@ async fn handle_connection(
 
     let request = String::from_utf8_lossy(&buf[..total]);
     let first_line = request.lines().next().unwrap_or("");
+
+    // Bearer token auth — constant-time comparison to prevent timing attacks.
+    if let Some(expected) = metrics_token {
+        if !check_bearer_auth(&request, expected) {
+            let response = "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream.write_all(response.as_bytes()).await?;
+            stream.flush().await?;
+            return Ok(());
+        }
+    }
 
     if first_line.starts_with("GET /metrics") {
         let body = render_prometheus(registry);
@@ -137,10 +164,18 @@ mod tests {
         registry: Arc<MetricsRegistry>,
         health: Arc<dyn HealthProvider>,
     ) -> std::net::SocketAddr {
+        spawn_server_with_token(registry, health, None).await
+    }
+
+    async fn spawn_server_with_token(
+        registry: Arc<MetricsRegistry>,
+        health: Arc<dyn HealthProvider>,
+        token: Option<String>,
+    ) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind"); // OK: test
         let addr = listener.local_addr().expect("addr"); // OK: test
         tokio::spawn(async move {
-            serve_metrics_on(listener, registry, health).await;
+            serve_metrics_on(listener, registry, health, token).await;
         });
         tokio::time::sleep(Duration::from_millis(20)).await;
         addr
@@ -149,6 +184,17 @@ mod tests {
     async fn http_get(addr: std::net::SocketAddr, path: &str) -> String {
         let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
         let req = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        stream.write_all(req.as_bytes()).await.expect("write"); // OK: test
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.expect("read"); // OK: test
+        String::from_utf8(buf).expect("utf8") // OK: test
+    }
+
+    async fn http_get_with_auth(addr: std::net::SocketAddr, path: &str, token: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.expect("connect"); // OK: test
+        let req = format!(
+            "GET {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\n\r\n"
+        );
         stream.write_all(req.as_bytes()).await.expect("write"); // OK: test
         let mut buf = Vec::new();
         stream.read_to_end(&mut buf).await.expect("read"); // OK: test
@@ -178,7 +224,7 @@ mod tests {
     #[tokio::test]
     async fn serve_metrics_invalid_address_returns_error() {
         let registry = Arc::new(MetricsRegistry::new(64));
-        let result = serve_metrics("not-a-valid-address:99999", registry, healthy()).await;
+        let result = serve_metrics("not-a-valid-address:99999", registry, healthy(), None).await;
         assert!(result.is_err());
     }
 
@@ -243,6 +289,105 @@ mod tests {
         assert!(
             result.is_ok(),
             "server must close connection within 7s (5s timeout + margin)"
+        );
+    }
+
+    // --- Metrics auth tests (HIGH #10) ---
+
+    #[tokio::test]
+    async fn metrics_without_token_returns_401_when_configured() {
+        let registry = Arc::new(MetricsRegistry::new(256));
+        let addr = spawn_server_with_token(
+            Arc::clone(&registry),
+            healthy(),
+            Some("secret-token".to_owned()),
+        )
+        .await;
+
+        let response = http_get(addr, "/metrics").await;
+        assert!(
+            response.starts_with("HTTP/1.1 401"),
+            "unauthenticated /metrics must return 401, got: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_with_valid_token_returns_200() {
+        let registry = Arc::new(MetricsRegistry::new(256));
+        let addr = spawn_server_with_token(
+            Arc::clone(&registry),
+            healthy(),
+            Some("secret-token".to_owned()),
+        )
+        .await;
+
+        let response = http_get_with_auth(addr, "/metrics", "secret-token").await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "valid token must grant access, got: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_with_wrong_token_returns_401() {
+        let registry = Arc::new(MetricsRegistry::new(256));
+        let addr = spawn_server_with_token(
+            Arc::clone(&registry),
+            healthy(),
+            Some("correct-token".to_owned()),
+        )
+        .await;
+
+        let response = http_get_with_auth(addr, "/metrics", "wrong-token").await;
+        assert!(
+            response.starts_with("HTTP/1.1 401"),
+            "wrong token must be rejected, got: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_without_configured_token_serves_open() {
+        let registry = Arc::new(MetricsRegistry::new(256));
+        let addr = spawn_server_with_token(Arc::clone(&registry), healthy(), None).await;
+
+        let response = http_get(addr, "/metrics").await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "no token configured must serve without auth, got: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn health_with_valid_token_returns_200() {
+        let registry = Arc::new(MetricsRegistry::new(64));
+        let addr = spawn_server_with_token(
+            Arc::clone(&registry),
+            healthy(),
+            Some("health-tok".to_owned()),
+        )
+        .await;
+
+        let response = http_get_with_auth(addr, "/health", "health-tok").await;
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "valid token must grant /health access, got: {response}"
+        );
+    }
+
+    #[tokio::test]
+    async fn health_without_token_returns_401_when_configured() {
+        let registry = Arc::new(MetricsRegistry::new(64));
+        let addr = spawn_server_with_token(
+            Arc::clone(&registry),
+            healthy(),
+            Some("health-tok".to_owned()),
+        )
+        .await;
+
+        let response = http_get(addr, "/health").await;
+        assert!(
+            response.starts_with("HTTP/1.1 401"),
+            "unauthenticated /health must return 401, got: {response}"
         );
     }
 }

@@ -10,6 +10,7 @@ license.workspace     = true
 rust-version.workspace = true
 
 [dependencies]
+constant_time_eq = "0.3"
 thiserror = { workspace = true }
 tokio     = { workspace = true, features = ["net", "rt", "macros", "io-util", "time"] }
 

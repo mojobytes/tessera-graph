@@ -135,7 +135,12 @@ pub type Result<T> = std::result::Result<T, AuditError>;
 /// background writer task. The send is O(1) and never blocks the caller.
 pub struct AuditLog {
     sender: mpsc::Sender<AuditEntry>,
+    /// Count of entries dropped due to channel backpressure.
+    /// Expose via `/metrics` as `tessera_audit_entries_dropped_total`.
+    dropped_count: Arc<std::sync::atomic::AtomicU64>,
 }
+
+use std::sync::Arc;
 
 impl AuditLog {
     /// Open (or create) an audit log and return the log handle + writer task.
@@ -164,6 +169,23 @@ impl AuditLog {
         max_rotated_files: usize,
         channel_capacity: usize,
     ) -> Result<(Self, AuditWriterTask)> {
+        Self::open_with_sync(path, rotation_max_size_bytes, max_rotated_files, channel_capacity, false)
+    }
+
+    /// Open with explicit sync option. When `sync_data` is `true`, the writer
+    /// calls `sync_data()` after each batch flush to minimize data loss on
+    /// SIGKILL (HIGH #8).
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuditError::Io` if the file cannot be opened.
+    pub fn open_with_sync(
+        path: &Path,
+        rotation_max_size_bytes: u64,
+        max_rotated_files: usize,
+        channel_capacity: usize,
+        sync_data: bool,
+    ) -> Result<(Self, AuditWriterTask)> {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
         let (sender, receiver) = mpsc::channel(channel_capacity);
@@ -175,9 +197,16 @@ impl AuditLog {
             bytes_written: file_size,
             rotation_max_size_bytes,
             max_rotated_files,
+            sync_data,
         };
 
-        Ok((Self { sender }, task))
+        Ok((Self { sender, dropped_count: Arc::new(std::sync::atomic::AtomicU64::new(0)) }, task))
+    }
+
+    /// Return the number of audit entries dropped due to channel overflow.
+    #[must_use]
+    pub fn dropped_count(&self) -> u64 {
+        self.dropped_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Create a null logger that discards all entries.
@@ -191,13 +220,13 @@ impl AuditLog {
         // Create a channel and immediately drop the receiver.
         // Every try_send will fail with ChannelClosed — entries are discarded.
         let (sender, _receiver) = mpsc::channel(1);
-        Self { sender }
+        Self { sender, dropped_count: Arc::new(std::sync::atomic::AtomicU64::new(0)) }
     }
 
     /// Construct an `AuditLog` with an externally provided sender (for testing).
     #[must_use]
-    pub const fn new_with_sender(sender: mpsc::Sender<AuditEntry>) -> Self {
-        Self { sender }
+    pub fn new_with_sender(sender: mpsc::Sender<AuditEntry>) -> Self {
+        Self { sender, dropped_count: Arc::new(std::sync::atomic::AtomicU64::new(0)) }
     }
 
     /// Record an audit entry (non-blocking channel send).
@@ -210,7 +239,7 @@ impl AuditLog {
     pub fn record_event(&self, entry: AuditEntry) -> Result<()> {
         self.sender.try_send(entry).map_err(|e| match e {
             mpsc::error::TrySendError::Full(_) => {
-                eprintln!("audit: channel full — entry dropped");
+                self.dropped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 AuditError::ChannelFull
             }
             mpsc::error::TrySendError::Closed(_) => AuditError::ChannelClosed,
@@ -230,6 +259,9 @@ pub struct AuditWriterTask {
     bytes_written: u64,
     rotation_max_size_bytes: u64,
     max_rotated_files: usize,
+    /// If true, call `sync_data()` after each batch flush to minimize
+    /// data loss on SIGKILL. Increases write latency; recommended for production.
+    sync_data: bool,
 }
 
 impl AuditWriterTask {
@@ -261,6 +293,10 @@ impl AuditWriterTask {
             // Single flush after the batch.
             if let Err(e) = self.writer.flush() {
                 eprintln!("audit flush error: {e}");
+            } else if self.sync_data {
+                if let Err(e) = self.writer.get_ref().sync_data() {
+                    eprintln!("audit sync_data error: {e}");
+                }
             }
         }
     }

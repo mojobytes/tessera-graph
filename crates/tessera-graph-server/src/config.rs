@@ -11,6 +11,18 @@ const DEFAULT_FLUSH_INTERVAL_MS: u64 = 50;
 /// Default query cache capacity (number of parsed ASTs to keep).
 const DEFAULT_QUERY_CACHE_CAPACITY: usize = 1024;
 
+/// Parse an environment variable, logging a warning if the value is present but
+/// cannot be parsed. Returns `default` if the variable is unset or invalid.
+pub(crate) fn parse_env_or_warn<T: std::str::FromStr>(name: &str, default: T) -> T {
+    match std::env::var(name) {
+        Err(_) => default, // not set
+        Ok(v) => v.parse().unwrap_or_else(|_| {
+            tracing::warn!("{name} has invalid value '{v}' — using default");
+            default
+        }),
+    }
+}
+
 /// Parsed persistence configuration derived from environment variables.
 #[derive(Debug)]
 pub struct PersistenceConfig {
@@ -43,12 +55,8 @@ impl PersistenceConfig {
     pub fn from_env() -> Self {
         let data_dir = std::env::var("TESSERA_DATA_DIR").ok().map(PathBuf::from);
 
-        let memory_limit_bytes = std::env::var("TESSERA_MEMORY_LIMIT_MB")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(64)
-            * 1024
-            * 1024;
+        let memory_limit_bytes =
+            parse_env_or_warn::<usize>("TESSERA_MEMORY_LIMIT_MB", 64) * 1024 * 1024;
 
         let wal_enabled = std::env::var("TESSERA_WAL_ENABLED")
             .map(|v| v.to_lowercase() != "false")
@@ -57,14 +65,11 @@ impl PersistenceConfig {
         let default_tenant =
             std::env::var("TESSERA_DEFAULT_TENANT").unwrap_or_else(|_| "default".to_owned());
 
-        let flush_interval_ms = Self::parse_flush_interval(
-            std::env::var("TESSERA_FLUSH_INTERVAL_MS").ok().as_deref(),
-        );
+        let flush_interval_ms =
+            parse_env_or_warn("TESSERA_FLUSH_INTERVAL_MS", DEFAULT_FLUSH_INTERVAL_MS);
 
-        let query_cache_capacity = std::env::var("TESSERA_QUERY_CACHE_CAPACITY")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_QUERY_CACHE_CAPACITY);
+        let query_cache_capacity =
+            parse_env_or_warn("TESSERA_QUERY_CACHE_CAPACITY", DEFAULT_QUERY_CACHE_CAPACITY);
 
         Self {
             data_dir,

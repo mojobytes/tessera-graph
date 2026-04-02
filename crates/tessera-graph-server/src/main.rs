@@ -60,11 +60,15 @@ async fn main() {
     // --- Audit ---
     let audit_config = AuditConfig::from_env();
     let audit = if audit_config.enabled {
-        let (log, writer_task) = AuditLog::open_with_capacity(
+        let audit_sync = std::env::var("TESSERA_AUDIT_SYNC")
+            .map(|v| v != "false" && v != "0")
+            .unwrap_or(true);
+        let (log, writer_task) = AuditLog::open_with_sync(
             &audit_config.log_path,
             audit_config.rotation_max_size_bytes,
             audit_config.max_rotated_files,
             audit_config.channel_capacity,
+            audit_sync,
         )
         .expect("audit log init"); // OK: server cannot start without audit
         tokio::spawn(writer_task.run());
@@ -82,7 +86,15 @@ async fn main() {
         .data_dir
         .unwrap_or_else(|| std::env::temp_dir().join("tessera-data"));
     tracing::info!("tenant data dir: {}", base_dir.display());
-    let registry = Arc::new(TenantRegistry::new(&base_dir, persistence.graph_config));
+    let max_loaded_tenants: usize = std::env::var("TESSERA_MAX_LOADED_TENANTS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let registry = Arc::new(TenantRegistry::new_with_cap(
+        &base_dir,
+        persistence.graph_config,
+        max_loaded_tenants,
+    ));
     let default_tenant = persistence.default_tenant;
 
     // --- Metrics ---
@@ -95,15 +107,28 @@ async fn main() {
 
     // --- Metrics HTTP server (optional) ---
     if let Ok(metrics_bind) = std::env::var("TESSERA_METRICS_BIND") {
+        let metrics_token = std::env::var("TESSERA_METRICS_TOKEN").ok();
+        if metrics_token.is_none() {
+            tracing::warn!(
+                "TESSERA_METRICS_TOKEN not set — metrics endpoint is unauthenticated. \
+                 Set this variable to require Bearer token auth on /metrics and /health."
+            );
+        }
         tracing::info!("Prometheus metrics + health on {metrics_bind}");
         let m = Arc::clone(&metrics);
         let h = Arc::clone(&health);
         tokio::spawn(async move {
-            if let Err(e) = tessera_graph_monitor::serve_metrics(&metrics_bind, m, h).await {
+            if let Err(e) =
+                tessera_graph_monitor::serve_metrics(&metrics_bind, m, h, metrics_token).await
+            {
                 tracing::error!("metrics server failed: {e}");
             }
         });
     }
+
+    // --- Clones for background metrics/cleanup task ---
+    let sessions_bg = Arc::clone(&sessions);
+    let audit_bg = Arc::clone(&audit);
 
     // --- Server context ---
     let ctx = Arc::new(ServerContext::new(
@@ -134,7 +159,73 @@ async fn main() {
         flush_interval_ms,
         shutdown_rx.clone(),
         Arc::clone(&health),
+        base_dir.clone(),
     );
+
+    // --- Background metrics + session cleanup (30s interval) ---
+    {
+        let metrics_bg = Arc::clone(ctx.metrics());
+        let registry_bg = Arc::clone(&registry);
+        let mut shutdown_bg = shutdown_rx.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            interval.tick().await; // skip immediate first tick
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        // Session cleanup (CRITICAL #4)
+                        let purged = sessions_bg.purge_expired();
+                        if purged > 0 {
+                            tracing::info!(purged, "expired sessions purged");
+                        }
+
+                        // System metrics (MEDIUM #15)
+                        metrics_bg.tenants_loaded.store(
+                            registry_bg.loaded_count() as u64,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                        metrics_bg.audit_entries_dropped.store(
+                            audit_bg.dropped_count(),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+
+                        // RSS and FD count (platform-specific, best-effort)
+                        #[cfg(target_os = "linux")]
+                        {
+                            if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+                                if let Some(line) = status.lines().find(|l| l.starts_with("VmRSS:")) {
+                                    let kb: u64 = line.split_whitespace()
+                                        .nth(1)
+                                        .and_then(|v| v.parse().ok())
+                                        .unwrap_or(0);
+                                    metrics_bg.process_rss_bytes.store(
+                                        kb * 1024,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                    );
+                                }
+                            }
+                            if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+                                metrics_bg.open_fds.store(
+                                    entries.count() as u64,
+                                    std::sync::atomic::Ordering::Relaxed,
+                                );
+                            }
+                        }
+                        #[cfg(target_os = "macos")]
+                        {
+                            // On macOS, use libc::proc_pidinfo for RSS.
+                            // Simplified: just report 0 (metric present but empty).
+                            // FD count: not trivially available without lsof.
+                        }
+                    }
+                    _ = shutdown_bg.changed() => {
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     // --- Listen ---
     let listener = TesseraListener::bind(&bind_addr)
