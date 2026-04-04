@@ -71,6 +71,28 @@ fn memgraph_clear_empties_graph() {
 }
 
 #[test]
+fn memgraph_shortest_path_finds_path_in_chain() {
+    let mut t = connect();
+    let a = t.create_node("N", Properties::new()).unwrap(); // OK: test
+    let b = t.create_node("N", Properties::new()).unwrap(); // OK: test
+    let c = t.create_node("N", Properties::new()).unwrap(); // OK: test
+    t.create_edge("E", a, b, Properties::new()).unwrap(); // OK: test
+    t.create_edge("E", b, c, Properties::new()).unwrap(); // OK: test
+    let path = t.shortest_path(a, c).unwrap(); // OK: test
+    assert!(path.is_some(), "path A→B→C must be found");
+    assert_eq!(path.unwrap().len(), 3, "path must have 3 nodes: A, B, C");
+}
+
+#[test]
+fn memgraph_shortest_path_unreachable_returns_none() {
+    let mut t = connect();
+    let a = t.create_node("N", Properties::new()).unwrap(); // OK: test
+    let b = t.create_node("N", Properties::new()).unwrap(); // OK: test
+    let path = t.shortest_path(a, b).unwrap(); // OK: test
+    assert!(path.is_none(), "disconnected nodes must return None");
+}
+
+#[test]
 fn memgraph_write_scenario_runs_without_error() {
     let mut t = connect();
     let s = WriteScenario {

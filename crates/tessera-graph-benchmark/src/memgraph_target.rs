@@ -281,10 +281,12 @@ impl BenchmarkTarget for MemgraphTarget {
             .get(&to.0)
             .ok_or_else(|| BenchmarkError::external("unknown to node handle"))?;
 
+        // Memgraph uses `[*BFS]` for shortest path traversal, not Cypher's
+        // `shortestPath()` function which it does not support.
         let q = query(
             "MATCH (a) WHERE id(a) = $from \
              MATCH (b) WHERE id(b) = $to \
-             MATCH p=shortestPath((a)-[*]->(b)) \
+             MATCH p = (a)-[*BFS]->(b) \
              RETURN [n IN nodes(p) | id(n)] AS path_nids",
         )
         .param("from", from_nid)
@@ -301,10 +303,12 @@ impl BenchmarkTarget for MemgraphTarget {
                     let path_nids: Vec<i64> = row
                         .get("path_nids")
                         .map_err(|e| BenchmarkError::external(format!("path nids: {e}")))?;
+                    // Map graph node IDs back to NodeHandles via reverse lookup.
+                    let reverse: std::collections::HashMap<i64, u64> =
+                        self.node_ids.iter().map(|(&h, &nid)| (nid, h)).collect();
                     let handles: Vec<NodeHandle> = path_nids
                         .iter()
-                        .enumerate()
-                        .map(|(i, _)| NodeHandle(from.0 + i as u64))
+                        .filter_map(|nid| reverse.get(nid).map(|&h| NodeHandle(h)))
                         .collect();
                     Ok(Some(handles))
                 }
