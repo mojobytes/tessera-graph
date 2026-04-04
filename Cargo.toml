@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/tessera-graph-server",
-    "crates/tessera-graph-protocol",
     "crates/tessera-graph-auth",
     "crates/tessera-graph-storage",
     "crates/tessera-graph-import",
@@ -26,7 +25,7 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 tessera-graph              = { path = "../tessera-graph/crates/tessera-graph", features = ["extended-gql"] }
-tessera-graph-protocol     = { path = "crates/tessera-graph-protocol" }
+tessera-graph-protocol     = { path = "../tessera-graph/crates/tessera-graph-protocol" }
 tessera-graph-auth         = { path = "crates/tessera-graph-auth" }
 tessera-graph-storage      = { path = "crates/tessera-graph-storage" }
 tessera-graph-import       = { path = "crates/tessera-graph-import" }
