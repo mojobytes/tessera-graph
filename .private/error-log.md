@@ -125,3 +125,9 @@
 - **Causa raíz:** Asumí que `with_client_certificate` haría trust del cert sin verificar que fuera un CA cert válido. El nombre del método es engañoso — realmente añade el cert al root CA store.
 - **Cómo lo solucioné:** Generé un par CA+cert firmado dedicado para benchmarks. CA con `basicConstraints=critical,CA:TRUE`, cert end-entity firmado por el CA.
 - **Regla para evitarlo:** Para TLS con certs auto-firmados en tests/benchmarks, SIEMPRE generar un CA propio y firmar los certs end-entity con él. No usar el cert self-signed directamente como raíz de confianza.
+
+### [2026-04-04] Añadí #[must_use] a función que retorna Result — clippy::double_must_use
+- **Qué hice mal:** Añadí `#[must_use]` a `secure_node_projected` que retorna `Result<Node>`. `Result` ya tiene `#[must_use]` por defecto, así que clippy::double_must_use (implied by clippy::all = deny) rechazó la compilación.
+- **Causa raíz:** No verifiqué si el tipo de retorno ya tiene `#[must_use]` antes de añadir la anotación. El plan lo anticipaba como posibilidad (Fase 0 step 1) pero no lo ejecuté antes de implementar.
+- **Cómo lo solucioné:** Quité `#[must_use]` de `secure_node_projected`. Las funciones que retornan Result no necesitan la anotación.
+- **Regla para evitarlo:** NUNCA añadir `#[must_use]` a funciones que retornan `Result<T>` o `Option<T>` — estos tipos ya lo tienen. Solo añadir a funciones que retornan tipos simples (Vec, bool, usize, structs propios).

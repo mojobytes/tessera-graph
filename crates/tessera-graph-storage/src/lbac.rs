@@ -136,8 +136,9 @@ pub mod filter {
     ) -> tessera_graph::Result<Node> {
         let mut node = secure_node(inner, clearance, id)?;
         // `secure_node` already stripped security properties. Now project.
+        let key_set: std::collections::HashSet<&str> = keys.iter().copied().collect();
         node.properties_mut()
-            .retain(|k, _| keys.contains(&k.as_str()));
+            .retain(|k, _| key_set.contains(k.as_str()));
         Ok(node)
     }
 

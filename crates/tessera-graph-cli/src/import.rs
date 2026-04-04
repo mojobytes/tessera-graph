@@ -666,10 +666,9 @@ fn write_endpoint_match(
         )));
     }
 
-    let (match_key, match_val) = match_obj
-        .iter()
-        .next()
-        .expect("match_obj.len() == 1 guaranteed above");
+    let Some((match_key, match_val)) = match_obj.iter().next() else {
+        unreachable!("match_obj.len() == 1 guaranteed above");
+    };
 
     if let Some(l) = label {
         buf.push(':');
@@ -1121,6 +1120,7 @@ mod tests {
         let mut buf = String::new();
         let val = json!({"nested": "value"});
         write_json_value_to_buf(&val, &mut buf).unwrap(); // OK: test
+        // serde_json preserves insertion order (IndexMap-backed Object).
         assert_eq!(buf, r#"'{"nested":"value"}'"#);
     }
 

@@ -119,4 +119,3 @@ impl PersistenceConfig {
             .unwrap_or(DEFAULT_FLUSH_INTERVAL_MS)
     }
 }
-

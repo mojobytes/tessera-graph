@@ -334,6 +334,11 @@ fn ref_node_projected_strips_security_properties() {
             .contains_key(SecurityPolicy::COMPARTMENTS_KEY)
     );
     assert!(node.properties().contains_key("name"));
+    assert_eq!(
+        node.properties().len(),
+        1,
+        "only 'name' should survive projection"
+    );
 }
 
 #[test]
