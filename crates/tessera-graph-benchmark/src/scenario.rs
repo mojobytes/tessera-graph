@@ -162,7 +162,7 @@ impl Scenario for TraversalScenario {
         let mut samples = Vec::with_capacity(self.iterations);
         for _ in 0..self.iterations {
             let t0 = std::time::Instant::now();
-            let _ = target.traverse_bfs(start, depth);
+            target.traverse_bfs(start, depth)?;
             samples.push(t0.elapsed().as_nanos() as u64);
         }
 
@@ -195,7 +195,7 @@ impl Scenario for PathfindingScenario {
         let mut samples = Vec::with_capacity(self.iterations);
         for _ in 0..self.iterations {
             let t0 = std::time::Instant::now();
-            let _ = target.shortest_path(from, to);
+            target.shortest_path(from, to)?;
             samples.push(t0.elapsed().as_nanos() as u64);
         }
 
@@ -464,5 +464,60 @@ mod tests {
             .unwrap();
         assert_eq!(r.scenario_name, "concurrent");
         assert_eq!(r.target_name, "tessera");
+    }
+
+    /// Target that fails on traversal/pathfinding (mimics Bolt targets
+    /// that cannot execute these operations via query language).
+    use crate::target::{EdgeData, EdgeHandle, NodeData};
+
+    struct UnsupportedTraversalTarget(TesseraTarget);
+
+    impl BenchmarkTarget for UnsupportedTraversalTarget {
+        fn name(&self) -> &str { self.0.name() }
+        fn create_node(&mut self, l: &str, p: Properties) -> Result<NodeHandle> { self.0.create_node(l, p) }
+        fn create_edge(&mut self, l: &str, f: NodeHandle, t: NodeHandle, p: Properties) -> Result<EdgeHandle> { self.0.create_edge(l, f, t, p) }
+        fn get_node(&self, h: NodeHandle) -> Result<NodeData> { self.0.get_node(h) }
+        fn get_edge(&self, h: EdgeHandle) -> Result<EdgeData> { self.0.get_edge(h) }
+        fn traverse_bfs(&self, _s: NodeHandle, _d: u32) -> Result<Vec<NodeHandle>> {
+            Err(crate::error::BenchmarkError::scenario("not supported"))
+        }
+        fn traverse_dfs(&self, _s: NodeHandle, _d: u32) -> Result<Vec<NodeHandle>> {
+            Err(crate::error::BenchmarkError::scenario("not supported"))
+        }
+        fn shortest_path(&self, _f: NodeHandle, _t: NodeHandle) -> Result<Option<Vec<NodeHandle>>> {
+            Err(crate::error::BenchmarkError::scenario("not supported"))
+        }
+        fn clear(&mut self) { self.0.clear(); }
+    }
+
+    #[test]
+    fn traversal_scenario_propagates_error_from_target() {
+        let mut t = UnsupportedTraversalTarget(TesseraTarget::new());
+        let start = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let s = TraversalScenario {
+            start,
+            max_depth: 3,
+            iterations: 5,
+        };
+        assert!(
+            s.run(&mut t).is_err(),
+            "traversal must propagate target error, not silently measure Err time"
+        );
+    }
+
+    #[test]
+    fn pathfinding_scenario_propagates_error_from_target() {
+        let mut t = UnsupportedTraversalTarget(TesseraTarget::new());
+        let a = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let b = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let s = PathfindingScenario {
+            from: a,
+            to: b,
+            iterations: 5,
+        };
+        assert!(
+            s.run(&mut t).is_err(),
+            "pathfinding must propagate target error, not silently measure Err time"
+        );
     }
 }
