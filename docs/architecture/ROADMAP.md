@@ -24,52 +24,48 @@ tessera-graph (MIT, embeddable library)
 
 ### MIT vs Enterprise Boundary
 
-The `extended-gql` feature flag in tessera-graph gates features that are
-**compiled only by the enterprise crate**. The MIT core exposes the AST types
-and parser hooks, but the enterprise compiler extensions provide the execution
-logic. This allows the MIT library to remain a lightweight embeddable graph
-engine while the enterprise product delivers a full query language.
-
-**Principle**: advanced query language features (variable-length paths,
-shortestPath, WITH, OPTIONAL MATCH, CASE WHEN, UNWIND, UNION, EXPLAIN, CALL,
-regex, path variables, list comprehensions, FOREACH, map projections) are
-enterprise value. The MIT core provides basic MATCH-WHERE-RETURN with fixed
-patterns, CRUD mutations, and aggregations.
+**Principle**: the GQL query language is **complete in the MIT core**. The
+enterprise product differentiates through production infrastructure — not by
+restricting language features. This follows the model of Redis (full command
+set in community, enterprise adds clustering/security) and PostgreSQL (complete
+SQL, extensions for operations).
 
 | MIT (tessera-graph) | Enterprise (tessera-graph-enterprise) |
 |---|---|
+| **Complete GQL query language** | **Production infrastructure** |
 | In-memory and file-backed storage | MVCC, snapshot isolation, concurrent access |
 | WAL crash recovery | Online backup and scheduled snapshots |
 | Label index | Property indexes, B-tree on-disk indexes |
-| Query primitives (traversal, pathfinding API) | Query optimizer, prepared statements, EXPLAIN |
-| Pattern builder (Layer 2) | GQL extended compiler (variable-length paths, shortestPath) |
-| GQL parser + compiler — basic queries (Layer 3) | Cypher compat mode + advanced GQL features |
-| MATCH (fixed patterns), WHERE, RETURN, ORDER BY, LIMIT | SKIP, WITH, OPTIONAL MATCH, CASE WHEN |
-| CREATE, DELETE, SET, MERGE mutations | UNWIND, UNION, EXISTS subqueries, FOREACH |
-| COUNT, SUM, AVG, MIN, MAX, COLLECT | EXPLAIN/PROFILE, CALL procedures |
-| | Regex matching, path variables, map projections |
-| | Authentication (native, LDAP, external modules) |
-| | RBAC and LBAC (Bell-LaPadula) |
-| | TLS (mandatory) |
-| | Audit logging with sync + rotation |
-| | Replication (HA) |
-| | Multi-tenancy with LRU eviction |
-| | Streaming connectors |
-| | Prometheus metrics + health endpoint |
+| Pattern builder (Layer 2) | Bolt 4.4 wire protocol (TCP + TLS) |
+| Full GQL parser + compiler (Layer 3) | Cypher compatibility mode |
+| MATCH, WHERE, RETURN, ORDER BY, LIMIT, SKIP | Authentication (native, LDAP, OIDC) |
+| Variable-length paths, shortestPath | RBAC and LBAC (Bell-LaPadula) |
+| WITH, OPTIONAL MATCH, CASE WHEN | TLS (mandatory in server) |
+| UNWIND, UNION, EXISTS subqueries | Audit logging with sync + rotation |
+| CREATE, DELETE, SET, MERGE mutations | Replication (HA) |
+| All aggregations (COUNT, SUM, AVG, etc.) | Multi-tenancy with LRU eviction |
+| EXPLAIN/PROFILE, CALL procedures | Streaming connectors |
+| Regex, path variables, map projections | Prometheus metrics + health endpoint |
+| | Docker image + production deployment |
+
+#### Why the language is MIT
+
+1. **Community trust**: users evaluating the library get a complete, functional
+   GQL engine — no artificial limitations that frustrate adoption
+2. **Competitive positioning**: "full GQL in MIT" is a stronger message than
+   Memgraph's BSL-licensed Cypher
+3. **Enterprise justification**: Bolt protocol, TLS, auth, RBAC/LBAC, audit,
+   multi-tenancy, metrics, backup, and replication are more than enough to
+   justify the enterprise product — these are what production deployments need
+4. **Ecosystem growth**: a complete GQL engine attracts contributors to the
+   core, which benefits the enterprise product
 
 #### GQL Feature Flag: `extended-gql`
 
-The MIT core defines the AST types for advanced features (e.g.,
-`EdgeLength::Variable`, `Expr::Case`) behind `#[cfg(feature = "extended-gql")]`.
-The **parser** recognizes the syntax under this flag but returns `GqlUnsupported`
-for features that require enterprise compiler extensions. The **enterprise crate**
-enables this flag and provides the compiler logic.
-
-This design ensures:
-1. MIT users get a working GQL engine for basic queries (no broken features)
-2. Enterprise adds value through advanced query capabilities
-3. The AST is shared — no type duplication between repos
-4. The parser can reject or accept syntax based on the compilation target
+The `extended-gql` feature flag in the MIT core gates features that are
+**in development** — not features reserved for enterprise. Once a feature is
+complete and tested, it graduates from behind the flag to always-on. The flag
+is a development workflow tool, not a commercial boundary.
 
 ---
 
