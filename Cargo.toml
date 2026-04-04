@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version     = "0.2.0"
+version     = "0.2.1"
 edition     = "2024"
 authors     = ["BelowZero Security OU <info@belowzerosecurity.io>"]
 license     = "LicenseRef-Proprietary"
