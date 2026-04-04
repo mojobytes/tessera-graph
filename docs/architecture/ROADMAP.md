@@ -24,22 +24,52 @@ tessera-graph (MIT, embeddable library)
 
 ### MIT vs Enterprise Boundary
 
+The `extended-gql` feature flag in tessera-graph gates features that are
+**compiled only by the enterprise crate**. The MIT core exposes the AST types
+and parser hooks, but the enterprise compiler extensions provide the execution
+logic. This allows the MIT library to remain a lightweight embeddable graph
+engine while the enterprise product delivers a full query language.
+
+**Principle**: advanced query language features (variable-length paths,
+shortestPath, WITH, OPTIONAL MATCH, CASE WHEN, UNWIND, UNION, EXPLAIN, CALL,
+regex, path variables, list comprehensions, FOREACH, map projections) are
+enterprise value. The MIT core provides basic MATCH-WHERE-RETURN with fixed
+patterns, CRUD mutations, and aggregations.
+
 | MIT (tessera-graph) | Enterprise (tessera-graph-enterprise) |
 |---|---|
 | In-memory and file-backed storage | MVCC, snapshot isolation, concurrent access |
 | WAL crash recovery | Online backup and scheduled snapshots |
 | Label index | Property indexes, B-tree on-disk indexes |
-| Query primitives (traversal, pathfinding) | Query optimizer, prepared statements, EXPLAIN |
-| Pattern builder (Layer 2) | Mutations via GQL, Cypher compat mode |
-| GQL parser — read-only queries (Layer 3) | SQL/PGQ bridge |
+| Query primitives (traversal, pathfinding API) | Query optimizer, prepared statements, EXPLAIN |
+| Pattern builder (Layer 2) | GQL extended compiler (variable-length paths, shortestPath) |
+| GQL parser + compiler — basic queries (Layer 3) | Cypher compat mode + advanced GQL features |
+| MATCH (fixed patterns), WHERE, RETURN, ORDER BY, LIMIT | SKIP, WITH, OPTIONAL MATCH, CASE WHEN |
+| CREATE, DELETE, SET, MERGE mutations | UNWIND, UNION, EXISTS subqueries, FOREACH |
+| COUNT, SUM, AVG, MIN, MAX, COLLECT | EXPLAIN/PROFILE, CALL procedures |
+| | Regex matching, path variables, map projections |
 | | Authentication (native, LDAP, external modules) |
-| | RBAC and LBAC |
-| | SSL/TLS |
-| | Audit logging |
+| | RBAC and LBAC (Bell-LaPadula) |
+| | TLS (mandatory) |
+| | Audit logging with sync + rotation |
 | | Replication (HA) |
-| | Multi-tenancy |
+| | Multi-tenancy with LRU eviction |
 | | Streaming connectors |
-| | Monitoring server |
+| | Prometheus metrics + health endpoint |
+
+#### GQL Feature Flag: `extended-gql`
+
+The MIT core defines the AST types for advanced features (e.g.,
+`EdgeLength::Variable`, `Expr::Case`) behind `#[cfg(feature = "extended-gql")]`.
+The **parser** recognizes the syntax under this flag but returns `GqlUnsupported`
+for features that require enterprise compiler extensions. The **enterprise crate**
+enables this flag and provides the compiler logic.
+
+This design ensures:
+1. MIT users get a working GQL engine for basic queries (no broken features)
+2. Enterprise adds value through advanced query capabilities
+3. The AST is shared — no type duplication between repos
+4. The parser can reject or accept syntax based on the compilation target
 
 ---
 

@@ -3,6 +3,16 @@
 # Cross-Repo Write Guard — PreToolUse hook for the Enterprise repo.
 # Blocks any Write/Edit/MultiEdit targeting the MIT (tessera-graph) repo.
 #
+# WHY: The MIT core (tessera-graph) provides basic GQL and graph primitives.
+# Advanced GQL features (variable-length paths, shortestPath, WITH, OPTIONAL
+# MATCH, CASE WHEN, etc.) are enterprise value and must be implemented in
+# this repo — never in the MIT core. If the MIT core needs changes (e.g.,
+# new AST types behind extended-gql), those must be done in a separate
+# Claude session targeting the MIT repo directly, with explicit user approval.
+#
+# See docs/architecture/ROADMAP.md "MIT vs Enterprise Boundary" for the
+# full boundary definition.
+#
 # Exit codes:
 #   0 — allow
 #   2 — block
