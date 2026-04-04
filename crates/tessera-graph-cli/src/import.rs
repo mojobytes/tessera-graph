@@ -582,7 +582,7 @@ fn write_json_props_to_buf(
         }
         write_gql_identifier(k, "property key", buf)?;
         buf.push_str(": ");
-        write_json_value_to_buf(v, buf);
+        write_json_value_to_buf(v, buf)?;
         first = false;
     }
     buf.push('}');
@@ -594,7 +594,8 @@ fn write_json_props_to_buf(
 /// Arrays and objects are serialized as JSON strings (GQL does not have
 /// native array/object literals). Use the caller's context to surface
 /// a diagnostic if needed.
-fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) {
+#[allow(clippy::unnecessary_wraps)] // Returns Result for consistency with write_gql_identifier chain
+fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) -> Result<(), CliError> {
     match v {
         serde_json::Value::Null => buf.push_str("null"),
         serde_json::Value::Bool(true) => buf.push_str("true"),
@@ -631,6 +632,7 @@ fn write_json_value_to_buf(v: &serde_json::Value, buf: &mut String) {
             buf.push('\'');
         }
     }
+    Ok(())
 }
 
 /// Write a MATCH clause for an edge endpoint into `buf`: `:Label {matchKey: 'matchVal'}`.
@@ -657,16 +659,17 @@ fn write_endpoint_match(
                 ))
             })?;
 
-    if match_obj.len() > 1 {
+    if match_obj.len() != 1 {
         return Err(CliError::ImportExport(format!(
             "edge {endpoint_key}.match must have exactly one key, got {}",
             match_obj.len()
         )));
     }
 
-    let (match_key, match_val) = match_obj.iter().next().ok_or_else(|| {
-        CliError::ImportExport(format!("edge {endpoint_key}.match is empty"))
-    })?;
+    let (match_key, match_val) = match_obj
+        .iter()
+        .next()
+        .expect("match_obj.len() == 1 guaranteed above");
 
     if let Some(l) = label {
         buf.push(':');
@@ -676,7 +679,7 @@ fn write_endpoint_match(
     buf.push('{');
     write_gql_identifier(match_key, &format!("edge {endpoint_key} match key"), buf)?;
     buf.push_str(": ");
-    write_json_value_to_buf(match_val, buf);
+    write_json_value_to_buf(match_val, buf)?;
     buf.push('}');
     Ok(())
 }
@@ -1099,6 +1102,48 @@ mod tests {
     fn write_gql_identifier_rejects_control_char() {
         let mut buf = String::new();
         assert!(write_gql_identifier("bad\x01name", "test", &mut buf).is_err());
+    }
+
+    // --- write_json_value_to_buf returns Result ---
+
+    #[test]
+    fn write_json_value_array_returns_ok() {
+        use serde_json::json;
+        let mut buf = String::new();
+        let val = json!(["a", "b", "c"]);
+        write_json_value_to_buf(&val, &mut buf).unwrap(); // OK: test
+        assert_eq!(buf, r#"'["a","b","c"]'"#);
+    }
+
+    #[test]
+    fn write_json_value_object_returns_ok() {
+        use serde_json::json;
+        let mut buf = String::new();
+        let val = json!({"nested": "value"});
+        write_json_value_to_buf(&val, &mut buf).unwrap(); // OK: test
+        assert_eq!(buf, r#"'{"nested":"value"}'"#);
+    }
+
+    #[test]
+    fn write_json_value_array_with_single_quote_is_escaped() {
+        use serde_json::json;
+        let mut buf = String::new();
+        let val = json!(["O'Brien"]);
+        write_json_value_to_buf(&val, &mut buf).unwrap(); // OK: test
+        assert_eq!(buf, r#"'["O''Brien"]'"#);
+    }
+
+    // --- write_endpoint_match ---
+
+    #[test]
+    fn write_endpoint_match_empty_match_is_error() {
+        use serde_json::json;
+        let edge = json!({
+            "source": { "label": "Person", "match": {} }
+        });
+        let mut buf = String::new();
+        let result = write_endpoint_match(&edge, "source", &mut buf);
+        assert!(result.is_err(), "empty match object must be rejected");
     }
 
     // --- Injection rejection ---

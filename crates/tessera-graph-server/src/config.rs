@@ -16,6 +16,7 @@ const DEFAULT_MIN_FREE_DISK_MB: u64 = 100;
 
 /// Parse an environment variable, logging a warning if the value is present but
 /// cannot be parsed. Returns `default` if the variable is unset or invalid.
+#[must_use]
 pub fn parse_env_or_warn<T: std::str::FromStr>(name: &str, default: T) -> T {
     match std::env::var(name) {
         Err(_) => default, // not set
@@ -28,18 +29,18 @@ pub fn parse_env_or_warn<T: std::str::FromStr>(name: &str, default: T) -> T {
 
 /// Parse a boolean environment variable. Accepts `"true"/"1"` for true,
 /// `"false"/"0"` for false. Warns and returns `default` on any other value.
+#[must_use]
 pub fn parse_bool_env_or_warn(name: &str, default: bool) -> bool {
-    match std::env::var(name) {
-        Err(_) => default,
-        Ok(v) => match v.to_ascii_lowercase().as_str() {
+    std::env::var(name).map_or(default, |v| {
+        match v.to_ascii_lowercase().as_str() {
             "true" | "1" => true,
             "false" | "0" => false,
             _ => {
                 tracing::warn!("{name} has invalid value '{v}' — using default ({default})");
                 default
             }
-        },
-    }
+        }
+    })
 }
 
 /// Parsed persistence configuration derived from environment variables.
@@ -80,9 +81,7 @@ impl PersistenceConfig {
         let memory_limit_bytes =
             parse_env_or_warn::<usize>("TESSERA_MEMORY_LIMIT_MB", 64) * 1024 * 1024;
 
-        let wal_enabled = std::env::var("TESSERA_WAL_ENABLED")
-            .map(|v| v.to_lowercase() != "false")
-            .unwrap_or(true);
+        let wal_enabled = parse_bool_env_or_warn("TESSERA_WAL_ENABLED", true);
 
         let default_tenant =
             std::env::var("TESSERA_DEFAULT_TENANT").unwrap_or_else(|_| "default".to_owned());
@@ -120,3 +119,4 @@ impl PersistenceConfig {
             .unwrap_or(DEFAULT_FLUSH_INTERVAL_MS)
     }
 }
+

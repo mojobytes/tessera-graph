@@ -298,3 +298,56 @@ fn ref_remove_edge_returns_error() {
     let err_msg = result.unwrap_err().to_string();
     assert!(err_msg.contains("read-only"), "got: {err_msg}");
 }
+
+// --- node_projected() ---
+
+#[test]
+fn ref_node_projected_returns_only_requested_keys() {
+    let mut g = Graph::new();
+    let label = SecurityLabel::new(1, comps(&["FINANCE"]));
+    let mut p = props! { "name" => "Alice", "age" => 30_i64, "city" => "Berlin" };
+    SecurityPolicy::inject_label(&mut p, &label);
+    let id = g.add_node("Person", p).unwrap(); // OK: test
+
+    let sg = SecureGraphRef::new(&g, clearance(2, &["FINANCE"]));
+    let node = sg.node_projected(id, &["name", "age"]).unwrap(); // OK: test
+    assert_eq!(node.properties().len(), 2);
+    assert!(node.properties().contains_key("name"));
+    assert!(node.properties().contains_key("age"));
+    assert!(!node.properties().contains_key("city"));
+}
+
+#[test]
+fn ref_node_projected_strips_security_properties() {
+    let (g, id) = make_graph_with_node(2, &["FINANCE"]);
+    let sg = SecureGraphRef::new(&g, clearance(3, &["FINANCE"]));
+    let node = sg
+        .node_projected(
+            id,
+            &["name", SecurityPolicy::LEVEL_KEY, SecurityPolicy::COMPARTMENTS_KEY],
+        )
+        .unwrap(); // OK: test
+    assert!(!node.properties().contains_key(SecurityPolicy::LEVEL_KEY));
+    assert!(
+        !node
+            .properties()
+            .contains_key(SecurityPolicy::COMPARTMENTS_KEY)
+    );
+    assert!(node.properties().contains_key("name"));
+}
+
+#[test]
+fn ref_node_projected_denied_when_clearance_insufficient() {
+    let (g, id) = make_graph_with_node(5, &[]);
+    let sg = SecureGraphRef::new(&g, clearance(4, &[]));
+    assert!(sg.node_projected(id, &["name"]).is_err());
+}
+
+#[test]
+fn ref_node_projected_empty_keys_returns_no_properties() {
+    let (g, id) = make_graph_with_node(1, &[]);
+    let sg = SecureGraphRef::new(&g, clearance(2, &[]));
+    let node = sg.node_projected(id, &[]).unwrap(); // OK: test
+    assert!(node.properties().is_empty());
+    assert_eq!(node.label(), "Person");
+}

@@ -61,6 +61,7 @@ pub mod filter {
 
     // --- Shared read implementations used by both SecureGraph and SecureGraphRef ---
 
+    #[must_use]
     pub fn secure_node_ids<G: GraphAccess>(inner: &G, clearance: &Clearance) -> Vec<NodeId> {
         inner
             .node_ids()
@@ -74,6 +75,7 @@ pub mod filter {
             .collect()
     }
 
+    #[must_use]
     pub fn secure_nodes_by_label<G: GraphAccess>(
         inner: &G,
         clearance: &Clearance,
@@ -110,6 +112,36 @@ pub mod filter {
         }
     }
 
+    /// Returns a projected node (only `keys` properties) if the caller's
+    /// clearance dominates its security label.
+    ///
+    /// The full node is always fetched first so the security label is
+    /// available for the clearance check, regardless of which `keys` were
+    /// requested. The in-memory `Graph` has no I/O distinction; in a
+    /// page-level storage backend the page containing the security
+    /// properties is loaded, but this is the minimum required to enforce
+    /// the access control decision.
+    ///
+    /// Keys that do not exist in the node's properties are silently ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`tessera_graph::Error::NodeNotFound`] if the node does not
+    /// exist or the caller lacks sufficient clearance.
+    pub fn secure_node_projected<G: GraphAccess>(
+        inner: &G,
+        clearance: &Clearance,
+        id: NodeId,
+        keys: &[&str],
+    ) -> tessera_graph::Result<Node> {
+        let mut node = secure_node(inner, clearance, id)?;
+        // `secure_node` already stripped security properties. Now project.
+        node.properties_mut()
+            .retain(|k, _| keys.contains(&k.as_str()));
+        Ok(node)
+    }
+
+    #[must_use]
     pub fn secure_node_exists<G: GraphAccess>(
         inner: &G,
         clearance: &Clearance,
@@ -121,6 +153,7 @@ pub mod filter {
             .unwrap_or(false)
     }
 
+    #[must_use]
     pub fn secure_edges_by_label<G: GraphAccess>(
         inner: &G,
         clearance: &Clearance,
@@ -157,6 +190,7 @@ pub mod filter {
         }
     }
 
+    #[must_use]
     pub fn secure_edge_count<G: GraphAccess>(inner: &G, clearance: &Clearance) -> usize {
         let mut seen = std::collections::HashSet::new();
         for &nid in &secure_node_ids(inner, clearance) {
@@ -308,10 +342,14 @@ impl<G: GraphAccess> GraphAccess for SecureGraph<'_, G> {
     fn node(&self, id: NodeId) -> tessera_graph::Result<Node> {
         filter::secure_node(self.inner, &self.clearance, id)
     }
+    fn node_projected(&self, id: NodeId, keys: &[&str]) -> tessera_graph::Result<Node> {
+        filter::secure_node_projected(self.inner, &self.clearance, id, keys)
+    }
     fn node_exists(&self, id: NodeId) -> bool {
         filter::secure_node_exists(self.inner, &self.clearance, id)
     }
     fn node_count(&self) -> usize {
+        // TODO(perf): replace with a counting iterator to avoid Vec allocation
         self.node_ids().len()
     }
     fn edges_by_label(&self, label: &str) -> Vec<EdgeId> {
@@ -453,10 +491,14 @@ impl<G: GraphAccess> GraphAccess for SecureGraphRef<'_, G> {
     fn node(&self, id: NodeId) -> tessera_graph::Result<Node> {
         filter::secure_node(self.inner, &self.clearance, id)
     }
+    fn node_projected(&self, id: NodeId, keys: &[&str]) -> tessera_graph::Result<Node> {
+        filter::secure_node_projected(self.inner, &self.clearance, id, keys)
+    }
     fn node_exists(&self, id: NodeId) -> bool {
         filter::secure_node_exists(self.inner, &self.clearance, id)
     }
     fn node_count(&self) -> usize {
+        // TODO(perf): replace with a counting iterator to avoid Vec allocation
         self.node_ids().len()
     }
     fn edges_by_label(&self, label: &str) -> Vec<EdgeId> {

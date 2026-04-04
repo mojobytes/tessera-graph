@@ -30,7 +30,7 @@ pub struct TenantRegistry {
     max_loaded: usize,
     /// LRU access order — front is least recently used.
     /// Uses `Mutex` instead of `RwLock` because every access is a write
-    /// (retain + push_back), so RwLock's reader-count overhead is wasted.
+    /// (`retain` + `push_back`), so `RwLock`'s reader-count overhead is wasted.
     access_order: Mutex<VecDeque<DatabaseAddress>>,
 }
 

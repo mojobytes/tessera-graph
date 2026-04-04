@@ -276,3 +276,57 @@ fn incoming_edges_filters_inaccessible_edges() {
         "incoming_edges must filter compartmented edge"
     );
 }
+
+// --- node_projected() ---
+
+#[test]
+fn node_projected_returns_only_requested_keys() {
+    let mut g = Graph::new();
+    let label = SecurityLabel::new(1, comps(&["FINANCE"]));
+    let mut p = props! { "name" => "Alice", "age" => 30_i64, "city" => "Berlin" };
+    SecurityPolicy::inject_label(&mut p, &label);
+    let id = g.add_node("Person", p).unwrap(); // OK: test
+
+    let sg = SecureGraph::new(&mut g, clearance(2, &["FINANCE"]));
+    let node = sg.node_projected(id, &["name", "age"]).unwrap(); // OK: test
+    assert_eq!(node.properties().len(), 2);
+    assert!(node.properties().contains_key("name"));
+    assert!(node.properties().contains_key("age"));
+    assert!(!node.properties().contains_key("city"));
+}
+
+#[test]
+fn node_projected_strips_security_properties() {
+    let (mut g, id) = make_graph_with_node(2, &["FINANCE"]);
+    let sg = SecureGraph::new(&mut g, clearance(3, &["FINANCE"]));
+    // Request all keys including security ones — they must be stripped
+    let node = sg
+        .node_projected(
+            id,
+            &["name", SecurityPolicy::LEVEL_KEY, SecurityPolicy::COMPARTMENTS_KEY],
+        )
+        .unwrap(); // OK: test
+    assert!(!node.properties().contains_key(SecurityPolicy::LEVEL_KEY));
+    assert!(
+        !node
+            .properties()
+            .contains_key(SecurityPolicy::COMPARTMENTS_KEY)
+    );
+    assert!(node.properties().contains_key("name"));
+}
+
+#[test]
+fn node_projected_denied_when_clearance_insufficient() {
+    let (mut g, id) = make_graph_with_node(5, &[]);
+    let sg = SecureGraph::new(&mut g, clearance(4, &[]));
+    assert!(sg.node_projected(id, &["name"]).is_err());
+}
+
+#[test]
+fn node_projected_empty_keys_returns_no_properties() {
+    let (mut g, id) = make_graph_with_node(1, &[]);
+    let sg = SecureGraph::new(&mut g, clearance(2, &[]));
+    let node = sg.node_projected(id, &[]).unwrap(); // OK: test
+    assert!(node.properties().is_empty());
+    assert_eq!(node.label(), "Person");
+}

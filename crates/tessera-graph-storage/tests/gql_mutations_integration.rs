@@ -364,7 +364,15 @@ fn match_create_edge_with_properties() {
 
     assert_eq!(result.edges_created, 1);
 
-    let alice_id = g.nodes_by_label("Person")[0];
+    let alice_id = g
+        .nodes_by_label("Person")
+        .into_iter()
+        .find(|&id| {
+            g.node(id)
+                .map(|n| n.properties().get("name").and_then(|p| p.as_str()) == Some("Alice"))
+                .unwrap_or(false)
+        })
+        .expect("Alice must exist");
     let edges = g.outgoing_edges(alice_id).unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].label(), "KNOWS");
