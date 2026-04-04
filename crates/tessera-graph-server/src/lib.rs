@@ -10,6 +10,7 @@ pub mod error;
 pub mod flush_task;
 pub mod listener;
 pub mod shutdown;
+pub mod startup;
 
 pub use bolt_handler::BoltConnectionHandler;
 pub use context::ServerContext;

@@ -100,4 +100,12 @@ ENV RUST_LOG=tessera_graph_server=info,tessera_graph_audit=info
 # Data and log volumes
 VOLUME ["/var/lib/tessera/data", "/var/log/tessera"]
 
+# Health check via /health endpoint (metrics port).
+# If TESSERA_METRICS_TOKEN is set, /health requires auth and this check will
+# fail — override the healthcheck in docker-compose.yml to include the token.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD bash -c '</dev/tcp/localhost/9090' || exit 1
+
+STOPSIGNAL SIGTERM
+
 ENTRYPOINT ["/usr/local/bin/tessera-graph-server"]

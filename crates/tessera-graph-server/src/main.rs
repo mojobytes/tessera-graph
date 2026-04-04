@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use tessera_graph_audit::AuditLog;
 use tessera_graph_config::AuditConfig;
-use tessera_graph_auth::credentials::{Password, PasswordPolicy};
+use tessera_graph_auth::credentials::PasswordPolicy;
 use tessera_graph_auth::policy::AuthPolicy;
 use tessera_graph_auth::rbac::RoleStoreHandle;
 use tessera_graph_auth::session::SessionManager;
@@ -47,10 +47,13 @@ async fn main() {
 
     // --- Auth ---
     let policy = PasswordPolicy::default();
-    let admin_pw = Password::new(
-        &std::env::var("TESSERA_ADMIN_PASSWORD").expect("TESSERA_ADMIN_PASSWORD must be set"),
+    let admin_pw = tessera_graph_server::startup::validate_admin_password(
+        std::env::var("TESSERA_ADMIN_PASSWORD").ok(),
     )
-    .expect("invalid admin password");
+    .unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     let user_store =
         Arc::new(UserStoreHandle::new("admin", &admin_pw, &policy).expect("user store init"));
     let role_store = RoleStoreHandle::with_defaults();
@@ -144,10 +147,27 @@ async fn main() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-        tracing::info!("shutting down");
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    tracing::info!("received SIGTERM, shutting down");
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("received SIGINT, shutting down");
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c()
+                .await
+                .expect("failed to install Ctrl+C handler");
+            tracing::info!("shutting down");
+        }
         let _ = shutdown_tx.send(true);
     });
 

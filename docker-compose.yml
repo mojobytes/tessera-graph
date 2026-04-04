@@ -18,18 +18,20 @@
 services:
   # ── TesseraGraph Enterprise ──────────────────────────────────────
   graphdb:
-    image: tesseraio/tessera-graph-enterprise:latest
+    image: tesseraio/tessera-graph-enterprise:0.2.1
     container_name: tessera-graphdb
     ports:
       - "7687:7687"   # Bolt 4.4
-      - "9090:9090"   # Prometheus metrics
+      - "9090:9090"   # Prometheus metrics + health
     environment:
-      - TESSERA_ADMIN_PASSWORD=${TESSERA_ADMIN_PASSWORD:-Admin.123}
+      - TESSERA_ADMIN_PASSWORD=${TESSERA_ADMIN_PASSWORD:-Admin@.123}
       - TESSERA_BIND=0.0.0.0:7687
       - TESSERA_DATA_DIR=/var/lib/tessera/data
       - TESSERA_DEFAULT_TENANT=default
       - TESSERA_MEMORY_LIMIT_MB=2048
       - TESSERA_MAX_CONNECTIONS=256
+      - TESSERA_IDLE_TIMEOUT_SECS=300
+      - TESSERA_WAL_ENABLED=true
       - TESSERA_METRICS_BIND=0.0.0.0:9090
       - TESSERA_FLUSH_INTERVAL_MS=${TESSERA_FLUSH_INTERVAL_MS:-50}
       - TESSERA_AUDIT_ENABLED=false
@@ -37,6 +39,13 @@ services:
     volumes:
       - graphdb-data:/var/lib/tessera/data
       - graphdb-logs:/var/log/tessera
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/9090"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    stop_grace_period: 35s
     deploy:
       resources:
         limits:
