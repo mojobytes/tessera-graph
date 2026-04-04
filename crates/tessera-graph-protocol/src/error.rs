@@ -15,15 +15,6 @@ pub enum ProtocolError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error(
-        "frame too large: declared {declared} bytes (max {})",
-        crate::frame::MAX_FRAME_SIZE
-    )]
-    FrameTooLarge { declared: u32 },
-
-    #[error("invalid message: {0}")]
-    InvalidMessage(#[from] serde_json::Error),
-
     #[error("packstream buffer underflow: need {needed} bytes, got {available}")]
     PackStreamUnderflow { needed: usize, available: usize },
 

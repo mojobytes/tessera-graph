@@ -7,8 +7,6 @@ pub mod bolt_frame;
 pub mod bolt_handshake;
 pub mod bolt_message;
 pub mod error;
-pub mod frame;
-pub mod message;
 pub mod packstream;
 pub mod tls;
 
@@ -23,7 +21,5 @@ pub use bolt_message::{
     encode_response,
 };
 pub use error::{ProtocolError, Result};
-pub use frame::{FramedReader, FramedWriter, MAX_FRAME_SIZE};
-pub use message::{ClientMessage, ServerMessage};
 pub use packstream::{PackStreamValue, decode, encode};
 pub use tls::{ClientAuth, TlsConfig, TlsConfigBuilder};
