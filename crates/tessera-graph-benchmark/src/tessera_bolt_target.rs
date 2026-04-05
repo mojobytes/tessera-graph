@@ -82,6 +82,8 @@ pub struct TesseraBoltTarget {
     rt: Runtime,
     client: RefCell<Client>,
     node_ids: RefCell<HashMap<u64, i64>>,
+    /// Tracks node handle IDs in creation order (excludes edge handles).
+    node_handle_order: RefCell<Vec<u64>>,
     edge_count: u64,
     next_handle: AtomicU64,
 }
@@ -141,6 +143,7 @@ impl TesseraBoltTarget {
             rt,
             client: RefCell::new(client),
             node_ids: RefCell::new(HashMap::new()),
+            node_handle_order: RefCell::new(Vec::new()),
             edge_count: 0,
             next_handle: AtomicU64::new(1),
         })
@@ -186,12 +189,19 @@ impl TesseraBoltTarget {
     }
 
     /// Fetches all node IDs from the graph and populates the handle→ID map.
+    ///
+    /// Maps handles from `node_handle_order` (creation order) to graph node IDs
+    /// returned in ascending order. This assumes nodes are assigned IDs in
+    /// creation order, which holds for `tessera-graph`'s sequential allocator.
     fn resolve_node_ids(&self) -> Result<()> {
         let rows = self.run_query("MATCH (n) RETURN id(n) AS nid ORDER BY id(n) ASC")?;
+        let handles = self.node_handle_order.borrow();
         let mut ids = self.node_ids.borrow_mut();
         for (i, row) in rows.iter().enumerate() {
             if let Some(PackStreamValue::Int(nid)) = row.first() {
-                ids.insert((i + 1) as u64, *nid);
+                if let Some(&handle_id) = handles.get(i) {
+                    ids.insert(handle_id, *nid);
+                }
             }
         }
         Ok(())
@@ -208,6 +218,7 @@ impl BenchmarkTarget for TesseraBoltTarget {
         self.run_query(&query)?;
 
         let handle_id = self.next_handle();
+        self.node_handle_order.borrow_mut().push(handle_id);
         Ok(NodeHandle(handle_id))
     }
 
@@ -281,31 +292,127 @@ impl BenchmarkTarget for TesseraBoltTarget {
         })
     }
 
-    fn traverse_bfs(&self, _start: NodeHandle, _max_depth: u32) -> Result<Vec<NodeHandle>> {
-        Err(BenchmarkError::scenario(
-            "BFS traversal not supported via TesseraGraph Bolt",
-        ))
+    fn traverse_bfs(&self, start: NodeHandle, max_depth: u32) -> Result<Vec<NodeHandle>> {
+        // Lazy ID resolution: fetch all IDs on first miss.
+        if !self.node_ids.borrow().contains_key(&start.0) {
+            self.resolve_node_ids()?;
+        }
+
+        let start_nid = {
+            let ids = self.node_ids.borrow();
+            *ids.get(&start.0).ok_or_else(|| {
+                BenchmarkError::external("start node handle not found after ID resolution")
+            })?
+        };
+
+        // Variable-length path query — returns reachable nodes (excludes start).
+        let query = format!(
+            "MATCH (s) WHERE id(s) = {start_nid} \
+             MATCH (s)-[*1..{max_depth}]->(n) \
+             RETURN DISTINCT id(n) AS nid"
+        );
+        let rows = self.run_query(&query)?;
+
+        // Build reverse lookup: graph nid → NodeHandle
+        let reverse: std::collections::HashMap<i64, u64> = self
+            .node_ids
+            .borrow()
+            .iter()
+            .map(|(&h, &nid)| (nid, h))
+            .collect();
+
+        // Start node is always included (trait contract).
+        let mut result = vec![start];
+        for row in &rows {
+            if let Some(PackStreamValue::Int(nid)) = row.first() {
+                if let Some(&h) = reverse.get(nid) {
+                    if h != start.0 {
+                        result.push(NodeHandle(h));
+                    }
+                }
+            }
+        }
+        Ok(result)
     }
 
-    fn traverse_dfs(&self, _start: NodeHandle, _max_depth: u32) -> Result<Vec<NodeHandle>> {
-        Err(BenchmarkError::scenario(
-            "DFS traversal not supported via TesseraGraph Bolt",
-        ))
+    fn traverse_dfs(&self, start: NodeHandle, max_depth: u32) -> Result<Vec<NodeHandle>> {
+        // TesseraGraph variable-length paths don't distinguish BFS/DFS at the
+        // GQL level — both return the same set of reachable nodes.
+        self.traverse_bfs(start, max_depth)
     }
 
     fn shortest_path(
         &self,
-        _from: NodeHandle,
-        _to: NodeHandle,
+        from: NodeHandle,
+        to: NodeHandle,
     ) -> Result<Option<Vec<NodeHandle>>> {
-        Err(BenchmarkError::scenario(
-            "Shortest path not supported via TesseraGraph Bolt",
-        ))
+        // Lazy ID resolution.
+        {
+            let ids = self.node_ids.borrow();
+            if !ids.contains_key(&from.0) || !ids.contains_key(&to.0) {
+                drop(ids);
+                self.resolve_node_ids()?;
+            }
+        }
+
+        let (from_nid, to_nid) = {
+            let ids = self.node_ids.borrow();
+            let f = *ids.get(&from.0).ok_or_else(|| {
+                BenchmarkError::external("from node handle not found")
+            })?;
+            let t = *ids.get(&to.0).ok_or_else(|| {
+                BenchmarkError::external("to node handle not found")
+            })?;
+            (f, t)
+        };
+
+        let query = format!(
+            "MATCH (a) WHERE id(a) = {from_nid}, (b) WHERE id(b) = {to_nid} \
+             RETURN shortestPath(a, b)"
+        );
+        let rows = self.run_query(&query)?;
+
+        let Some(row) = rows.first() else {
+            return Ok(None);
+        };
+        let Some(val) = row.first() else {
+            return Ok(None);
+        };
+
+        match val {
+            PackStreamValue::Null => Ok(None),
+            PackStreamValue::List(items) if items.is_empty() => Ok(None),
+            PackStreamValue::List(items) => {
+                let reverse: std::collections::HashMap<i64, u64> = self
+                    .node_ids
+                    .borrow()
+                    .iter()
+                    .map(|(&h, &nid)| (nid, h))
+                    .collect();
+                let handles: Vec<NodeHandle> = items
+                    .iter()
+                    .filter_map(|v| {
+                        if let PackStreamValue::Int(nid) = v {
+                            reverse.get(nid).map(|&h| NodeHandle(h))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if handles.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(handles))
+                }
+            }
+            _ => Ok(None),
+        }
     }
 
     fn clear(&mut self) {
         let _ = self.run_query("MATCH (n) DETACH DELETE n");
         self.node_ids.borrow_mut().clear();
+        self.node_handle_order.borrow_mut().clear();
         self.edge_count = 0;
     }
 }

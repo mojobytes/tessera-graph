@@ -131,3 +131,9 @@
 - **Causa raíz:** No verifiqué si el tipo de retorno ya tiene `#[must_use]` antes de añadir la anotación. El plan lo anticipaba como posibilidad (Fase 0 step 1) pero no lo ejecuté antes de implementar.
 - **Cómo lo solucioné:** Quité `#[must_use]` de `secure_node_projected`. Las funciones que retornan Result no necesitan la anotación.
 - **Regla para evitarlo:** NUNCA añadir `#[must_use]` a funciones que retornan `Result<T>` o `Option<T>` — estos tipos ya lo tienen. Solo añadir a funciones que retornan tipos simples (Vec, bool, usize, structs propios).
+
+### [2026-04-05] MATCH retorna 0 filas tras CREATE en misma sesión Bolt — investigación en curso
+- **Qué observamos:** `resolve_node_ids()` en `TesseraBoltTarget` ejecuta `MATCH (n) RETURN id(n)` y obtiene 0 filas, a pesar de que `CREATE (:N)` se ejecutó previamente en la misma conexión Bolt con SUCCESS.
+- **Causa raíz probable:** Por determinar. Descartado: BEGIN/FAIL (BoltClient no envía BEGIN). El architecture read/write lock es correcto. Posibles causas: LBAC clearance level mismatch, query cache returning stale results, o bug en gql::execute con id() function tras mutations.
+- **Estado:** Bloqueante para TesseraBoltTarget integration tests. El benchmark "read" mide queries fallidas silenciosamente (let _ = pattern). Necesita investigación en el bolt_handler con tracing habilitado.
+- **Regla:** Antes de asumir que un benchmark funciona, verificar que las queries realmente retornan datos (no solo medir el tiempo de ejecución).
