@@ -367,7 +367,8 @@ impl BenchmarkTarget for TesseraBoltTarget {
         };
 
         let query = format!(
-            "MATCH (a) WHERE id(a) = {from_nid}, (b) WHERE id(b) = {to_nid} \
+            "MATCH (a) WHERE id(a) = {from_nid} \
+             MATCH (b) WHERE id(b) = {to_nid} \
              RETURN shortestPath(a, b)"
         );
         let rows = self.run_query(&query)?;
@@ -410,7 +411,12 @@ impl BenchmarkTarget for TesseraBoltTarget {
     }
 
     fn clear(&mut self) {
-        let _ = self.run_query("MATCH (n) DETACH DELETE n");
+        if self.run_query("MATCH (n) DETACH DELETE n").is_err() {
+            // The server enters FAILED state after a query error.
+            // Send RESET to recover before subsequent queries.
+            let mut client = self.client.borrow_mut();
+            let _ = self.rt.block_on(client.reset());
+        }
         self.node_ids.borrow_mut().clear();
         self.node_handle_order.borrow_mut().clear();
         self.edge_count = 0;

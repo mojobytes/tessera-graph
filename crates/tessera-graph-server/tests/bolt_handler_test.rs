@@ -1043,3 +1043,139 @@ async fn pull_without_n_returns_all_rows_backward_compat() {
     }
     assert_eq!(records.len(), 5, "legacy PULL must return all 5 records");
 }
+
+// ── CREATE-then-MATCH regression test ────────────────────────────────────────
+
+#[tokio::test]
+async fn create_then_match_returns_created_node() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // CREATE a node
+    bolt_send(
+        &mut writer,
+        &run_query("CREATE (:TestNode {name: 'hello'})"),
+    )
+    .await;
+    let create_run = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(create_run, BoltResponse::Success { .. }),
+        "CREATE RUN must succeed, got {create_run:?}"
+    );
+
+    // PULL the mutation summary
+    bolt_send(&mut writer, &pull()).await;
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { .. } => {} // mutation summary row
+            BoltResponse::Success { .. } => break,
+            other => panic!("unexpected during CREATE PULL: {other:?}"),
+        }
+    }
+
+    // MATCH the node we just created
+    bolt_send(
+        &mut writer,
+        &run_query("MATCH (n:TestNode) RETURN n.name"),
+    )
+    .await;
+    let match_run = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(match_run, BoltResponse::Success { .. }),
+        "MATCH RUN must succeed, got {match_run:?}"
+    );
+
+    bolt_send(&mut writer, &pull()).await;
+
+    let mut records = Vec::new();
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { fields } => records.push(fields),
+            BoltResponse::Success { .. } => break,
+            other => panic!("unexpected during MATCH PULL: {other:?}"),
+        }
+    }
+
+    assert_eq!(
+        records.len(),
+        1,
+        "MATCH after CREATE must return 1 record, got {}",
+        records.len()
+    );
+    assert!(
+        records[0]
+            .iter()
+            .any(|v| matches!(v, PackStreamValue::String(s) if s == "hello")),
+        "expected 'hello' in record, got {:?}",
+        records[0]
+    );
+}
+
+#[tokio::test]
+async fn create_then_match_with_id_function() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // CREATE a node (same as TesseraBoltTarget::create_node)
+    bolt_send(&mut writer, &run_query("CREATE (:N)")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+    bolt_send(&mut writer, &pull()).await;
+    loop {
+        match bolt_recv(&mut reader).await {
+            BoltResponse::Record { .. } => {}
+            BoltResponse::Success { .. } => break,
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    // MATCH with id() — same query as resolve_node_ids
+    bolt_send(
+        &mut writer,
+        &run_query("MATCH (n) RETURN id(n) AS nid ORDER BY id(n) ASC"),
+    )
+    .await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    bolt_send(&mut writer, &pull()).await;
+    let mut records = Vec::new();
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { fields } => records.push(fields),
+            BoltResponse::Success { .. } => break,
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    assert_eq!(
+        records.len(),
+        1,
+        "MATCH (n) RETURN id(n) after CREATE must return 1 row, got {}",
+        records.len()
+    );
+    assert!(
+        matches!(records[0].first(), Some(PackStreamValue::Int(_))),
+        "expected integer node ID, got {:?}",
+        records[0]
+    );
+}
