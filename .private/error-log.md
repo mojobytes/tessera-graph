@@ -1,5 +1,11 @@
 # Error Log — TesseraGraph Enterprise
 
+### [2026-04-06] Placeholder types in function signatures cause repeated compile failures
+- **Qué hice mal:** Al implementar helpers para el BFS optimizado, usé tipos placeholder (`&tessera_graph::gql::GqlQuery` donde debería haber sido `NodePattern`, `EdgePattern`, etc.) en firmas de funciones, sabiendo que los tipos reales no estaban re-exportados. Esto causó 3 rondas de errores de compilación.
+- **Causa raíz:** Intenté escribir funciones con firmas que referencian tipos no accesibles desde fuera del crate. Debería haber inlineado la lógica o usado closures desde el principio.
+- **Cómo lo solucioné:** Inliné la lógica de resolución en las funciones que sí pueden acceder a los campos transitivamente, y usé `&[String]` / `&[(String, Literal)]` en vez de intentar pasar el tipo completo.
+- **Regla para evitarlo:** Cuando un tipo no está re-exportado de un crate externo, NUNCA uses placeholder types en firmas. Opciones: (1) inlinear la lógica, (2) extraer los datos como tipos estándar antes de pasar a helpers, (3) usar closures que capturen el contexto.
+
 ### [2026-03-22] Lanzar Criterion benchmarks sin evaluar alternativas — 3h perdidas
 - **Qué hice mal:** Lancé `cargo bench` con Criterion (100 muestras, 3s warmup) en 6 suites en paralelo para medir el impacto del refactor GraphAccess. Tardó 3+ horas sin producir resultados fiables.
 - **Causa raíz:** No evalué las herramientas disponibles antes de actuar. El proyecto enterprise tiene `tessera-bench` diseñado exactamente para benchmarking controlado con JSON output. Además, lanzar benchmarks en paralelo contamina las mediciones por contención de CPU/disco.

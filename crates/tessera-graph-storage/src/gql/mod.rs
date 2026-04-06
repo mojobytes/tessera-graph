@@ -1,16 +1,761 @@
-//! GQL mutation execution — enterprise-only.
+//! GQL execution — enterprise-only.
 //!
-//! Provides `execute_mut` for executing GQL mutation statements (CREATE, DELETE,
-//! SET, MERGE) against any mutable `GraphAccess` implementation. Read-only query
-//! execution remains in the MIT core (`tessera_graph::gql::execute`).
+//! Provides:
+//! - `execute_mut` for executing GQL mutation statements (CREATE, DELETE,
+//!   SET, MERGE) against any mutable `GraphAccess` implementation.
+//! - `execute_query` for read-only queries, with an optimized enterprise
+//!   traversal engine for variable-hop patterns and shortestPath.
+//! - `needs_optimized_execution` to classify queries that benefit from the
+//!   enterprise optimized traversal engine.
+//!
+//! Read-only query execution for non-optimized queries delegates to the MIT
+//! core (`tessera_graph::gql::execute`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use tessera_graph::gql::{
-    CreatePattern, DeleteClause, MergeClause, MutationClause, MutationStatement, SetClause,
-    compile_match_for_mutation, eval_set_value, literal_to_property, literal_vec_to_properties,
+    CreatePattern, DeleteClause, EdgeLength, Expr, GqlQuery, GqlResult, GqlRow, GqlValue,
+    Literal, MergeClause, MutationClause, MutationStatement, SetClause, compile_match_for_mutation,
+    eval_set_value, literal_to_property, literal_vec_to_properties,
 };
-use tessera_graph::{Error, GqlMutationResult, GraphAccess, NodeId, Property};
+use tessera_graph::{Direction, Error, GqlMutationResult, GraphAccess, NodeId, Property};
+
+// ── Query Classifier ────────────────────────────────────────────────────────
+
+/// Returns `true` if the query contains patterns that benefit from the
+/// enterprise optimized execution path:
+///
+/// - Variable-length edge patterns (`-[*1..3]->`)
+/// - `shortestPath(a, b)` function calls in RETURN
+///
+/// Queries that return `false` are delegated to the MIT core engine.
+///
+/// # Limitations
+///
+/// This classifier only inspects:
+/// - Edge patterns in MATCH for variable-length hops
+/// - RETURN items for `shortestPath` function calls
+///
+/// It does NOT inspect WHERE clauses or nested expressions. Queries with
+/// WHERE are always delegated to MIT core by `execute_query`. If
+/// `shortestPath` appears outside of RETURN items, it will not be detected.
+#[must_use]
+pub fn needs_optimized_execution(query: &GqlQuery) -> bool {
+    for pattern in &query.match_clause.patterns {
+        for (edge, _node) in &pattern.hops {
+            if matches!(edge.length, EdgeLength::Variable { .. }) {
+                return true;
+            }
+        }
+    }
+
+    for item in &query.return_clause.items {
+        if has_shortest_path_call(&item.expr) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Returns `true` if any RETURN item is a bare variable reference (`Expr::Var`).
+/// Bare variables cannot be projected correctly by the optimized engine (no
+/// property keys), so these queries must be delegated to the MIT core.
+fn has_bare_var_return(query: &GqlQuery) -> bool {
+    query
+        .return_clause
+        .items
+        .iter()
+        .any(|item| matches!(&item.expr, Expr::Var(_)))
+}
+
+#[cfg(feature = "extended-gql")]
+fn has_shortest_path_call(expr: &Expr) -> bool {
+    matches!(expr, Expr::FunctionCall { name, .. } if name == "shortestpath")
+}
+
+#[cfg(not(feature = "extended-gql"))]
+fn has_shortest_path_call(_expr: &Expr) -> bool {
+    false
+}
+
+// ── Optimized Query Execution ────────────────────────────────────────────────
+
+/// Executes a GQL read-only query, using the enterprise optimized engine for
+/// variable-hop traversals and shortestPath, delegating everything else to the
+/// MIT core engine.
+///
+/// # Errors
+///
+/// Returns errors from the MIT core engine or from the optimized traversal.
+pub fn execute_query<G: GraphAccess + ?Sized>(
+    graph: &G,
+    query: &GqlQuery,
+) -> tessera_graph::Result<GqlResult> {
+    // Delegate to MIT core for non-optimized queries, queries with WHERE
+    // (WHERE requires expression evaluation not available in this crate),
+    // or queries with bare Var in RETURN (Expr::Var produces incomplete
+    // results in the optimized path — no property keys).
+    if !needs_optimized_execution(query)
+        || query.where_clause.is_some()
+        || has_bare_var_return(query)
+    {
+        return tessera_graph::gql::execute(graph, query);
+    }
+
+    // Check if this is a shortestPath query
+    #[cfg(feature = "extended-gql")]
+    {
+        if let Some(result) = try_execute_shortest_path(graph, query)? {
+            return Ok(result);
+        }
+    }
+
+    execute_variable_hop_query(graph, query)
+}
+
+// ── Bidirectional BFS shortestPath ───────────────────────────────────────────
+
+/// Attempts to execute a shortestPath query using bidirectional BFS.
+///
+/// Returns `Ok(Some(result))` if the query contains a shortestPath call,
+/// `Ok(None)` if it doesn't (caller should try other execution paths).
+#[cfg(feature = "extended-gql")]
+#[allow(clippy::unnecessary_wraps)] // Result needed for consistency with execute_query call site
+fn try_execute_shortest_path<G: GraphAccess + ?Sized>(
+    graph: &G,
+    query: &GqlQuery,
+) -> tessera_graph::Result<Option<GqlResult>> {
+    // Find shortestPath(a, b) in RETURN items
+    let sp_item = query.return_clause.items.iter().find(|item| {
+        matches!(&item.expr, Expr::FunctionCall { name, .. } if name == "shortestpath")
+    });
+
+    let Some(sp_item) = sp_item else {
+        return Ok(None);
+    };
+
+    let Expr::FunctionCall { args, .. } = &sp_item.expr else {
+        return Ok(None);
+    };
+
+    // Extract the two variable names from shortestPath(a, b)
+    let (Some(Expr::Var(from_var)), Some(Expr::Var(to_var))) = (args.first(), args.get(1)) else {
+        return Ok(None);
+    };
+
+    // Resolve from/to node IDs by scanning MATCH clause patterns for variable bindings.
+    let from_ids = resolve_var_ids(graph, from_var, query);
+    let to_ids = resolve_var_ids(graph, to_var, query);
+
+    let col_name = sp_item
+        .alias
+        .as_deref()
+        .map_or_else(|| expr_surface_name(&sp_item.expr), String::from);
+
+    if from_ids.is_empty() || to_ids.is_empty() {
+        // No matching nodes — produce a single row with Null
+        let mut row = HashMap::with_capacity(1);
+        row.insert(col_name, GqlValue::Null);
+        return Ok(Some(vec![row]));
+    }
+
+    // Run bidirectional BFS for each (from, to) pair
+    let mut results: GqlResult = Vec::new();
+
+    for &from_id in &from_ids {
+        for &to_id in &to_ids {
+            let path = bidirectional_bfs(graph, from_id, to_id);
+
+            #[allow(clippy::cast_possible_wrap)]
+            let value = path.map_or(GqlValue::Null, |ids| {
+                GqlValue::List(
+                    ids.into_iter()
+                        .map(|nid| GqlValue::Int(nid.as_u64() as i64))
+                        .collect(),
+                )
+            });
+
+            let mut row = HashMap::with_capacity(1);
+            row.insert(col_name.clone(), value);
+            results.push(row);
+        }
+    }
+
+    Ok(Some(results))
+}
+
+/// Resolves a variable name to matching node IDs by scanning MATCH clause
+/// patterns for node bindings with that variable name.
+#[cfg(feature = "extended-gql")]
+fn resolve_var_ids<G: GraphAccess + ?Sized>(
+    graph: &G,
+    var_name: &str,
+    query: &GqlQuery,
+) -> Vec<NodeId> {
+    for pattern in &query.match_clause.patterns {
+        // Check start node
+        if pattern.start.var.as_deref() == Some(var_name) {
+            let labels = &pattern.start.labels;
+            let props = &pattern.start.props;
+            return resolve_by_label_props(graph, labels, props);
+        }
+        // Check hop end nodes
+        for (_ep, np) in &pattern.hops {
+            if np.var.as_deref() == Some(var_name) {
+                return resolve_by_label_props(graph, &np.labels, &np.props);
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Finds node IDs matching a label + inline property constraints.
+#[cfg(feature = "extended-gql")]
+fn resolve_by_label_props<G: GraphAccess + ?Sized>(
+    graph: &G,
+    labels: &[String],
+    props: &[(String, Literal)],
+) -> Vec<NodeId> {
+    let Some(label) = labels.first() else {
+        return Vec::new();
+    };
+    let candidates = graph.nodes_by_label(label);
+    if props.is_empty() {
+        return candidates;
+    }
+    let prop_filters: Vec<(String, Property)> = props
+        .iter()
+        .filter_map(|(k, v)| literal_to_property(v).map(|p| (k.clone(), p)))
+        .collect();
+    candidates
+        .into_iter()
+        .filter(|&id| {
+            let Ok(node) = graph.node(id) else { return false };
+            prop_filters.iter().all(|(key, expected)| {
+                node.properties().get(key).is_some_and(|actual| actual == expected)
+            })
+        })
+        .collect()
+}
+
+/// Bidirectional BFS: expands forward from `from` and backward from `to`,
+/// alternating the smaller frontier. Returns the shortest path as a list
+/// of node IDs (including endpoints), or None if unreachable.
+fn bidirectional_bfs<G: GraphAccess + ?Sized>(
+    graph: &G,
+    from: NodeId,
+    to: NodeId,
+) -> Option<Vec<NodeId>> {
+    if from == to {
+        return Some(vec![from]);
+    }
+
+    // Forward: from → to (outgoing edges)
+    let mut fwd_visited: HashMap<NodeId, Option<NodeId>> = HashMap::new(); // node → parent
+    let mut fwd_frontier: Vec<NodeId> = vec![from];
+    fwd_visited.insert(from, None);
+
+    // Backward: to → from (incoming edges)
+    let mut bwd_visited: HashMap<NodeId, Option<NodeId>> = HashMap::new();
+    let mut bwd_frontier: Vec<NodeId> = vec![to];
+    bwd_visited.insert(to, None);
+
+    loop {
+        if fwd_frontier.is_empty() && bwd_frontier.is_empty() {
+            return None; // Unreachable
+        }
+
+        // Expand the smaller frontier, accumulating all meeting candidates
+        // from the complete layer before selecting the optimal one.
+        let mut meeting_candidate: Option<NodeId> = None;
+
+        #[allow(clippy::branches_sharing_code)] // forward/backward are distinct despite shared init
+        if !fwd_frontier.is_empty()
+            && (bwd_frontier.is_empty() || fwd_frontier.len() <= bwd_frontier.len())
+        {
+            // Expand forward — complete the entire layer
+            let mut next_frontier = Vec::new();
+            for &node in &fwd_frontier {
+                let Ok(edges) = graph.outgoing_edges(node) else {
+                    continue;
+                };
+                for edge in edges {
+                    let neighbor = edge.target();
+                    if fwd_visited.contains_key(&neighbor) {
+                        continue;
+                    }
+                    fwd_visited.insert(neighbor, Some(node));
+
+                    if bwd_visited.contains_key(&neighbor) {
+                        // Accumulate candidate — don't return yet
+                        meeting_candidate = Some(neighbor);
+                    } else {
+                        next_frontier.push(neighbor);
+                    }
+                }
+            }
+            fwd_frontier = next_frontier;
+        } else {
+            // Expand backward — complete the entire layer
+            let mut next_frontier = Vec::new();
+            for &node in &bwd_frontier {
+                let Ok(edges) = graph.incoming_edges(node) else {
+                    continue;
+                };
+                for edge in edges {
+                    let neighbor = edge.source();
+                    if bwd_visited.contains_key(&neighbor) {
+                        continue;
+                    }
+                    bwd_visited.insert(neighbor, Some(node));
+
+                    if fwd_visited.contains_key(&neighbor) {
+                        meeting_candidate = Some(neighbor);
+                    } else {
+                        next_frontier.push(neighbor);
+                    }
+                }
+            }
+            bwd_frontier = next_frontier;
+        }
+
+        // After completing the layer, if any meeting point was found, reconstruct.
+        // All candidates in the same BFS layer have the same total depth, so any
+        // candidate produces an optimal path.
+        if let Some(meeting) = meeting_candidate {
+            return Some(reconstruct_path(&fwd_visited, &bwd_visited, meeting));
+        }
+    }
+}
+
+/// Reconstructs the shortest path from two parent maps meeting at `meeting`.
+fn reconstruct_path(
+    fwd_parents: &HashMap<NodeId, Option<NodeId>>,
+    bwd_parents: &HashMap<NodeId, Option<NodeId>>,
+    meeting: NodeId,
+) -> Vec<NodeId> {
+    // Build forward part: from → meeting
+    let mut fwd_path = Vec::new();
+    let mut current = meeting;
+    loop {
+        fwd_path.push(current);
+        match fwd_parents.get(&current) {
+            Some(Some(parent)) => current = *parent,
+            _ => break,
+        }
+    }
+    fwd_path.reverse();
+
+    // Build backward part: meeting → to
+    current = meeting;
+    while let Some(Some(child)) = bwd_parents.get(&current) {
+        current = *child;
+        fwd_path.push(current);
+    }
+
+    fwd_path
+}
+
+// ── Variable-hop Optimized Execution ────────────────────────────────────────
+
+/// Optimized variable-hop BFS execution.
+///
+/// Instead of cloning full `Node` / `HashMap` per visited node (MIT core),
+/// this implementation:
+/// - Tracks `NodeId` only during BFS
+/// - Builds a `HashSet<NodeId>` for O(1) end-label membership check
+/// - Only fetches `graph.node(id)` when emitting a result that passes filters
+/// - Projects RETURN items directly into `GqlRow`
+#[allow(clippy::too_many_lines)]
+fn execute_variable_hop_query<G: GraphAccess + ?Sized>(
+    graph: &G,
+    query: &GqlQuery,
+) -> tessera_graph::Result<GqlResult> {
+    let pattern = &query.match_clause.patterns[0];
+
+    if pattern.hops.is_empty() {
+        return tessera_graph::gql::execute(graph, query);
+    }
+
+    // Find the variable-hop edge. The caller (execute_query) guarantees at
+    // least one exists via needs_optimized_execution, but we delegate
+    // gracefully instead of panicking if the invariant is somehow violated.
+    let Some(hop_idx) = pattern
+        .hops
+        .iter()
+        .position(|(ep, _)| matches!(ep.length, EdgeLength::Variable { .. }))
+    else {
+        return tessera_graph::gql::execute(graph, query);
+    };
+
+    // If there are hops before the variable-hop, delegate to MIT core
+    // (complex multi-hop + variable-hop not yet supported in optimized path).
+    if hop_idx > 0 {
+        return tessera_graph::gql::execute(graph, query);
+    }
+
+    let (ep, end_np) = &pattern.hops[hop_idx];
+    let start_np = &pattern.start;
+
+    let (min, max) = match ep.length {
+        EdgeLength::Variable { min, max } => (min.unwrap_or(0), max.unwrap_or(u32::MAX)),
+        EdgeLength::Fixed => unreachable!(),
+    };
+
+    // Resolve start nodes: label filter, then property filter.
+    #[allow(clippy::option_if_let_else)] // complex logic is clearer as if-let
+    let start_ids: Vec<NodeId> = if let Some(label) = start_np.labels.first() {
+        let candidates = graph.nodes_by_label(label);
+        if start_np.props.is_empty() {
+            candidates
+        } else {
+            let prop_filters: Vec<(String, Property)> = start_np
+                .props
+                .iter()
+                .filter_map(|(k, v)| literal_to_property(v).map(|p| (k.clone(), p)))
+                .collect();
+            candidates
+                .into_iter()
+                .filter(|&id| {
+                    let Ok(node) = graph.node(id) else { return false };
+                    prop_filters.iter().all(|(key, expected)| {
+                        node.properties().get(key).is_some_and(|actual| actual == expected)
+                    })
+                })
+                .collect()
+        }
+    } else {
+        // No label — match all nodes (unusual but valid).
+        // KNOWN LIMITATION: assumes IDs are in range 0..node_count(). If the
+        // graph has deleted nodes (sparse IDs), node_exists() guards against
+        // invalid IDs but nodes with ID >= node_count() will be missed.
+        // GraphAccess does not expose an all-node-IDs iterator.
+        (0..graph.node_count())
+            .filter_map(|i| {
+                #[allow(clippy::cast_possible_truncation)]
+                let id = NodeId::from_raw(i as u64);
+                if graph.node_exists(id) { Some(id) } else { None }
+            })
+            .collect()
+    };
+
+    // Build label filter set for O(1) end-node label check.
+    let label_filter: Option<HashSet<NodeId>> = end_np
+        .labels
+        .first()
+        .map(|label| graph.nodes_by_label(label).into_iter().collect());
+
+    // Build property filter from end NodePattern inline props.
+    let end_props: Vec<(String, Property)> = end_np
+        .props
+        .iter()
+        .filter_map(|(k, v)| literal_to_property(v).map(|p| (k.clone(), p)))
+        .collect();
+
+    // Build a variable map: variable name → role (start or end) so we can
+    // resolve RETURN expressions.
+    let start_var = start_np.var.as_deref();
+    let end_var = end_np.var.as_deref();
+
+    // Convert AstDirection → tessera_graph::Direction for BFS traversal.
+    // AstDirection is not re-exported from MIT core but has the same variants
+    // as Direction (Outgoing, Incoming, Both). We convert via Debug formatting.
+    let direction = ast_direction_to_direction(&ep.direction);
+
+    let mut results: GqlResult = Vec::new();
+
+    for &start_id in &start_ids {
+        // BFS tracking NodeId + depth only
+        let mut queue: VecDeque<(NodeId, u32)> = VecDeque::new();
+        let mut visited = HashSet::new();
+        visited.insert(start_id);
+
+        // Emit start node at depth 0 when min == 0
+        if min == 0 && node_passes_filter(start_id, label_filter.as_ref(), &end_props, graph) {
+            let row = project_bfs_row(graph, start_id, start_id, start_var, end_var, query)?;
+            results.push(row);
+        }
+
+        // Seed BFS
+        for edge in edges_for_direction(graph, start_id, direction)? {
+            if let Some(next_id) = edge_neighbor(&edge, start_id, direction) {
+                if visited.insert(next_id) {
+                    queue.push_back((next_id, 1));
+                }
+            }
+        }
+
+        while let Some((node_id, depth)) = queue.pop_front() {
+            if depth > max {
+                continue;
+            }
+
+            // Emit if within [min..=max] and passes end-node filters
+            if depth >= min && node_passes_filter(node_id, label_filter.as_ref(), &end_props, graph) {
+                let row =
+                    project_bfs_row(graph, start_id, node_id, start_var, end_var, query)?;
+                results.push(row);
+            }
+
+            // Continue BFS if not at max depth
+            if depth < max {
+                if let Ok(next_edges) = edges_for_direction(graph, node_id, direction) {
+                    for edge in next_edges {
+                        if let Some(next_id) = edge_neighbor(&edge, node_id, direction) {
+                            if visited.insert(next_id) {
+                                queue.push_back((next_id, depth + 1));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+// ── Optimized traversal helpers ─────────────────────────────────────────────
+
+/// Converts an `AstDirection` (not re-exported from MIT core) into the public
+/// `tessera_graph::Direction` enum by matching its Debug representation.
+///
+/// Both enums have identical variants (Outgoing, Incoming, Both).
+fn ast_direction_to_direction(ast_dir: &impl std::fmt::Debug) -> Direction {
+    let s = format!("{ast_dir:?}");
+    if s.contains("Incoming") {
+        Direction::Incoming
+    } else if s.contains("Both") {
+        Direction::Both
+    } else {
+        debug_assert!(
+            s.contains("Outgoing"),
+            "ast_direction_to_direction: unknown AstDirection variant '{s}'. \
+             Update this function if MIT core adds new Direction variants."
+        );
+        Direction::Outgoing
+    }
+}
+
+/// Returns edges from a node following the given direction.
+fn edges_for_direction<G: GraphAccess + ?Sized>(
+    graph: &G,
+    node_id: NodeId,
+    direction: Direction,
+) -> tessera_graph::Result<Vec<tessera_graph::Edge>> {
+    match direction {
+        Direction::Outgoing => graph.outgoing_edges(node_id),
+        Direction::Incoming => graph.incoming_edges(node_id),
+        Direction::Both => {
+            let mut edges = graph.outgoing_edges(node_id)?;
+            let incoming = graph.incoming_edges(node_id)?;
+            // Self-loops appear in both outgoing and incoming; skip duplicates.
+            for edge in incoming {
+                if edge.source() != edge.target() {
+                    edges.push(edge);
+                }
+            }
+            Ok(edges)
+        }
+    }
+}
+
+/// Returns the neighbor node for an edge given the traversal direction.
+fn edge_neighbor(
+    edge: &tessera_graph::Edge,
+    current: NodeId,
+    direction: Direction,
+) -> Option<NodeId> {
+    match direction {
+        Direction::Outgoing => {
+            if edge.source() == current {
+                Some(edge.target())
+            } else {
+                None
+            }
+        }
+        Direction::Incoming => {
+            if edge.target() == current {
+                Some(edge.source())
+            } else {
+                None
+            }
+        }
+        Direction::Both => {
+            if edge.source() == current {
+                Some(edge.target())
+            } else {
+                Some(edge.source())
+            }
+        }
+    }
+}
+
+/// Converts a graph `Property` into a runtime `GqlValue`.
+fn gql_value_from_property(p: &Property) -> GqlValue {
+    match p {
+        Property::String(s) => GqlValue::Str(s.clone()),
+        Property::I64(v) => GqlValue::Int(*v),
+        Property::F64(v) => GqlValue::Float(*v),
+        Property::Bool(b) => GqlValue::Bool(*b),
+        Property::Bytes(_) => GqlValue::Null,
+    }
+}
+
+/// Checks if a node passes the end-node label and property filters without
+/// fetching the full Node (uses the precomputed label `HashSet` for O(1) check).
+fn node_passes_filter<G: GraphAccess + ?Sized>(
+    node_id: NodeId,
+    label_filter: Option<&HashSet<NodeId>>,
+    end_props: &[(String, Property)],
+    graph: &G,
+) -> bool {
+    // Label check via precomputed set
+    if let Some(allowed) = label_filter {
+        if !allowed.contains(&node_id) {
+            return false;
+        }
+    }
+
+    // Property check — only fetch node if we have props to check.
+    // graph.node() errors are treated as "does not pass filter" (fail-safe:
+    // exclude the node from results rather than propagating the error).
+    if !end_props.is_empty() {
+        let Ok(node) = graph.node(node_id) else {
+            return false;
+        };
+        for (key, expected) in end_props {
+            match node.properties().get(key) {
+                Some(actual) if actual == expected => {}
+                _ => return false,
+            }
+        }
+    }
+
+    true
+}
+
+/// Projects a RETURN row from BFS result, resolving variable references
+/// to the start or end node.
+fn project_bfs_row<G: GraphAccess + ?Sized>(
+    graph: &G,
+    start_id: NodeId,
+    end_id: NodeId,
+    start_var: Option<&str>,
+    end_var: Option<&str>,
+    query: &GqlQuery,
+) -> tessera_graph::Result<GqlRow> {
+    let mut row = HashMap::with_capacity(query.return_clause.items.len());
+
+    for item in &query.return_clause.items {
+        let col_name = item
+            .alias
+            .as_deref()
+            .map_or_else(|| expr_surface_name(&item.expr), String::from);
+
+        let value = eval_bfs_expr(&item.expr, graph, start_id, end_id, start_var, end_var)?;
+        row.insert(col_name, value);
+    }
+
+    Ok(row)
+}
+
+/// Evaluates a RETURN expression against BFS-resolved nodes.
+///
+/// Supports `PropAccess`, `Var`, and `Literal`. For anything else, returns Null.
+fn eval_bfs_expr<G: GraphAccess + ?Sized>(
+    expr: &Expr,
+    graph: &G,
+    start_id: NodeId,
+    end_id: NodeId,
+    start_var: Option<&str>,
+    end_var: Option<&str>,
+) -> tessera_graph::Result<GqlValue> {
+    match expr {
+        Expr::PropAccess { var, prop } => {
+            let node_id = resolve_var_to_node_id(var, start_var, start_id, end_var, end_id);
+            match node_id {
+                Some(id) => {
+                    let node = graph.node(id)?;
+                    Ok(node
+                        .properties()
+                        .get(prop)
+                        .map_or(GqlValue::Null, gql_value_from_property))
+                }
+                None => Ok(GqlValue::Null),
+            }
+        }
+        Expr::Var(var) => {
+            // Return the variable name as a map of all properties
+            let node_id = resolve_var_to_node_id(var, start_var, start_id, end_var, end_id);
+            match node_id {
+                Some(id) => {
+                    let node = graph.node(id)?;
+                    let props: Vec<GqlValue> = node
+                        .properties()
+                        .values()
+                        .map(gql_value_from_property)
+                        .collect();
+                    // For a bare variable, return all properties as a list
+                    // (MIT core returns the full node as a map — we approximate)
+                    Ok(GqlValue::List(props))
+                }
+                None => Ok(GqlValue::Null),
+            }
+        }
+        Expr::Literal(lit) => Ok(compile_literal(lit)),
+        _ => Ok(GqlValue::Null),
+    }
+}
+
+/// Resolves a variable name to a `NodeId` based on the start/end variable bindings.
+fn resolve_var_to_node_id(
+    var: &str,
+    start_var: Option<&str>,
+    start_id: NodeId,
+    end_var: Option<&str>,
+    end_id: NodeId,
+) -> Option<NodeId> {
+    if start_var == Some(var) {
+        Some(start_id)
+    } else if end_var == Some(var) {
+        Some(end_id)
+    } else {
+        None
+    }
+}
+
+/// Converts an AST `Literal` into a `GqlValue`.
+fn compile_literal(lit: &Literal) -> GqlValue {
+    match lit {
+        Literal::Int(v) => GqlValue::Int(*v),
+        Literal::Float(v) => GqlValue::Float(*v),
+        Literal::Str(s) => GqlValue::Str(s.clone()),
+        Literal::Bool(b) => GqlValue::Bool(*b),
+        Literal::Null => GqlValue::Null,
+        #[cfg(feature = "extended-gql")]
+        Literal::List(items) => GqlValue::List(items.iter().map(compile_literal).collect()),
+    }
+}
+
+/// Produces a display name for an expression (column name when no AS alias).
+fn expr_surface_name(expr: &Expr) -> String {
+    match expr {
+        Expr::Literal(Literal::Int(v)) => v.to_string(),
+        Expr::Literal(Literal::Str(s)) => format!("'{s}'"),
+        Expr::Var(v) => v.clone(),
+        Expr::PropAccess { var, prop } => format!("{var}.{prop}"),
+        #[cfg(feature = "extended-gql")]
+        Expr::FunctionCall { name, args } => {
+            let arg_strs: Vec<String> = args.iter().map(expr_surface_name).collect();
+            format!("{}({})", name, arg_strs.join(", "))
+        }
+        _ => "?".to_string(),
+    }
+}
+
+// ── Mutation Execution ──────────────────────────────────────────────────────
 
 /// Executes a GQL mutation statement against a mutable graph.
 ///

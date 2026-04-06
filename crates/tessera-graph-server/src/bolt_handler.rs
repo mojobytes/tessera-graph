@@ -488,7 +488,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                         ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
                     })?;
                     let secure = SecureGraphRef::new(&*graph, clearance);
-                    let result = tessera_graph::gql::execute(&secure, q)
+                    let result = tessera_graph_storage::gql::execute_query(&secure, q)
                         .map(|r| gql_result_to_packstream(&r))
                         .map_err(|e| e.to_string());
                     drop(secure);

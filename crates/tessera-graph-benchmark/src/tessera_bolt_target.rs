@@ -169,7 +169,7 @@ impl TesseraBoltTarget {
         let user =
             std::env::var("TESSERA_BOLT_USER").unwrap_or_else(|_| "admin".into());
         let pass =
-            std::env::var("TESSERA_BOLT_PASS").unwrap_or_else(|_| "Admin.123".into());
+            std::env::var("TESSERA_BOLT_PASS").unwrap_or_else(|_| "Admin@.123".into());
         Self::connect(&host, port, &user, &pass)
     }
 
@@ -225,15 +225,30 @@ impl BenchmarkTarget for TesseraBoltTarget {
     fn create_edge(
         &mut self,
         label: &str,
-        _from: NodeHandle,
-        _to: NodeHandle,
+        from: NodeHandle,
+        to: NodeHandle,
         _props: Properties,
     ) -> Result<EdgeHandle> {
-        // TesseraGraph CREATE doesn't return node IDs in the mutation response,
-        // so we can't target specific nodes. For write benchmarks we just measure
-        // the CREATE round-trip cost.
+        // Lazy-resolve node IDs on first edge creation: CREATE mutations don't
+        // return IDs, so we fetch them in bulk via MATCH after all nodes exist.
+        if !self.node_ids.borrow().contains_key(&from.0) {
+            self.resolve_node_ids()?;
+        }
+
+        let from_nid = *self
+            .node_ids
+            .borrow()
+            .get(&from.0)
+            .ok_or_else(|| BenchmarkError::external("unknown source node handle in create_edge"))?;
+        let to_nid = *self
+            .node_ids
+            .borrow()
+            .get(&to.0)
+            .ok_or_else(|| BenchmarkError::external("unknown target node handle in create_edge"))?;
+
         let query = format!(
-            "MATCH (a:N), (b:N) WHERE id(a) <> id(b) \
+            "MATCH (a) WHERE id(a) = {from_nid} \
+             MATCH (b) WHERE id(b) = {to_nid} \
              CREATE (a)-[:{label}]->(b)"
         );
         self.run_query(&query)?;

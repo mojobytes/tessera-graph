@@ -17,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version     = "0.2.1"
+version     = "0.2.3"
 edition     = "2024"
 authors     = ["BelowZero Security OU <info@belowzerosecurity.io>"]
 license     = "LicenseRef-Proprietary"
@@ -27,7 +27,7 @@ rust-version = "1.85"
 tessera-graph              = { path = "../tessera-graph/crates/tessera-graph", features = ["extended-gql"] }
 tessera-graph-protocol     = { path = "../tessera-graph/crates/tessera-graph-protocol" }
 tessera-graph-auth         = { path = "crates/tessera-graph-auth" }
-tessera-graph-storage      = { path = "crates/tessera-graph-storage" }
+tessera-graph-storage      = { path = "crates/tessera-graph-storage", features = ["extended-gql"] }
 tessera-graph-import       = { path = "crates/tessera-graph-import" }
 tessera-graph-streaming    = { path = "crates/tessera-graph-streaming" }
 tessera-graph-monitor      = { path = "crates/tessera-graph-monitor" }

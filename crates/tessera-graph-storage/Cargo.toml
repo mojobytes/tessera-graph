@@ -15,6 +15,10 @@ tessera-graph-cypher = { workspace = true }
 thiserror      = { workspace = true }
 crc32fast      = { workspace = true }
 
+[features]
+default = ["extended-gql"]
+extended-gql = ["tessera-graph/extended-gql"]
+
 [dev-dependencies]
 tempfile = "3"
 

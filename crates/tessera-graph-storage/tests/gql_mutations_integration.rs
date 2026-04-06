@@ -400,7 +400,9 @@ fn parse_statement_rejects_multi_label_node() {
 }
 
 #[test]
-fn parse_statement_rejects_variable_length_path() {
-    let err = gql::parse_statement("MATCH (a)-[*]->(b) RETURN a").unwrap_err();
-    assert!(matches!(err, tessera_graph::Error::GqlUnsupported(_)));
+fn parse_statement_accepts_variable_length_path() {
+    // With extended-gql enabled (default in enterprise), variable-length paths
+    // are parsed successfully and handled by the optimized traversal engine.
+    let stmt = gql::parse_statement("MATCH (a)-[*]->(b) RETURN a").unwrap();
+    assert!(matches!(stmt, gql::GqlStatement::Query(_)));
 }
