@@ -20,6 +20,9 @@ use tessera_graph::gql::{
 };
 use tessera_graph::{Direction, Error, GqlMutationResult, GraphAccess, NodeId, Property};
 
+use crate::cache::NeighborCache;
+use crate::shared_cache::{ClearanceKey, SharedNeighborCache};
+
 // ── Query Classifier ────────────────────────────────────────────────────────
 
 /// Returns `true` if the query contains patterns that benefit from the
@@ -111,7 +114,80 @@ pub fn execute_query<G: GraphAccess + ?Sized>(
         }
     }
 
-    execute_variable_hop_query(graph, query)
+    execute_variable_hop_query(graph, query, &|n, d| neighbor_ids_uncached(graph, n, d))
+}
+
+/// Executes a GQL read-only query using the enterprise `NeighborCache`.
+///
+/// Same semantics as `execute_query` but BFS/DFS neighbor resolution uses
+/// the cache instead of full `Edge` deserialization.
+///
+/// # Errors
+///
+/// Returns errors from the MIT core engine or from the optimized traversal.
+pub fn execute_query_cached<G: GraphAccess>(
+    graph: &G,
+    cache: &NeighborCache<G>,
+    query: &GqlQuery,
+) -> tessera_graph::Result<GqlResult> {
+    if !needs_optimized_execution(query)
+        || query.where_clause.is_some()
+        || has_bare_var_return(query)
+    {
+        return tessera_graph::gql::execute(graph, query);
+    }
+
+    #[cfg(feature = "extended-gql")]
+    {
+        if let Some(result) = try_execute_shortest_path_cached(graph, cache, query)? {
+            return Ok(result);
+        }
+    }
+
+    execute_variable_hop_query(
+        graph,
+        query,
+        &|n, d| neighbor_ids_for_direction(graph, Some(cache), n, d),
+    )
+}
+
+/// Executes a GQL read-only query using the thread-safe `SharedNeighborCache`.
+///
+/// LBAC-safe: the `clearance` is used to build a `ClearanceKey` that scopes
+/// cache entries. The `graph` parameter must be a `SecureGraphRef` (or
+/// equivalent LBAC-filtered `GraphAccess` implementation) so that neighbor
+/// lists are populated with LBAC-filtered results.
+///
+/// # Errors
+///
+/// Returns errors from the MIT core engine or from the optimized traversal.
+pub fn execute_query_with_shared_cache<G: GraphAccess + ?Sized>(
+    graph: &G,
+    cache: &SharedNeighborCache,
+    clearance: &tessera_graph_auth::lbac::Clearance,
+    query: &GqlQuery,
+) -> tessera_graph::Result<GqlResult> {
+    if !needs_optimized_execution(query)
+        || query.where_clause.is_some()
+        || has_bare_var_return(query)
+    {
+        return tessera_graph::gql::execute(graph, query);
+    }
+
+    let ck = ClearanceKey::from(clearance);
+
+    #[cfg(feature = "extended-gql")]
+    {
+        if let Some(result) = try_execute_shortest_path_shared(graph, cache, &ck, query)? {
+            return Ok(result);
+        }
+    }
+
+    execute_variable_hop_query(
+        graph,
+        query,
+        &|n, d| shared_neighbor_ids_for_direction(graph, cache, &ck, n, d),
+    )
 }
 
 // ── Bidirectional BFS shortestPath ───────────────────────────────────────────
@@ -165,7 +241,148 @@ fn try_execute_shortest_path<G: GraphAccess + ?Sized>(
 
     for &from_id in &from_ids {
         for &to_id in &to_ids {
-            let path = bidirectional_bfs(graph, from_id, to_id);
+            let path = bidirectional_bfs(
+                from_id,
+                to_id,
+                &|n| Ok(graph.outgoing_edges(n)?.iter().map(tessera_graph::Edge::target).collect()),
+                &|n| Ok(graph.incoming_edges(n)?.iter().map(tessera_graph::Edge::source).collect()),
+            );
+
+            #[allow(clippy::cast_possible_wrap)]
+            let value = path.map_or(GqlValue::Null, |ids| {
+                GqlValue::List(
+                    ids.into_iter()
+                        .map(|nid| GqlValue::Int(nid.as_u64() as i64))
+                        .collect(),
+                )
+            });
+
+            let mut row = HashMap::with_capacity(1);
+            row.insert(col_name.clone(), value);
+            results.push(row);
+        }
+    }
+
+    Ok(Some(results))
+}
+
+/// Cached variant of `try_execute_shortest_path` — uses `NeighborCache` for
+/// BFS neighbor resolution instead of full `Edge` deserialization.
+#[cfg(feature = "extended-gql")]
+#[allow(clippy::unnecessary_wraps)]
+fn try_execute_shortest_path_cached<G: GraphAccess>(
+    graph: &G,
+    cache: &NeighborCache<G>,
+    query: &GqlQuery,
+) -> tessera_graph::Result<Option<GqlResult>> {
+    let sp_item = query.return_clause.items.iter().find(|item| {
+        matches!(&item.expr, Expr::FunctionCall { name, .. } if name == "shortestpath")
+    });
+
+    let Some(sp_item) = sp_item else {
+        return Ok(None);
+    };
+
+    let Expr::FunctionCall { args, .. } = &sp_item.expr else {
+        return Ok(None);
+    };
+
+    let (Some(Expr::Var(from_var)), Some(Expr::Var(to_var))) = (args.first(), args.get(1)) else {
+        return Ok(None);
+    };
+
+    let from_ids = resolve_var_ids(graph, from_var, query);
+    let to_ids = resolve_var_ids(graph, to_var, query);
+
+    let col_name = sp_item
+        .alias
+        .as_deref()
+        .map_or_else(|| expr_surface_name(&sp_item.expr), String::from);
+
+    if from_ids.is_empty() || to_ids.is_empty() {
+        let mut row = HashMap::with_capacity(1);
+        row.insert(col_name, GqlValue::Null);
+        return Ok(Some(vec![row]));
+    }
+
+    let mut results: GqlResult = Vec::new();
+
+    for &from_id in &from_ids {
+        for &to_id in &to_ids {
+            let path = bidirectional_bfs(
+                from_id,
+                to_id,
+                &|n| cache.outgoing_neighbor_ids(n),
+                &|n| cache.incoming_neighbor_ids(n),
+            );
+
+            #[allow(clippy::cast_possible_wrap)]
+            let value = path.map_or(GqlValue::Null, |ids| {
+                GqlValue::List(
+                    ids.into_iter()
+                        .map(|nid| GqlValue::Int(nid.as_u64() as i64))
+                        .collect(),
+                )
+            });
+
+            let mut row = HashMap::with_capacity(1);
+            row.insert(col_name.clone(), value);
+            results.push(row);
+        }
+    }
+
+    Ok(Some(results))
+}
+
+/// `SharedNeighborCache` variant of shortest path execution.
+#[cfg(feature = "extended-gql")]
+#[allow(clippy::unnecessary_wraps)]
+fn try_execute_shortest_path_shared<G: GraphAccess + ?Sized>(
+    graph: &G,
+    cache: &SharedNeighborCache,
+    ck: &ClearanceKey,
+    query: &GqlQuery,
+) -> tessera_graph::Result<Option<GqlResult>> {
+    let sp_item = query.return_clause.items.iter().find(|item| {
+        matches!(&item.expr, Expr::FunctionCall { name, .. } if name == "shortestpath")
+    });
+
+    let Some(sp_item) = sp_item else {
+        return Ok(None);
+    };
+
+    let Expr::FunctionCall { args, .. } = &sp_item.expr else {
+        return Ok(None);
+    };
+
+    let (Some(Expr::Var(from_var)), Some(Expr::Var(to_var))) = (args.first(), args.get(1)) else {
+        return Ok(None);
+    };
+
+    let from_ids = resolve_var_ids(graph, from_var, query);
+    let to_ids = resolve_var_ids(graph, to_var, query);
+
+    let col_name = sp_item
+        .alias
+        .as_deref()
+        .map_or_else(|| expr_surface_name(&sp_item.expr), String::from);
+
+    if from_ids.is_empty() || to_ids.is_empty() {
+        let mut row = HashMap::with_capacity(1);
+        row.insert(col_name, GqlValue::Null);
+        return Ok(Some(vec![row]));
+    }
+
+    let mut results: GqlResult = Vec::new();
+
+    for &from_id in &from_ids {
+        for &to_id in &to_ids {
+            let path = bidirectional_bfs(
+                from_id,
+                to_id,
+                &|n| cache.outgoing_neighbor_ids(graph, n, ck),
+                &|n| cache.incoming_neighbor_ids(graph, n, ck),
+            );
 
             #[allow(clippy::cast_possible_wrap)]
             let value = path.map_or(GqlValue::Null, |ids| {
@@ -242,10 +459,15 @@ fn resolve_by_label_props<G: GraphAccess + ?Sized>(
 /// Bidirectional BFS: expands forward from `from` and backward from `to`,
 /// alternating the smaller frontier. Returns the shortest path as a list
 /// of node IDs (including endpoints), or None if unreachable.
-fn bidirectional_bfs<G: GraphAccess + ?Sized>(
-    graph: &G,
+///
+/// Neighbor resolution is parameterized via closures so callers can supply
+/// either a `NeighborCache` (fast, cached `Vec<NodeId>`) or fall back to
+/// full `Edge` deserialization via `GraphAccess`.
+fn bidirectional_bfs(
     from: NodeId,
     to: NodeId,
+    outgoing_fn: &dyn Fn(NodeId) -> tessera_graph::Result<Vec<NodeId>>,
+    incoming_fn: &dyn Fn(NodeId) -> tessera_graph::Result<Vec<NodeId>>,
 ) -> Option<Vec<NodeId>> {
     if from == to {
         return Some(vec![from]);
@@ -277,11 +499,10 @@ fn bidirectional_bfs<G: GraphAccess + ?Sized>(
             // Expand forward — complete the entire layer
             let mut next_frontier = Vec::new();
             for &node in &fwd_frontier {
-                let Ok(edges) = graph.outgoing_edges(node) else {
+                let Ok(neighbors) = outgoing_fn(node) else {
                     continue;
                 };
-                for edge in edges {
-                    let neighbor = edge.target();
+                for neighbor in neighbors {
                     if fwd_visited.contains_key(&neighbor) {
                         continue;
                     }
@@ -300,11 +521,10 @@ fn bidirectional_bfs<G: GraphAccess + ?Sized>(
             // Expand backward — complete the entire layer
             let mut next_frontier = Vec::new();
             for &node in &bwd_frontier {
-                let Ok(edges) = graph.incoming_edges(node) else {
+                let Ok(neighbors) = incoming_fn(node) else {
                     continue;
                 };
-                for edge in edges {
-                    let neighbor = edge.source();
+                for neighbor in neighbors {
                     if bwd_visited.contains_key(&neighbor) {
                         continue;
                     }
@@ -371,6 +591,7 @@ fn reconstruct_path(
 fn execute_variable_hop_query<G: GraphAccess + ?Sized>(
     graph: &G,
     query: &GqlQuery,
+    resolve_neighbors: &dyn Fn(NodeId, Direction) -> tessera_graph::Result<Vec<NodeId>>,
 ) -> tessera_graph::Result<GqlResult> {
     let pattern = &query.match_clause.patterns[0];
 
@@ -478,11 +699,9 @@ fn execute_variable_hop_query<G: GraphAccess + ?Sized>(
         }
 
         // Seed BFS
-        for edge in edges_for_direction(graph, start_id, direction)? {
-            if let Some(next_id) = edge_neighbor(&edge, start_id, direction) {
-                if visited.insert(next_id) {
-                    queue.push_back((next_id, 1));
-                }
+        for next_id in resolve_neighbors(start_id, direction)? {
+            if visited.insert(next_id) {
+                queue.push_back((next_id, 1));
             }
         }
 
@@ -500,12 +719,10 @@ fn execute_variable_hop_query<G: GraphAccess + ?Sized>(
 
             // Continue BFS if not at max depth
             if depth < max {
-                if let Ok(next_edges) = edges_for_direction(graph, node_id, direction) {
-                    for edge in next_edges {
-                        if let Some(next_id) = edge_neighbor(&edge, node_id, direction) {
-                            if visited.insert(next_id) {
-                                queue.push_back((next_id, depth + 1));
-                            }
+                if let Ok(next_ids) = resolve_neighbors(node_id, direction) {
+                    for next_id in next_ids {
+                        if visited.insert(next_id) {
+                            queue.push_back((next_id, depth + 1));
                         }
                     }
                 }
@@ -561,33 +778,94 @@ fn edges_for_direction<G: GraphAccess + ?Sized>(
     }
 }
 
-/// Returns the neighbor node for an edge given the traversal direction.
-fn edge_neighbor(
-    edge: &tessera_graph::Edge,
-    current: NodeId,
+/// Returns neighbor node IDs from a node following the given direction.
+///
+/// Lightweight alternative to `edges_for_direction` — returns `Vec<NodeId>` instead of
+/// `Vec<Edge>`, avoiding full edge deserialization. When a `NeighborCache` is available,
+/// this resolves from the cache with zero page reads and zero heap allocations.
+/// Returns neighbor node IDs from a node following the given direction.
+///
+/// Lightweight alternative to `edges_for_direction` — returns `Vec<NodeId>` instead of
+/// `Vec<Edge>`, avoiding full edge deserialization. When a `NeighborCache` is available,
+/// this resolves from the cache with zero page reads and zero heap allocations.
+fn neighbor_ids_for_direction<G: GraphAccess>(
+    graph: &G,
+    cache: Option<&NeighborCache<G>>,
+    node_id: NodeId,
     direction: Direction,
-) -> Option<NodeId> {
+) -> tessera_graph::Result<Vec<NodeId>> {
+    match (direction, cache) {
+        (Direction::Outgoing, Some(c)) => c.outgoing_neighbor_ids(node_id),
+        (Direction::Incoming, Some(c)) => c.incoming_neighbor_ids(node_id),
+        (Direction::Both, Some(c)) => {
+            let mut ids = c.outgoing_neighbor_ids(node_id)?;
+            let incoming = c.incoming_neighbor_ids(node_id)?;
+            // Skip self-loops (they appear in both outgoing and incoming)
+            for id in incoming {
+                if id != node_id {
+                    ids.push(id);
+                }
+            }
+            Ok(ids)
+        }
+        // Fallback: full edge deserialization
+        (Direction::Outgoing, None) => {
+            Ok(graph.outgoing_edges(node_id)?.iter().map(tessera_graph::Edge::target).collect())
+        }
+        (Direction::Incoming, None) => {
+            Ok(graph.incoming_edges(node_id)?.iter().map(tessera_graph::Edge::source).collect())
+        }
+        (Direction::Both, None) => {
+            let edges = edges_for_direction(graph, node_id, direction)?;
+            Ok(edges.iter().map(|e| {
+                if e.source() == node_id { e.target() } else { e.source() }
+            }).collect())
+        }
+    }
+}
+
+/// Uncached variant of `neighbor_ids_for_direction` for `?Sized` graph types.
+fn neighbor_ids_uncached<G: GraphAccess + ?Sized>(
+    graph: &G,
+    node_id: NodeId,
+    direction: Direction,
+) -> tessera_graph::Result<Vec<NodeId>> {
     match direction {
         Direction::Outgoing => {
-            if edge.source() == current {
-                Some(edge.target())
-            } else {
-                None
-            }
+            Ok(graph.outgoing_edges(node_id)?.iter().map(tessera_graph::Edge::target).collect())
         }
         Direction::Incoming => {
-            if edge.target() == current {
-                Some(edge.source())
-            } else {
-                None
-            }
+            Ok(graph.incoming_edges(node_id)?.iter().map(tessera_graph::Edge::source).collect())
         }
         Direction::Both => {
-            if edge.source() == current {
-                Some(edge.target())
-            } else {
-                Some(edge.source())
+            let edges = edges_for_direction(graph, node_id, direction)?;
+            Ok(edges.iter().map(|e| {
+                if e.source() == node_id { e.target() } else { e.source() }
+            }).collect())
+        }
+    }
+}
+
+/// Resolves neighbor IDs via `SharedNeighborCache` (thread-safe, LBAC-scoped).
+fn shared_neighbor_ids_for_direction<G: GraphAccess + ?Sized>(
+    graph: &G,
+    cache: &SharedNeighborCache,
+    ck: &ClearanceKey,
+    node_id: NodeId,
+    direction: Direction,
+) -> tessera_graph::Result<Vec<NodeId>> {
+    match direction {
+        Direction::Outgoing => cache.outgoing_neighbor_ids(graph, node_id, ck),
+        Direction::Incoming => cache.incoming_neighbor_ids(graph, node_id, ck),
+        Direction::Both => {
+            let mut ids = cache.outgoing_neighbor_ids(graph, node_id, ck)?;
+            let incoming = cache.incoming_neighbor_ids(graph, node_id, ck)?;
+            for id in incoming {
+                if id != node_id {
+                    ids.push(id);
+                }
             }
+            Ok(ids)
         }
     }
 }

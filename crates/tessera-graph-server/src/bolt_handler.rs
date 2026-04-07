@@ -66,6 +66,8 @@ pub struct BoltConnectionHandler<S: AsyncRead + AsyncWrite + Unpin + Send + Sync
     ctx: Arc<ServerContext>,
     /// The graph instance selected during HELLO (via [`TenantRegistry`][tessera_graph_tenant::TenantRegistry]).
     graph: Option<Arc<RwLock<Graph>>>,
+    /// LBAC-scoped neighbor cache for accelerated traversal queries.
+    neighbor_cache: Option<Arc<tessera_graph_storage::shared_cache::SharedNeighborCache>>,
     session_token: Option<SessionToken>,
     /// True after a FAILURE; commands other than RESET/GOODBYE are ignored.
     failed: bool,
@@ -116,6 +118,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
             writer: BoltChunkedWriter::new(write_half),
             ctx,
             graph: None,
+            neighbor_cache: None,
             session_token: None,
             failed: false,
             pending_result: None,
@@ -206,6 +209,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                 self.pending_result = None;
                 self.session_token = None;
                 self.graph = None;
+                self.neighbor_cache = None;
                 self.handle_hello(auth).await?;
             }
             BoltRequest::Run {
@@ -292,6 +296,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         };
 
         self.graph = Some(graph);
+        self.neighbor_cache = Some(self.ctx.neighbor_cache(&addr));
         self.session_token = Some(token);
         self.ctx
             .metrics()
@@ -487,10 +492,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                     let graph = graph_arc.read().map_err(|_| {
                         ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
                     })?;
-                    let secure = SecureGraphRef::new(&*graph, clearance);
-                    let result = tessera_graph_storage::gql::execute_query(&secure, q)
-                        .map(|r| gql_result_to_packstream(&r))
-                        .map_err(|e| e.to_string());
+                    let secure = SecureGraphRef::new(&*graph, clearance.clone());
+                    let result = self.neighbor_cache.as_ref().map_or_else(
+                        || tessera_graph_storage::gql::execute_query(&secure, q),
+                        |cache| {
+                            tessera_graph_storage::gql::execute_query_with_shared_cache(
+                                &secure, cache, &clearance, q,
+                            )
+                        },
+                    )
+                    .map(|r| gql_result_to_packstream(&r))
+                    .map_err(|e| e.to_string());
                     drop(secure);
                     drop(graph); // Explicitly drop guard before any `.await`
                     result
@@ -505,6 +517,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                     // background timer (see flush_task::spawn_background_flush).
                     drop(secure);
                     drop(graph); // Explicitly drop write guard before any `.await`
+
+                    // Invalidate the neighbor cache after topology mutations.
+                    if let Ok(ref result) = r {
+                        if result.nodes_created > 0
+                            || result.edges_created > 0
+                            || result.nodes_deleted > 0
+                            || result.edges_deleted > 0
+                        {
+                            if let Some(ref cache) = self.neighbor_cache {
+                                cache.clear();
+                            }
+                        }
+                    }
+
                     #[allow(clippy::cast_possible_wrap)]
                     r.map(|result| {
                         let summary_row = vec![

@@ -14,7 +14,8 @@ use tessera_graph_auth::user::{UserId, UserStoreHandle};
 use tessera_graph_cypher::cache::QueryCache;
 use tessera_graph_monitor::MetricsRegistry;
 use tessera_graph_protocol::tls::TlsConfig;
-use tessera_graph_tenant::TenantRegistry;
+use tessera_graph_storage::shared_cache::SharedNeighborCache;
+use tessera_graph_tenant::{DatabaseAddress, TenantRegistry};
 
 /// Server context that holds all security components.
 ///
@@ -33,6 +34,7 @@ pub struct ServerContext {
     query_cache: Arc<QueryCache>,
     login_tracker: Arc<LoginAttemptTracker>,
     login_policy: LoginPolicy,
+    neighbor_caches: std::sync::RwLock<HashMap<DatabaseAddress, Arc<SharedNeighborCache>>>,
 }
 
 impl ServerContext {
@@ -66,6 +68,7 @@ impl ServerContext {
             login_tracker: Arc::new(LoginAttemptTracker::new()),
             // Default: lock after 5 failures for 300 seconds.
             login_policy: LoginPolicy::new(5, 300),
+            neighbor_caches: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -160,6 +163,35 @@ impl ServerContext {
     #[must_use]
     pub const fn login_policy(&self) -> &LoginPolicy {
         &self.login_policy
+    }
+
+    /// Returns the `SharedNeighborCache` for the given database, creating one if
+    /// it does not exist yet.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal `RwLock` is poisoned.
+    pub fn neighbor_cache(&self, addr: &DatabaseAddress) -> Arc<SharedNeighborCache> {
+        // Fast path: read lock
+        {
+            let guard = self
+                .neighbor_caches
+                .read()
+                .expect("neighbor_caches lock poisoned");
+            if let Some(cache) = guard.get(addr) {
+                return Arc::clone(cache);
+            }
+        }
+        // Slow path: write lock, double-check
+        let mut guard = self
+            .neighbor_caches
+            .write()
+            .expect("neighbor_caches lock poisoned");
+        Arc::clone(
+            guard
+                .entry(addr.clone())
+                .or_insert_with(|| Arc::new(SharedNeighborCache::new())),
+        )
     }
 
     /// Validate a session token and check the required permission.
