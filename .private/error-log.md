@@ -138,8 +138,9 @@
 - **Cómo lo solucioné:** Quité `#[must_use]` de `secure_node_projected`. Las funciones que retornan Result no necesitan la anotación.
 - **Regla para evitarlo:** NUNCA añadir `#[must_use]` a funciones que retornan `Result<T>` o `Option<T>` — estos tipos ya lo tienen. Solo añadir a funciones que retornan tipos simples (Vec, bool, usize, structs propios).
 
-### [2026-04-05] MATCH retorna 0 filas tras CREATE en misma sesión Bolt — investigación en curso
+### [2026-04-05] MATCH retorna 0 filas tras CREATE en misma sesión Bolt — RESUELTO
 - **Qué observamos:** `resolve_node_ids()` en `TesseraBoltTarget` ejecuta `MATCH (n) RETURN id(n)` y obtiene 0 filas, a pesar de que `CREATE (:N)` se ejecutó previamente en la misma conexión Bolt con SUCCESS.
-- **Causa raíz probable:** Por determinar. Descartado: BEGIN/FAIL (BoltClient no envía BEGIN). El architecture read/write lock es correcto. Posibles causas: LBAC clearance level mismatch, query cache returning stale results, o bug en gql::execute con id() function tras mutations.
-- **Estado:** Bloqueante para TesseraBoltTarget integration tests. El benchmark "read" mide queries fallidas silenciosamente (let _ = pattern). Necesita investigación en el bolt_handler con tracing habilitado.
+- **Causa raíz:** El Bolt handler entraba en FAILED state tras errores en `DETACH DELETE` (cleanup), y todas las queries posteriores retornaban IGNORED (0 filas).
+- **Cómo se solucionó:** Commit 2fc7f97 — `clear()` envía RESET tras DETACH DELETE fallido. Tests enterprise requerían actualización del byte order del handshake (MIT core cambió de `[0x00, major, minor, 0x00]` a `[0x00, 0x00, minor, major]` per Neo4j spec).
+- **Estado:** Resuelto. 29/29 bolt handler tests + 4/4 E2E tests pasan (2026-04-08).
 - **Regla:** Antes de asumir que un benchmark funciona, verificar que las queries realmente retornan datos (no solo medir el tiempo de ejecución).

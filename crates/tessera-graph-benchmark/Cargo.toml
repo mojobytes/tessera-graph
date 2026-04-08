@@ -16,6 +16,7 @@ integration-tests  = []
 tessera-graph    = { workspace = true, features = ["benchmarks"] }
 tessera-graph-cypher = { workspace = true }
 tessera-graph-config = { workspace = true }
+tessera-graph-storage = { workspace = true }
 thiserror        = { workspace = true }
 
 # Memgraph / Bolt target (optional)

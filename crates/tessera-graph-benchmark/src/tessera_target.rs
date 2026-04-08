@@ -1,13 +1,18 @@
-//! [`BenchmarkTarget`] implementation backed by the in-process `tessera-graph` engine.
+//! [`BenchmarkTarget`] implementation backed by the in-process `tessera-graph` engine
+//! with the enterprise `NeighborCache` for traversal optimization.
 
-use tessera_graph::{Direction, EdgeId, Graph, NodeId, Properties};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use tessera_graph::{Direction, EdgeId, Graph, GraphAccess, NodeId, Properties};
+use tessera_graph_storage::cache::NeighborCache;
 
 use crate::error::Result;
 use crate::target::{BenchmarkTarget, EdgeData, EdgeHandle, NodeData, NodeHandle};
 
-/// In-process target that exercises `tessera-graph` directly through its Rust API.
+/// In-process target that exercises `tessera-graph` with the enterprise
+/// `NeighborCache`, eliminating full `Edge` deserialization during traversals.
 pub struct TesseraTarget {
-    graph: Graph,
+    graph: NeighborCache<Graph>,
 }
 
 impl Default for TesseraTarget {
@@ -17,11 +22,12 @@ impl Default for TesseraTarget {
 }
 
 impl TesseraTarget {
-    /// Creates a new target backed by a fresh in-memory graph.
+    /// Creates a new target backed by a fresh in-memory graph with
+    /// enterprise `NeighborCache`.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            graph: Graph::new(),
+            graph: NeighborCache::new(Graph::new()),
         }
     }
 
@@ -29,7 +35,7 @@ impl TesseraTarget {
     /// external benchmark harnesses that need direct access).
     #[must_use]
     pub const fn graph(&self) -> &Graph {
-        &self.graph
+        self.graph.inner()
     }
 
     // -- private helpers --
@@ -48,6 +54,108 @@ impl TesseraTarget {
 
     fn collect_node_handles(ids: &[NodeId]) -> Vec<NodeHandle> {
         ids.iter().copied().map(Self::to_node_handle).collect()
+    }
+
+    /// BFS traversal using `NeighborCache::outgoing_neighbor_ids` to avoid
+    /// full `Edge` deserialization on every hop.
+    fn cached_bfs(&self, start: NodeId, max_depth: u32, direction: Direction) -> tessera_graph::Result<Vec<NodeId>> {
+        let mut visited = HashSet::new();
+        let mut order = Vec::new();
+        let mut queue: VecDeque<(NodeId, u32)> = VecDeque::new();
+
+        visited.insert(start);
+        order.push(start);
+        queue.push_back((start, 0));
+
+        while let Some((current, depth)) = queue.pop_front() {
+            if depth >= max_depth {
+                continue;
+            }
+            for neighbor in self.cached_neighbors(current, direction)? {
+                if visited.insert(neighbor) {
+                    order.push(neighbor);
+                    queue.push_back((neighbor, depth + 1));
+                }
+            }
+        }
+        Ok(order)
+    }
+
+    /// DFS traversal using `NeighborCache::outgoing_neighbor_ids`.
+    fn cached_dfs(&self, start: NodeId, max_depth: u32, direction: Direction) -> tessera_graph::Result<Vec<NodeId>> {
+        let mut visited = HashSet::new();
+        let mut order = Vec::new();
+        let mut stack: Vec<(NodeId, u32)> = vec![(start, 0)];
+
+        while let Some((current, depth)) = stack.pop() {
+            if !visited.insert(current) {
+                continue;
+            }
+            order.push(current);
+            if depth >= max_depth {
+                continue;
+            }
+            let neighbors = self.cached_neighbors(current, direction)?;
+            for neighbor in neighbors.into_iter().rev() {
+                if !visited.contains(&neighbor) {
+                    stack.push((neighbor, depth + 1));
+                }
+            }
+        }
+        Ok(order)
+    }
+
+    /// Shortest path via BFS using `NeighborCache`.
+    fn cached_shortest_path(&self, from: NodeId, to: NodeId, direction: Direction) -> tessera_graph::Result<Option<Vec<NodeId>>> {
+        if from == to {
+            return Ok(Some(vec![from]));
+        }
+        let mut visited = HashSet::new();
+        let mut parent: HashMap<NodeId, NodeId> = HashMap::new();
+        let mut queue: VecDeque<NodeId> = VecDeque::new();
+
+        visited.insert(from);
+        queue.push_back(from);
+
+        while let Some(current) = queue.pop_front() {
+            for neighbor in self.cached_neighbors(current, direction)? {
+                if visited.insert(neighbor) {
+                    parent.insert(neighbor, current);
+                    if neighbor == to {
+                        // Reconstruct path
+                        let mut path = Vec::new();
+                        let mut node = to;
+                        while node != from {
+                            path.push(node);
+                            node = *parent.get(&node).expect("parent map incomplete");
+                        }
+                        path.push(from);
+                        path.reverse();
+                        return Ok(Some(path));
+                    }
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Returns neighbor IDs for a node using the cache, respecting direction.
+    fn cached_neighbors(&self, node: NodeId, direction: Direction) -> tessera_graph::Result<Vec<NodeId>> {
+        match direction {
+            Direction::Outgoing => self.graph.outgoing_neighbor_ids(node),
+            Direction::Incoming => self.graph.incoming_neighbor_ids(node),
+            Direction::Both => {
+                let mut out = self.graph.outgoing_neighbor_ids(node)?;
+                let inc = self.graph.incoming_neighbor_ids(node)?;
+                for id in inc {
+                    if !out.contains(&id) {
+                        out.push(id);
+                    }
+                }
+                Ok(out)
+            }
+        }
     }
 }
 
@@ -91,38 +199,26 @@ impl BenchmarkTarget for TesseraTarget {
     }
 
     fn traverse_bfs(&self, start: NodeHandle, max_depth: u32) -> Result<Vec<NodeHandle>> {
-        let ids = self
-            .graph
-            .traverse(Self::to_node_id(start))
-            .direction(Direction::Outgoing)
-            .max_depth(max_depth as usize)
-            .bfs()
-            .collect()?;
+        let ids = self.cached_bfs(Self::to_node_id(start), max_depth, Direction::Outgoing)?;
         Ok(Self::collect_node_handles(&ids))
     }
 
     fn traverse_dfs(&self, start: NodeHandle, max_depth: u32) -> Result<Vec<NodeHandle>> {
-        let ids = self
-            .graph
-            .traverse(Self::to_node_id(start))
-            .direction(Direction::Outgoing)
-            .max_depth(max_depth as usize)
-            .dfs()
-            .collect()?;
+        let ids = self.cached_dfs(Self::to_node_id(start), max_depth, Direction::Outgoing)?;
         Ok(Self::collect_node_handles(&ids))
     }
 
     fn shortest_path(&self, from: NodeHandle, to: NodeHandle) -> Result<Option<Vec<NodeHandle>>> {
-        let result = self
-            .graph
-            .shortest_path(Self::to_node_id(from), Self::to_node_id(to))
-            .direction(Direction::Outgoing)
-            .find()?;
-        Ok(result.map(|path| Self::collect_node_handles(path.nodes())))
+        let result = self.cached_shortest_path(
+            Self::to_node_id(from),
+            Self::to_node_id(to),
+            Direction::Outgoing,
+        )?;
+        Ok(result.map(|ids| Self::collect_node_handles(&ids)))
     }
 
     fn clear(&mut self) {
-        self.graph = Graph::new();
+        self.graph = NeighborCache::new(Graph::new());
     }
 }
 

@@ -2250,6 +2250,7 @@ dependencies = [
  "tessera-graph-config",
  "tessera-graph-cypher",
  "tessera-graph-protocol",
+ "tessera-graph-storage",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",

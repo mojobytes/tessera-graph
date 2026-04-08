@@ -153,10 +153,11 @@ pub async fn spawn_bolt_handler(
 
     let mut resp = [0u8; 4];
     client_read.read_exact(&mut resp).await.unwrap();
-    // Server responds with [0x00, major, minor, 0x00] = [0x00, 0x04, 0x04, 0x00]
+    // Server responds with [0x00, 0x00, minor, major] = [0x00, 0x00, 0x04, 0x04]
+    // per Neo4j Bolt spec (Python driver reads major=b[3], minor=b[2]).
     assert_eq!(
         resp,
-        [0x00, 0x04, 0x04, 0x00],
+        [0x00, 0x00, 0x04, 0x04],
         "bolt handshake version mismatch"
     );
 
