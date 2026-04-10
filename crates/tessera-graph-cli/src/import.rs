@@ -702,6 +702,7 @@ fn truncate_line(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     // --- GQL splitter ---
 
@@ -1295,12 +1296,7 @@ mod tests {
     #[test]
     fn stream_gql_multiple_statements() {
         let input = std::io::Cursor::new("CREATE (:A);\nCREATE (:B);\nCREATE (:C);");
-        let mut out = Vec::new();
-        let count = stream_gql_import(input, |s| {
-            out.push(s);
-            Ok(())
-        })
-        .unwrap(); // OK: test
+        let count = stream_gql_import(input, |_| Ok(())).unwrap(); // OK: test
         assert_eq!(count, 3);
     }
 
@@ -1650,7 +1646,7 @@ mod tests {
     fn throughput_stream_gql_10k() {
         let mut input = String::new();
         for i in 0..THROUGHPUT_ELEMENT_COUNT {
-            input.push_str(&format!("CREATE (:Node {{id: {i}, name: 'node_{i}'}});\n"));
+            writeln!(input, "CREATE (:Node {{id: {i}, name: 'node_{i}'}});").expect("write to String"); // OK: test
         }
         let start = std::time::Instant::now();
         let mut count = 0usize;
@@ -1671,7 +1667,7 @@ mod tests {
     fn throughput_stream_csv_10k() {
         let mut input = String::from("label,id,name,score\n");
         for i in 0..THROUGHPUT_ELEMENT_COUNT {
-            input.push_str(&format!("Item,{i},item_{i},{}\n", i * 10));
+            writeln!(input, "Item,{i},item_{i},{}", i * 10).expect("write to String"); // OK: test
         }
         let start = std::time::Instant::now();
         let mut count = 0usize;

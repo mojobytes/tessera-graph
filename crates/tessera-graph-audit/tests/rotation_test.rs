@@ -29,7 +29,7 @@ async fn rotation_creates_new_file_when_size_exceeded() {
     // Should have at least 2 files (current + rotated).
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .expect("readdir") // OK: test
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| {
             e.path()
                 .extension()
@@ -77,7 +77,8 @@ async fn rotation_preserves_all_entries_across_files() {
         }
     }
     assert_eq!(
-        total_lines, total as usize,
+        total_lines,
+        usize::try_from(total).expect("test constant fits usize"),
         "all {total} entries must survive rotation"
     );
 }
@@ -106,7 +107,7 @@ async fn rotation_disabled_when_max_size_zero() {
 
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .expect("readdir") // OK: test
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| {
             e.path()
                 .extension()
@@ -142,7 +143,7 @@ async fn rotation_prunes_old_files_when_max_rotated_files_set() {
 
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .expect("readdir") // OK: test
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| {
             e.path()
                 .extension()

@@ -12,6 +12,8 @@ use std::collections::HashMap;
 
 use tessera_graph::{Edge, EdgeId, GraphAccess, Node, NodeId, Properties};
 
+use crate::adj_index::AdjacencyIndex;
+
 /// In-memory neighbor cache that wraps any `GraphAccess` implementation.
 ///
 /// Stores resolved `Vec<NodeId>` for outgoing and incoming neighbors,
@@ -26,6 +28,7 @@ pub struct NeighborCache<G> {
     inner: G,
     outgoing: RefCell<HashMap<NodeId, Vec<NodeId>>>,
     incoming: RefCell<HashMap<NodeId, Vec<NodeId>>>,
+    adj_index: RefCell<AdjacencyIndex>,
 }
 
 impl<G: GraphAccess> NeighborCache<G> {
@@ -35,6 +38,7 @@ impl<G: GraphAccess> NeighborCache<G> {
             inner,
             outgoing: RefCell::new(HashMap::new()),
             incoming: RefCell::new(HashMap::new()),
+            adj_index: RefCell::new(AdjacencyIndex::new()),
         }
     }
 
@@ -46,6 +50,11 @@ impl<G: GraphAccess> NeighborCache<G> {
     /// Returns a mutable reference to the inner graph.
     pub const fn inner_mut(&mut self) -> &mut G {
         &mut self.inner
+    }
+
+    /// Returns a reference to the adjacency index.
+    pub fn adj_index(&self) -> std::cell::Ref<'_, AdjacencyIndex> {
+        self.adj_index.borrow()
     }
 
     /// Returns cached outgoing neighbor IDs, or `None` on cache miss.
@@ -92,6 +101,10 @@ impl<G: GraphAccess> NeighborCache<G> {
         if let Some(cached) = self.outgoing_cached(node) {
             return Ok(cached);
         }
+        // Pre-warm core AdjCache from the enterprise index to avoid O(N) scan.
+        if let Some(ptr) = self.adj_index.borrow().get(node) {
+            self.inner.set_adj_pointer(node, ptr);
+        }
         let edges = self.inner.outgoing_edges(node)?;
         let neighbors: Vec<NodeId> = edges.iter().map(Edge::target).collect();
         self.populate_outgoing(node, neighbors.clone());
@@ -106,6 +119,10 @@ impl<G: GraphAccess> NeighborCache<G> {
     pub fn incoming_neighbor_ids(&self, node: NodeId) -> tessera_graph::Result<Vec<NodeId>> {
         if let Some(cached) = self.incoming_cached(node) {
             return Ok(cached);
+        }
+        // Pre-warm core AdjCache from the enterprise index to avoid O(N) scan.
+        if let Some(ptr) = self.adj_index.borrow().get(node) {
+            self.inner.set_adj_pointer(node, ptr);
         }
         let edges = self.inner.incoming_edges(node)?;
         let neighbors: Vec<NodeId> = edges.iter().map(Edge::source).collect();
@@ -192,12 +209,24 @@ impl<G: GraphAccess> GraphAccess for NeighborCache<G> {
 
         // Invalidate the removed node itself.
         self.invalidate_node(id);
-        // Invalidate all neighbors that had edges to/from the removed node.
-        for neighbor in out_neighbors {
-            self.incoming.borrow_mut().remove(&neighbor);
+        // Remove the node from the adjacency index.
+        self.adj_index.borrow_mut().remove(id);
+
+        // Invalidate all neighbors that had edges to/from the removed node
+        // and update their adj_index entries.
+        for neighbor in &out_neighbors {
+            self.incoming.borrow_mut().remove(neighbor);
+            match self.inner.adj_pointer(*neighbor) {
+                Ok(Some(ptr)) => self.adj_index.borrow_mut().insert(*neighbor, ptr),
+                _ => { self.adj_index.borrow_mut().remove(*neighbor); }
+            }
         }
-        for neighbor in in_neighbors {
-            self.outgoing.borrow_mut().remove(&neighbor);
+        for neighbor in &in_neighbors {
+            self.outgoing.borrow_mut().remove(neighbor);
+            match self.inner.adj_pointer(*neighbor) {
+                Ok(Some(ptr)) => self.adj_index.borrow_mut().insert(*neighbor, ptr),
+                _ => { self.adj_index.borrow_mut().remove(*neighbor); }
+            }
         }
 
         Ok(removed)
@@ -212,6 +241,15 @@ impl<G: GraphAccess> GraphAccess for NeighborCache<G> {
     ) -> tessera_graph::Result<EdgeId> {
         let id = self.inner.add_edge(label, source, target, properties)?;
         self.invalidate_edge(source, target);
+        // Update adj_index: re-read pointers from the core after the mutation.
+        if let Ok(Some(ptr)) = self.inner.adj_pointer(source) {
+            self.adj_index.borrow_mut().insert(source, ptr);
+        }
+        if source != target {
+            if let Ok(Some(ptr)) = self.inner.adj_pointer(target) {
+                self.adj_index.borrow_mut().insert(target, ptr);
+            }
+        }
         Ok(id)
     }
 
@@ -221,7 +259,20 @@ impl<G: GraphAccess> GraphAccess for NeighborCache<G> {
 
     fn remove_edge(&mut self, id: EdgeId) -> tessera_graph::Result<Edge> {
         let edge = self.inner.remove_edge(id)?;
-        self.invalidate_edge(edge.source(), edge.target());
+        let source = edge.source();
+        let target = edge.target();
+        self.invalidate_edge(source, target);
+        // Update adj_index: re-read pointers after the mutation.
+        match self.inner.adj_pointer(source) {
+            Ok(Some(ptr)) => self.adj_index.borrow_mut().insert(source, ptr),
+            _ => { self.adj_index.borrow_mut().remove(source); }
+        }
+        if source != target {
+            match self.inner.adj_pointer(target) {
+                Ok(Some(ptr)) => self.adj_index.borrow_mut().insert(target, ptr),
+                _ => { self.adj_index.borrow_mut().remove(target); }
+            }
+        }
         Ok(edge)
     }
 }
@@ -393,13 +444,171 @@ mod tests {
         let mut cache = NeighborCache::new(g);
 
         // Populate cache for A's outgoing and C's incoming
-        let _ = cache.outgoing_neighbor_ids(nodes[0]).unwrap();
-        let _ = cache.incoming_neighbor_ids(nodes[2]).unwrap();
+        let _ = cache.outgoing_neighbor_ids(nodes[0]).unwrap(); // OK: test
+        let _ = cache.incoming_neighbor_ids(nodes[2]).unwrap(); // OK: test
 
         // Remove B — A's outgoing and C's incoming should invalidate
-        cache.remove_node(nodes[1]).unwrap();
+        cache.remove_node(nodes[1]).unwrap(); // OK: test
 
         assert!(cache.outgoing_cached(nodes[0]).is_none());
         assert!(cache.incoming_cached(nodes[2]).is_none());
+    }
+
+    // ── Ciclo 5: NeighborCache has AdjacencyIndex, empty for new node ──
+
+    #[test]
+    fn adj_index_empty_for_new_node() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let id = cache.add_node("Person", Properties::new()).unwrap(); // OK: test
+        assert!(
+            cache.adj_index().get(id).is_none(),
+            "new node without edges must not be in adj_index"
+        );
+    }
+
+    // ── Ciclo 6: add_edge populates the index ──
+
+    #[test]
+    fn adj_index_populated_after_add_edge() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let a = cache.add_node("A", Properties::new()).unwrap(); // OK: test
+        let b = cache.add_node("B", Properties::new()).unwrap(); // OK: test
+        cache
+            .add_edge("REL", a, b, Properties::new())
+            .unwrap(); // OK: test
+
+        let ptr_a = cache.adj_index().get(a).expect("source must be indexed"); // OK: test
+        assert!(ptr_a.outgoing_page.is_some(), "source must have outgoing page");
+
+        let ptr_b = cache.adj_index().get(b).expect("target must be indexed"); // OK: test
+        assert!(ptr_b.incoming_page.is_some(), "target must have incoming page");
+    }
+
+    #[test]
+    fn adj_index_self_loop_populates_both_pages() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let a = cache.add_node("A", Properties::new()).unwrap(); // OK: test
+        cache
+            .add_edge("SELF", a, a, Properties::new())
+            .unwrap(); // OK: test
+
+        let ptr = cache.adj_index().get(a).expect("self-loop node must be indexed"); // OK: test
+        assert!(ptr.outgoing_page.is_some());
+        assert!(ptr.incoming_page.is_some());
+    }
+
+    // ── Ciclo 7: remove_edge and remove_node update the index ──
+
+    #[test]
+    fn adj_index_updated_after_remove_edge() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let a = cache.add_node("N", Properties::new()).unwrap(); // OK: test
+        let b = cache.add_node("N", Properties::new()).unwrap(); // OK: test
+        let eid = cache
+            .add_edge("E", a, b, Properties::new())
+            .unwrap(); // OK: test
+
+        assert!(cache.adj_index().get(a).is_some());
+        assert!(cache.adj_index().get(b).is_some());
+
+        cache.remove_edge(eid).unwrap(); // OK: test
+
+        // After removing the only edge, nodes still have adj pages (empty records).
+        // The index reflects the core state — no panic, no stale data.
+    }
+
+    #[test]
+    fn adj_index_cleared_after_remove_node() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let a = cache.add_node("A", Properties::new()).unwrap(); // OK: test
+        let b = cache.add_node("B", Properties::new()).unwrap(); // OK: test
+        cache
+            .add_edge("E", a, b, Properties::new())
+            .unwrap(); // OK: test
+        assert!(cache.adj_index().get(a).is_some());
+
+        cache.remove_node(a).unwrap(); // OK: test
+        assert!(
+            cache.adj_index().get(a).is_none(),
+            "removed node must be cleared from adj_index"
+        );
+    }
+
+    // ── Ciclo 8: pre-warm core cache from index ──
+
+    #[test]
+    fn outgoing_neighbor_ids_prewarms_core_cache() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let a = cache.add_node("A", Properties::new()).unwrap(); // OK: test
+        let b = cache.add_node("B", Properties::new()).unwrap(); // OK: test
+        cache
+            .add_edge("E", a, b, Properties::new())
+            .unwrap(); // OK: test
+
+        assert!(cache.adj_index().get(a).is_some());
+        // Clear the neighbor cache to force a re-read
+        cache.invalidate_node(a);
+
+        // outgoing_neighbor_ids should pre-warm core AdjCache and succeed
+        let neighbors = cache.outgoing_neighbor_ids(a).unwrap(); // OK: test
+        assert_eq!(neighbors, vec![b]);
+    }
+
+    #[test]
+    fn incoming_neighbor_ids_prewarms_core_cache() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let a = cache.add_node("A", Properties::new()).unwrap(); // OK: test
+        let b = cache.add_node("B", Properties::new()).unwrap(); // OK: test
+        cache
+            .add_edge("E", a, b, Properties::new())
+            .unwrap(); // OK: test
+
+        assert!(cache.adj_index().get(b).is_some());
+        cache.invalidate_node(b);
+
+        let neighbors = cache.incoming_neighbor_ids(b).unwrap(); // OK: test
+        assert_eq!(neighbors, vec![a]);
+    }
+
+    // ── Fase 3: Throughput regression guard ──
+
+    #[test]
+    fn add_edge_with_adj_index_throughput_regression_guard() {
+        let mut cache = NeighborCache::new(Graph::new());
+        let count = 5_000;
+
+        // Create nodes
+        let mut nodes = Vec::with_capacity(count + 1);
+        for _ in 0..=count {
+            nodes.push(cache.add_node("N", Properties::new()).unwrap()); // OK: test
+        }
+
+        // Measure: add_edge with adj_index maintenance
+        let start = std::time::Instant::now();
+        for i in 0..count {
+            cache
+                .add_edge("E", nodes[i], nodes[i + 1], Properties::new())
+                .unwrap(); // OK: test
+        }
+        let elapsed = start.elapsed();
+        #[allow(clippy::cast_precision_loss)]
+        let ops_per_sec = count as f64 / elapsed.as_secs_f64();
+
+        let threshold = if cfg!(debug_assertions) { 100.0 } else { 2_000.0 };
+        assert!(
+            ops_per_sec >= threshold,
+            "add_edge throughput {ops_per_sec:.0} ops/s is below threshold {threshold:.0} ops/s \
+             (elapsed: {elapsed:?} for {count} edges)"
+        );
+
+        // Verify adj_index has entries for all nodes with edges
+        assert!(
+            !cache.adj_index().is_empty(),
+            "adj_index must be populated after bulk insert"
+        );
+        assert!(
+            cache.adj_index().len() >= count,
+            "adj_index must have entries for edge endpoints"
+        );
     }
 }

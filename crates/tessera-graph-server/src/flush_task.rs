@@ -45,84 +45,6 @@ fn update_health_state(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tessera_graph_monitor::HealthProvider;
-
-    #[test]
-    fn health_stays_healthy_on_success() {
-        let flag = AtomicHealthFlag::new();
-        let count = update_health_state(false, 0, &flag);
-        assert_eq!(count, 0);
-        assert!(flag.is_healthy());
-    }
-
-    #[test]
-    fn health_stays_healthy_under_threshold() {
-        let flag = AtomicHealthFlag::new();
-        let count = update_health_state(true, 0, &flag);
-        assert_eq!(count, 1);
-        assert!(flag.is_healthy()); // not yet at threshold (3)
-
-        let count = update_health_state(true, count, &flag);
-        assert_eq!(count, 2);
-        assert!(flag.is_healthy()); // still under threshold
-    }
-
-    #[test]
-    fn health_degrades_at_threshold() {
-        let flag = AtomicHealthFlag::new();
-        let mut count = 0;
-        for _ in 0..MAX_CONSECUTIVE_ERRORS {
-            count = update_health_state(true, count, &flag);
-        }
-        assert_eq!(count, MAX_CONSECUTIVE_ERRORS);
-        assert!(!flag.is_healthy(), "must be degraded after {MAX_CONSECUTIVE_ERRORS} errors");
-    }
-
-    #[test]
-    fn disk_space_threshold_constant_is_positive() {
-        assert!(
-            MIN_FREE_DISK_BYTES > 0,
-            "threshold must be positive"
-        );
-    }
-
-    #[test]
-    fn available_space_check_does_not_panic_on_nonexistent_path() {
-        let result = check_available_disk_bytes(std::path::Path::new("/nonexistent/path/xyz"));
-        // Must not panic. Result may be None.
-        let _ = result;
-    }
-
-    #[test]
-    fn available_space_returns_some_for_existing_path() {
-        let result = check_available_disk_bytes(std::path::Path::new("/tmp"));
-        assert!(result.is_some(), "expected Some for /tmp");
-        assert!(
-            result.expect("already checked is_some") > 0, // OK: test
-            "expected positive free space on /tmp"
-        );
-    }
-
-    #[test]
-    fn health_recovers_after_success() {
-        let flag = AtomicHealthFlag::new();
-        // Drive to degraded
-        let mut count = 0;
-        for _ in 0..MAX_CONSECUTIVE_ERRORS {
-            count = update_health_state(true, count, &flag);
-        }
-        assert!(!flag.is_healthy());
-
-        // One success recovers
-        let count = update_health_state(false, count, &flag);
-        assert_eq!(count, 0);
-        assert!(flag.is_healthy(), "must recover after successful flush");
-    }
-}
-
 /// Spawns a background tokio task that calls
 /// [`TenantRegistry::flush_all`] every `interval_ms` milliseconds.
 ///
@@ -207,4 +129,79 @@ pub fn spawn_background_flush(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tessera_graph_monitor::HealthProvider;
+
+    #[test]
+    fn health_stays_healthy_on_success() {
+        let flag = AtomicHealthFlag::new();
+        let count = update_health_state(false, 0, &flag);
+        assert_eq!(count, 0);
+        assert!(flag.is_healthy());
+    }
+
+    #[test]
+    fn health_stays_healthy_under_threshold() {
+        let flag = AtomicHealthFlag::new();
+        let count = update_health_state(true, 0, &flag);
+        assert_eq!(count, 1);
+        assert!(flag.is_healthy()); // not yet at threshold (3)
+
+        let count = update_health_state(true, count, &flag);
+        assert_eq!(count, 2);
+        assert!(flag.is_healthy()); // still under threshold
+    }
+
+    #[test]
+    fn health_degrades_at_threshold() {
+        let flag = AtomicHealthFlag::new();
+        let mut count = 0;
+        for _ in 0..MAX_CONSECUTIVE_ERRORS {
+            count = update_health_state(true, count, &flag);
+        }
+        assert_eq!(count, MAX_CONSECUTIVE_ERRORS);
+        assert!(!flag.is_healthy(), "must be degraded after {MAX_CONSECUTIVE_ERRORS} errors");
+    }
+
+    #[test]
+    fn disk_space_threshold_constant_is_positive() {
+        const _: () = assert!(MIN_FREE_DISK_BYTES > 0, "threshold must be positive");
+    }
+
+    #[test]
+    fn available_space_check_does_not_panic_on_nonexistent_path() {
+        let result = check_available_disk_bytes(std::path::Path::new("/nonexistent/path/xyz"));
+        // Must not panic. Result may be None.
+        let _ = result;
+    }
+
+    #[test]
+    fn available_space_returns_some_for_existing_path() {
+        let result = check_available_disk_bytes(std::path::Path::new("/tmp"));
+        assert!(result.is_some(), "expected Some for /tmp");
+        assert!(
+            result.expect("already checked is_some") > 0, // OK: test
+            "expected positive free space on /tmp"
+        );
+    }
+
+    #[test]
+    fn health_recovers_after_success() {
+        let flag = AtomicHealthFlag::new();
+        // Drive to degraded
+        let mut count = 0;
+        for _ in 0..MAX_CONSECUTIVE_ERRORS {
+            count = update_health_state(true, count, &flag);
+        }
+        assert!(!flag.is_healthy());
+
+        // One success recovers
+        let count = update_health_state(false, count, &flag);
+        assert_eq!(count, 0);
+        assert!(flag.is_healthy(), "must recover after successful flush");
+    }
 }

@@ -1,9 +1,9 @@
 // Copyright (c) 2026 BelowZero Security OU. All rights reserved.
 // SPDX-License-Identifier: LicenseRef-BelowZero-Enterprise
 
-//! Integration tests for the TesseraGraph Bolt benchmark target.
+//! Integration tests for the `TesseraGraph` Bolt benchmark target.
 //!
-//! These tests require a running TesseraGraph server and are gated behind
+//! These tests require a running `TesseraGraph` server and are gated behind
 //! `--features tessera-bolt,integration-tests`.
 //!
 //! Configure connection via environment variables:

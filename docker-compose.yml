@@ -18,7 +18,7 @@
 services:
   # ── TesseraGraph Enterprise ──────────────────────────────────────
   graphdb:
-    image: tesseraio/tessera-graph-enterprise:0.2.3
+    image: tesseraio/tessera-graph-enterprise:0.3.0
     container_name: tessera-graphdb
     ports:
       - "7687:7687"   # Bolt 4.4

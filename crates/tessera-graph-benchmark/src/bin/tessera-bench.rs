@@ -99,7 +99,7 @@ impl Default for CliArgs {
             #[cfg(feature = "tessera-bolt")]
             tessera_bolt_user: "admin".into(),
             #[cfg(feature = "tessera-bolt")]
-            tessera_bolt_pass: "Admin.123".into(),
+            tessera_bolt_pass: "Admin@.123".into(),
         }
     }
 }
@@ -604,6 +604,6 @@ mod tests {
         assert_eq!(args.tessera_bolt_host, "localhost");
         assert_eq!(args.tessera_bolt_port, 7687);
         assert_eq!(args.tessera_bolt_user, "admin");
-        assert_eq!(args.tessera_bolt_pass, "Admin.123");
+        assert_eq!(args.tessera_bolt_pass, "Admin@.123");
     }
 }

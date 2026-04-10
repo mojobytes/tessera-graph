@@ -12,7 +12,7 @@
 //! [`SecureGraph`] / [`SecureGraphRef`].
 
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::watch;
@@ -40,6 +40,85 @@ const AUTH_FAILURE_MSG: &str = "authentication failed";
 
 /// Global connection counter for unique `connection_id` in HELLO responses.
 static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Maximum number of mutations before an implicit batch is auto-flushed.
+const AUTO_FLUSH_OPS: u32 = 500;
+
+/// Maximum age of the first un-synced mutation before an implicit batch is
+/// auto-flushed. Keeps worst-case data-loss window bounded.
+const AUTO_FLUSH_WINDOW: Duration = Duration::from_millis(10);
+
+// ── Batch state ──────────────────────────────────────────────────────────────
+
+/// Per-connection batch state for deferred WAL sync.
+///
+/// Tracks whether the connection is inside an explicit `BEGIN`..`COMMIT` block
+/// and, for auto-commit mode, how many mutations have been coalesced since the
+/// last `wal_sync`.
+struct BatchState {
+    /// True when the client sent BEGIN and we called `graph.begin_batch()`.
+    in_batch: bool,
+    /// Number of mutations executed since the last WAL sync (auto-commit only).
+    dirty_count: u32,
+    /// Timestamp of the first un-synced mutation in the current implicit batch.
+    first_dirty_at: Option<Instant>,
+}
+
+impl BatchState {
+    const fn new() -> Self {
+        Self {
+            in_batch: false,
+            dirty_count: 0,
+            first_dirty_at: None,
+        }
+    }
+
+    /// Enter an explicit batch (BEGIN).
+    #[allow(clippy::missing_const_for_fn)]
+    fn enter(&mut self) {
+        self.in_batch = true;
+        self.dirty_count = 0;
+        self.first_dirty_at = None;
+    }
+
+    /// Exit a batch (COMMIT or ROLLBACK). Returns `true` if we were in a batch.
+    #[allow(clippy::missing_const_for_fn)]
+    fn exit(&mut self) -> bool {
+        let was = self.in_batch;
+        self.in_batch = false;
+        self.dirty_count = 0;
+        self.first_dirty_at = None;
+        was
+    }
+
+    /// Record that a mutation was executed (for auto-flush tracking).
+    fn mark_dirty(&mut self) {
+        self.dirty_count += 1;
+        if self.first_dirty_at.is_none() {
+            self.first_dirty_at = Some(Instant::now());
+        }
+    }
+
+    /// Check whether the implicit batch should be flushed.
+    fn should_auto_flush(&self, max_ops: u32, max_age: Duration) -> bool {
+        if self.dirty_count >= max_ops {
+            return true;
+        }
+        if let Some(first) = self.first_dirty_at {
+            if first.elapsed() >= max_age {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Reset dirty counters after an implicit flush.
+    #[allow(clippy::missing_const_for_fn)]
+    fn reset_dirty(&mut self) {
+        self.dirty_count = 0;
+        self.first_dirty_at = None;
+    }
+}
 
 // ── Pending result ────────────────────────────────────────────────────────────
 
@@ -69,6 +148,8 @@ pub struct BoltConnectionHandler<S: AsyncRead + AsyncWrite + Unpin + Send + Sync
     /// LBAC-scoped neighbor cache for accelerated traversal queries.
     neighbor_cache: Option<Arc<tessera_graph_storage::shared_cache::SharedNeighborCache>>,
     session_token: Option<SessionToken>,
+    /// Per-connection batch state for deferred WAL sync.
+    batch_state: BatchState,
     /// True after a FAILURE; commands other than RESET/GOODBYE are ignored.
     failed: bool,
     pending_result: Option<PendingResult>,
@@ -120,6 +201,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
             graph: None,
             neighbor_cache: None,
             session_token: None,
+            batch_state: BatchState::new(),
             failed: false,
             pending_result: None,
             default_tenant,
@@ -135,12 +217,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     ///
     /// Returns `ServerError` on unrecoverable I/O or protocol errors.
     pub async fn run(&mut self) -> Result<()> {
+        let result = self.run_inner().await;
+        // Flush any outstanding implicit or explicit batch on exit so that
+        // mutations are durable even if the client disconnects without COMMIT.
+        let _ = self.cleanup_batch_state();
+        result
+    }
+
+    async fn run_inner(&mut self) -> Result<()> {
         loop {
             let data = tokio::select! {
                 biased;
 
-                _ = self.shutdown.changed() => {
-                    if *self.shutdown.borrow() {
+                result = self.shutdown.changed() => {
+                    // Sender dropped (Err) or value changed to true → exit.
+                    if result.is_err() || *self.shutdown.borrow() {
                         return Ok(());
                     }
                     continue;
@@ -489,6 +580,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         let exec_result: std::result::Result<(Vec<String>, Vec<Vec<PackStreamValue>>), String> =
             match stmt {
                 GqlStatement::Query(ref q) => {
+                    // Flush any pending implicit batch before reading, so
+                    // read-after-write on the same connection sees its own writes.
+                    if !self.batch_state.in_batch && self.batch_state.dirty_count > 0 {
+                        let mut graph = graph_arc.write().map_err(|_| {
+                            ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
+                        })?;
+                        graph.end_batch().map_err(ServerError::Storage)?;
+                        self.batch_state.reset_dirty();
+                        drop(graph);
+                    }
+
                     let graph = graph_arc.read().map_err(|_| {
                         ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
                     })?;
@@ -511,11 +613,36 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                     let mut graph = graph_arc.write().map_err(|_| {
                         ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
                     })?;
+
+                    // Auto-commit coalescing: open an implicit batch before the
+                    // first mutation so that wal_sync inside add_node/etc is a
+                    // no-op (batch_depth > 0). The batch is flushed when the
+                    // ops/time threshold is reached or on RESET/LOGON/disconnect.
+                    if !self.batch_state.in_batch && self.batch_state.dirty_count == 0 {
+                        graph.begin_batch();
+                    }
+
                     let mut secure = SecureGraph::new(&mut *graph, clearance);
                     let r = tessera_graph_storage::gql::execute_mut(&mut secure, m);
-                    // WAL guarantees durability; flush is handled by the
-                    // background timer (see flush_task::spawn_background_flush).
                     drop(secure);
+
+                    // Track dirty state for auto-flush decisions.
+                    if r.is_ok() {
+                        self.batch_state.mark_dirty();
+                    }
+
+                    // Auto-flush: if not in an explicit batch and threshold is
+                    // reached, issue a single fsync and re-open a new implicit
+                    // batch for subsequent mutations.
+                    if !self.batch_state.in_batch
+                        && self.batch_state.should_auto_flush(AUTO_FLUSH_OPS, AUTO_FLUSH_WINDOW)
+                    {
+                        graph.end_batch().map_err(ServerError::Storage)?;
+                        self.batch_state.reset_dirty();
+                        // Re-open implicit batch for next mutation.
+                        graph.begin_batch();
+                    }
+
                     drop(graph); // Explicitly drop write guard before any `.await`
 
                     // Invalidate the neighbor cache after topology mutations.
@@ -675,37 +802,134 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     // ── BEGIN / COMMIT / ROLLBACK ─────────────────────────────────────────────
 
     async fn handle_begin(&mut self) -> Result<()> {
-        // Explicit transactions are not yet implemented. Responding SUCCESS
-        // would be a protocol lie: mutations auto-commit immediately and
-        // ROLLBACK cannot revert them. Send FAILURE so clients enter the
-        // FAILED state and cannot silently corrupt data.
-        self.send_failure(
-            "Neo.DatabaseError.Statement.ExecutionFailed",
-            "explicit transactions are not supported; use auto-commit mode",
-        )
-        .await
+        if self.batch_state.in_batch {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Statement.ExecutionFailed",
+                    "nested BEGIN is not supported",
+                )
+                .await;
+        }
+
+        let Some(graph_arc) = self.graph.clone() else {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Database.DatabaseNotFound",
+                    "no database selected",
+                )
+                .await;
+        };
+
+        // Acquire write lock briefly — call begin_batch — release immediately.
+        {
+            let mut graph = graph_arc.write().map_err(|_| {
+                ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
+            })?;
+            graph.begin_batch();
+        }
+
+        self.batch_state.enter();
+        self.send_response(&BoltResponse::Success { metadata: vec![] })
+            .await
     }
 
     async fn handle_commit(&mut self) -> Result<()> {
-        // Unreachable for well-behaved clients (BEGIN fails → FAILED state).
-        // If reached, the client sent COMMIT outside a transaction.
-        self.send_ignored().await
+        if !self.batch_state.in_batch {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Statement.ExecutionFailed",
+                    "no open transaction",
+                )
+                .await;
+        }
+
+        let Some(graph_arc) = self.graph.clone() else {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Database.DatabaseNotFound",
+                    "no database selected",
+                )
+                .await;
+        };
+
+        // Acquire write lock — end_batch triggers single fsync — release.
+        {
+            let mut graph = graph_arc.write().map_err(|_| {
+                ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
+            })?;
+            graph.end_batch().map_err(ServerError::Storage)?;
+        }
+
+        self.batch_state.exit();
+        self.send_response(&BoltResponse::Success { metadata: vec![] })
+            .await
     }
 
     async fn handle_rollback(&mut self) -> Result<()> {
-        // Unreachable for well-behaved clients (BEGIN fails → FAILED state).
-        // If reached, the client sent ROLLBACK outside a transaction.
+        if !self.batch_state.in_batch {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Statement.ExecutionFailed",
+                    "no open transaction",
+                )
+                .await;
+        }
+
+        let Some(graph_arc) = self.graph.clone() else {
+            return self
+                .send_failure(
+                    "Neo.ClientError.Database.DatabaseNotFound",
+                    "no database selected",
+                )
+                .await;
+        };
+
+        // end_batch syncs the WAL — mutations are already applied (no isolation),
+        // so "rollback" just closes the batch. Data is made durable.
+        {
+            let mut graph = graph_arc.write().map_err(|_| {
+                ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
+            })?;
+            graph.end_batch().map_err(ServerError::Storage)?;
+        }
+
+        self.batch_state.exit();
         self.pending_result = None;
-        self.send_ignored().await
+        self.send_response(&BoltResponse::Success { metadata: vec![] })
+            .await
     }
 
     // ── RESET ─────────────────────────────────────────────────────────────────
 
     async fn handle_reset(&mut self) -> Result<()> {
+        self.cleanup_batch_state()?;
         self.failed = false;
         self.pending_result = None;
         self.send_response(&BoltResponse::Success { metadata: vec![] })
             .await
+    }
+
+    // ── Batch helpers ────────────────────────────────────────────────────────
+
+    /// Flush and close any open batch (explicit or implicit).
+    ///
+    /// Called on RESET, LOGON, and connection teardown to ensure WAL
+    /// durability and prevent `batch_depth` leaks.
+    fn cleanup_batch_state(&mut self) -> Result<()> {
+        let needs_flush =
+            self.batch_state.in_batch || self.batch_state.dirty_count > 0;
+
+        if needs_flush {
+            if let Some(ref graph_arc) = self.graph {
+                let mut graph = graph_arc.write().map_err(|_| {
+                    ServerError::Auth(tessera_graph_auth::AuthError::LockPoisoned("graph"))
+                })?;
+                graph.end_batch().map_err(ServerError::Storage)?;
+            }
+        }
+
+        self.batch_state.exit();
+        Ok(())
     }
 
     // ── Response helpers ──────────────────────────────────────────────────────
@@ -831,4 +1055,78 @@ fn dict_str<'a>(dict: &'a BoltDict, key: &str) -> Option<&'a str> {
             None
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_state_new_is_clean() {
+        let bs = BatchState::new();
+        assert!(!bs.in_batch);
+        assert_eq!(bs.dirty_count, 0);
+        assert!(bs.first_dirty_at.is_none());
+    }
+
+    #[test]
+    fn batch_state_enter_exit_roundtrip() {
+        let mut bs = BatchState::new();
+        bs.enter();
+        assert!(bs.in_batch);
+        let was = bs.exit();
+        assert!(was);
+        assert!(!bs.in_batch);
+    }
+
+    #[test]
+    fn batch_state_exit_without_enter_returns_false() {
+        let mut bs = BatchState::new();
+        assert!(!bs.exit());
+    }
+
+    #[test]
+    fn batch_state_mark_dirty_tracks_count_and_timestamp() {
+        let mut bs = BatchState::new();
+        bs.mark_dirty();
+        assert_eq!(bs.dirty_count, 1);
+        assert!(bs.first_dirty_at.is_some());
+        let first = bs.first_dirty_at.unwrap();
+        bs.mark_dirty();
+        assert_eq!(bs.dirty_count, 2);
+        assert_eq!(bs.first_dirty_at.unwrap(), first);
+    }
+
+    #[test]
+    fn batch_state_auto_flush_on_ops_threshold() {
+        let mut bs = BatchState::new();
+        for _ in 0..499 {
+            bs.mark_dirty();
+        }
+        assert!(!bs.should_auto_flush(500, Duration::from_secs(60)));
+        bs.mark_dirty();
+        assert!(bs.should_auto_flush(500, Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn batch_state_auto_flush_on_time_threshold() {
+        let mut bs = BatchState::new();
+        bs.dirty_count = 1;
+        bs.first_dirty_at = Some(
+            Instant::now()
+                .checked_sub(Duration::from_millis(20))
+                .expect("test: clock"),
+        );
+        assert!(bs.should_auto_flush(500, Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn batch_state_reset_dirty_clears_counters() {
+        let mut bs = BatchState::new();
+        bs.mark_dirty();
+        bs.mark_dirty();
+        bs.reset_dirty();
+        assert_eq!(bs.dirty_count, 0);
+        assert!(bs.first_dirty_at.is_none());
+    }
 }

@@ -144,3 +144,9 @@
 - **Cómo se solucionó:** Commit 2fc7f97 — `clear()` envía RESET tras DETACH DELETE fallido. Tests enterprise requerían actualización del byte order del handshake (MIT core cambió de `[0x00, major, minor, 0x00]` a `[0x00, 0x00, minor, major]` per Neo4j spec).
 - **Estado:** Resuelto. 29/29 bolt handler tests + 4/4 E2E tests pasan (2026-04-08).
 - **Regla:** Antes de asumir que un benchmark funciona, verificar que las queries realmente retornan datos (no solo medir el tiempo de ejecución).
+
+### [2026-04-10] Default password en tessera-bench.rs no coincide con servidor Docker
+- **Qué hice mal:** El default de `tessera_bolt_pass` en `tessera-bench.rs` (línea 102) era `Admin.123` (sin `@`), pero el servidor Docker usa `Admin@.123`. Al lanzar el benchmark sin `--tessera-pass` explícito, falló con "authentication failed".
+- **Causa raíz:** Typo en el default del CLI — faltaba el `@` en la contraseña. El default en `from_env()` del target sí era correcto, pero el CLI tenía un valor distinto.
+- **Cómo lo solucioné:** Corregido el default en `tessera-bench.rs` y el test assertion correspondiente.
+- **Regla:** Al definir defaults de credenciales en múltiples sitios, verificar que todos coinciden con la configuración real del Docker Compose.

@@ -169,7 +169,7 @@ impl TesseraBoltTarget {
         let user =
             std::env::var("TESSERA_BOLT_USER").unwrap_or_else(|_| "admin".into());
         let pass =
-            std::env::var("TESSERA_BOLT_PASS").unwrap_or_else(|_| "Admin@.123".into());
+            std::env::var("TESSERA_BOLT_PASS").unwrap_or_else(|_| "Admin@.123".into());  // must match TESSERA_ADMIN_PASSWORD
         Self::connect(&host, port, &user, &pass)
     }
 

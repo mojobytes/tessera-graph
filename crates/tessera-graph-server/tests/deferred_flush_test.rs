@@ -8,6 +8,7 @@ use tessera_graph::{Graph, GraphConfig, Properties};
 use tessera_graph_server::flush_task::spawn_background_flush;
 use tessera_graph_tenant::{DatabaseAddress, DatabaseName, TenantId, TenantRegistry};
 
+#[allow(clippy::missing_const_for_fn)]
 fn test_config() -> GraphConfig {
     GraphConfig {
         memory_limit_bytes: 4 * 1024 * 1024,

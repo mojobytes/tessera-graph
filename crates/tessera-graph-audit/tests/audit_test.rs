@@ -225,10 +225,12 @@ fn audit_log_open_respects_channel_capacity() {
 #[test]
 fn audit_entry_timestamp_has_millisecond_resolution() {
     let e = AuditEntry::success(None, AuditEvent::Logout);
-    let now_ms = std::time::SystemTime::now()
+    let now_ms: u64 = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock") // OK: test
-        .as_millis() as u64;
+        .as_millis()
+        .try_into()
+        .expect("test: millis fits u64");
     assert!(
         e.timestamp_ms >= now_ms.saturating_sub(2000) && e.timestamp_ms <= now_ms + 2000,
         "timestamp_ms {} not near now_ms {}", e.timestamp_ms, now_ms
@@ -255,7 +257,11 @@ async fn writer_throughput_no_regression() {
     handle.await.expect("writer"); // OK: test
 
     let contents = std::fs::read_to_string(&path).expect("read"); // OK: test
-    assert_eq!(contents.trim().lines().count(), n as usize, "all entries must survive");
+    assert_eq!(
+        contents.trim().lines().count(),
+        usize::try_from(n).expect("test: n fits usize"),
+        "all entries must survive"
+    );
 }
 
 // ── HIGH #8: sync_data after flush ─────────────────────────────────────────

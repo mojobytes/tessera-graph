@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn from_protocol_error() {
-        let pe = tessera_graph_protocol::ProtocolError::FrameTooLarge { declared: 999 };
+        let pe = tessera_graph_protocol::ProtocolError::BoltInvalidHandshake { reason: "test" };
         let ce: CliError = pe.into();
         assert_eq!(ce.exit_code(), 1);
         assert!(ce.to_string().contains("Connection error"));

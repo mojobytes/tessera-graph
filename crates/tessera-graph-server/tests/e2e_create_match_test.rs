@@ -1,9 +1,9 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
-//! End-to-end test: real TCP server + real BoltClient.
+//! End-to-end test: real TCP server + real `BoltClient`.
 //!
 //! Reproduces the `TesseraBoltTarget` flow: CREATE then MATCH over a real
-//! TCP connection (no DuplexStream). This isolates whether the bug is in
+//! TCP connection (no `DuplexStream`). This isolates whether the bug is in
 //! the TCP/framing layer vs the handler logic.
 
 mod common;

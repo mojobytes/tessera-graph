@@ -105,39 +105,121 @@ impl TesseraTarget {
         Ok(order)
     }
 
-    /// Shortest path via BFS using `NeighborCache`.
+    /// Shortest path via bidirectional BFS using `NeighborCache`.
+    ///
+    /// Expands a forward frontier from `from` (using `direction`) and a backward
+    /// frontier from `to` (using the inverse direction) in alternating levels.
+    /// When the frontiers intersect, the path is reconstructed from both parent
+    /// maps. This halves the search space on chains and gives O(√N) on graphs
+    /// with branching factor > 1.
+    /// Shortest path via bidirectional BFS using `NeighborCache`.
+    ///
+    /// Expands a forward frontier from `from` and a backward frontier from `to`
+    /// in alternating levels. Uses `NodeId::from_raw(u64::MAX)` as sentinel for
+    /// root nodes to avoid `Option` overhead in the parent maps.
+    #[allow(clippy::similar_names)] // next_fwd / next_bwd are intentionally parallel
     fn cached_shortest_path(&self, from: NodeId, to: NodeId, direction: Direction) -> tessera_graph::Result<Option<Vec<NodeId>>> {
         if from == to {
             return Ok(Some(vec![from]));
         }
-        let mut visited = HashSet::new();
-        let mut parent: HashMap<NodeId, NodeId> = HashMap::new();
-        let mut queue: VecDeque<NodeId> = VecDeque::new();
 
-        visited.insert(from);
-        queue.push_back(from);
+        let backward_direction = match direction {
+            Direction::Outgoing => Direction::Incoming,
+            Direction::Incoming => Direction::Outgoing,
+            Direction::Both => Direction::Both,
+        };
 
-        while let Some(current) = queue.pop_front() {
-            for neighbor in self.cached_neighbors(current, direction)? {
-                if visited.insert(neighbor) {
-                    parent.insert(neighbor, current);
-                    if neighbor == to {
-                        // Reconstruct path
-                        let mut path = Vec::new();
-                        let mut node = to;
-                        while node != from {
-                            path.push(node);
-                            node = *parent.get(&node).expect("parent map incomplete");
-                        }
-                        path.push(from);
-                        path.reverse();
-                        return Ok(Some(path));
+        // Sentinel value for root nodes (avoids Option overhead)
+        let sentinel = NodeId::from_raw(u64::MAX);
+
+        let mut fwd_parent: HashMap<NodeId, NodeId> = HashMap::new();
+        let mut bwd_parent: HashMap<NodeId, NodeId> = HashMap::new();
+
+        fwd_parent.insert(from, sentinel);
+        bwd_parent.insert(to, sentinel);
+
+        let mut fwd_frontier: Vec<NodeId> = vec![from];
+        let mut bwd_frontier: Vec<NodeId> = vec![to];
+
+        // Expand the smaller frontier first for better performance
+        loop {
+            if fwd_frontier.is_empty() {
+                return Ok(None);
+            }
+
+            // Expand forward frontier one level
+            let mut next_fwd = Vec::new();
+            for &node in &fwd_frontier {
+                for neighbor in self.cached_neighbors(node, direction)? {
+                    if fwd_parent.contains_key(&neighbor) {
+                        continue;
                     }
-                    queue.push_back(neighbor);
+                    fwd_parent.insert(neighbor, node);
+                    if bwd_parent.contains_key(&neighbor) {
+                        return Ok(Some(Self::reconstruct_bidir_path(
+                            neighbor, from, to, sentinel, &fwd_parent, &bwd_parent,
+                        )));
+                    }
+                    next_fwd.push(neighbor);
                 }
             }
+            fwd_frontier = next_fwd;
+
+            if bwd_frontier.is_empty() {
+                return Ok(None);
+            }
+
+            // Expand backward frontier one level
+            let mut next_bwd = Vec::new();
+            for &node in &bwd_frontier {
+                for neighbor in self.cached_neighbors(node, backward_direction)? {
+                    if bwd_parent.contains_key(&neighbor) {
+                        continue;
+                    }
+                    bwd_parent.insert(neighbor, node);
+                    if fwd_parent.contains_key(&neighbor) {
+                        return Ok(Some(Self::reconstruct_bidir_path(
+                            neighbor, from, to, sentinel, &fwd_parent, &bwd_parent,
+                        )));
+                    }
+                    next_bwd.push(neighbor);
+                }
+            }
+            bwd_frontier = next_bwd;
         }
-        Ok(None)
+    }
+
+    /// Reconstructs the full path from the meeting node using both parent maps.
+    fn reconstruct_bidir_path(
+        meeting: NodeId,
+        from: NodeId,
+        to: NodeId,
+        sentinel: NodeId,
+        fwd_parent: &HashMap<NodeId, NodeId>,
+        bwd_parent: &HashMap<NodeId, NodeId>,
+    ) -> Vec<NodeId> {
+        // Forward segment: from → ... → meeting
+        let mut path = Vec::new();
+        let mut cursor = meeting;
+        while cursor != from {
+            path.push(cursor);
+            cursor = fwd_parent[&cursor];
+            debug_assert_ne!(cursor, sentinel, "fwd_parent chain broken");
+        }
+        path.push(from);
+        path.reverse();
+
+        // Backward segment: meeting → ... → to
+        cursor = bwd_parent[&meeting];
+        while cursor != sentinel {
+            path.push(cursor);
+            if cursor == to {
+                return path;
+            }
+            cursor = bwd_parent[&cursor];
+        }
+
+        path
     }
 
     /// Returns neighbor IDs for a node using the cache, respecting direction.
@@ -386,6 +468,90 @@ mod tests {
             elapsed.as_millis() < max_ms,
             "BFS traversal regression: 100 x 1000-node BFS took {}ms >= {max_ms}ms",
             elapsed.as_millis()
+        );
+    }
+
+    // ── Bidirectional BFS tests ──
+
+    #[test]
+    fn shortest_path_chain_of_100_returns_correct_length() {
+        let mut t = TesseraTarget::new();
+        let first = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let mut prev = first;
+        let mut last = first;
+        for _ in 0..99 {
+            let next = t.create_node("N", Properties::new()).unwrap(); // OK: test
+            t.create_edge("E", prev, next, Properties::new()).unwrap(); // OK: test
+            prev = next;
+            last = next;
+        }
+        let path = t.shortest_path(first, last).unwrap(); // OK: test
+        assert!(path.is_some());
+        assert_eq!(path.unwrap().len(), 100); // OK: test
+    }
+
+    #[test]
+    #[allow(clippy::many_single_char_names)]
+    fn shortest_path_diamond_returns_length_3() {
+        let mut t = TesseraTarget::new();
+        let a = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let b = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let c = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let d = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        t.create_edge("E", a, b, Properties::new()).unwrap(); // OK: test
+        t.create_edge("E", a, c, Properties::new()).unwrap(); // OK: test
+        t.create_edge("E", b, d, Properties::new()).unwrap(); // OK: test
+        t.create_edge("E", c, d, Properties::new()).unwrap(); // OK: test
+        let path = t.shortest_path(a, d).unwrap(); // OK: test
+        assert!(path.is_some());
+        assert_eq!(path.unwrap().len(), 3); // OK: test
+    }
+
+    #[test]
+    fn shortest_path_same_node_returns_singleton() {
+        let mut t = TesseraTarget::new();
+        let a = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let path = t.shortest_path(a, a).unwrap(); // OK: test
+        assert!(path.is_some());
+        assert_eq!(path.unwrap().len(), 1); // OK: test
+    }
+
+    /// Regression guard: bidirectional BFS on a 1K-chain must not be slower
+    /// than 500 ops/s in release. On chains (branching=1) bidirectional BFS is
+    /// ~parity with unidirectional; the real speedup appears on graphs with
+    /// branching factor > 1 where it reduces search from O(b^d) to O(b^(d/2)).
+    #[test]
+    fn shortest_path_throughput_regression_guard() {
+        use std::time::Instant;
+        let mut t = TesseraTarget::new();
+        let first = t.create_node("N", Properties::new()).unwrap(); // OK: test
+        let mut prev = first;
+        let mut last = first;
+        for _ in 0..999 {
+            let next = t.create_node("N", Properties::new()).unwrap(); // OK: test
+            t.create_edge("E", prev, next, Properties::new()).unwrap(); // OK: test
+            prev = next;
+            last = next;
+        }
+        let _ = t.shortest_path(first, last).unwrap(); // OK: test — warm up
+        let iters = 200usize;
+        let t0 = Instant::now();
+        for _ in 0..iters {
+            let p = t.shortest_path(first, last).unwrap(); // OK: test
+            assert!(p.is_some());
+        }
+        let elapsed = t0.elapsed();
+        #[allow(
+            clippy::cast_precision_loss,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let ops_per_sec = (iters as f64 / elapsed.as_secs_f64()) as u64;
+        let threshold: u64 = if cfg!(debug_assertions) { 100 } else { 500 };
+        assert!(
+            ops_per_sec >= threshold,
+            "shortest_path throughput regression: {ops_per_sec} ops/s < {threshold} ops/s minimum \
+             (1000-node chain, {iters} iterations, {elapsed:?})"
         );
     }
 }

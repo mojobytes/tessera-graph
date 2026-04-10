@@ -16,7 +16,7 @@ fn props(pairs: &[(&str, &str)]) -> Properties {
 fn parse_query(input: &str) -> GqlQuery {
     match gql::parse_statement(input).unwrap() {
         GqlStatement::Query(q) => q,
-        _ => panic!("expected a query statement"),
+        GqlStatement::Mutation(_) => panic!("expected a query statement"),
     }
 }
 
@@ -109,13 +109,13 @@ fn regular_function_does_not_need_optimized() {
 /// Builds a chain graph: A -> B -> C -> D
 fn build_chain_graph() -> Graph {
     let mut g = Graph::new();
-    let a = g.add_node("Node", props(&[("name", "A")])).unwrap();
-    let b = g.add_node("Node", props(&[("name", "B")])).unwrap();
-    let c = g.add_node("Node", props(&[("name", "C")])).unwrap();
-    let d = g.add_node("Node", props(&[("name", "D")])).unwrap();
-    g.add_edge("CONNECTS", a, b, Properties::new()).unwrap();
-    g.add_edge("CONNECTS", b, c, Properties::new()).unwrap();
-    g.add_edge("CONNECTS", c, d, Properties::new()).unwrap();
+    let node_a = g.add_node("Node", props(&[("name", "A")])).unwrap();
+    let node_b = g.add_node("Node", props(&[("name", "B")])).unwrap();
+    let node_c = g.add_node("Node", props(&[("name", "C")])).unwrap();
+    let node_d = g.add_node("Node", props(&[("name", "D")])).unwrap();
+    g.add_edge("CONNECTS", node_a, node_b, Properties::new()).unwrap();
+    g.add_edge("CONNECTS", node_b, node_c, Properties::new()).unwrap();
+    g.add_edge("CONNECTS", node_c, node_d, Properties::new()).unwrap();
     g
 }
 
@@ -245,7 +245,7 @@ fn variable_hop_throughput_guard() {
         let _ = execute_query(&g, &query).unwrap();
     }
     let elapsed = start.elapsed();
-    let qps = iterations as f64 / elapsed.as_secs_f64();
+    let qps = f64::from(iterations) / elapsed.as_secs_f64();
 
     // Debug threshold: >= 200 qps (release target: >= 5000 qps)
     // Debug mode has significant overhead from bounds checking, no inlining, etc.
@@ -270,16 +270,16 @@ fn variable_hop_throughput_guard() {
 /// Builds: A -> B -> C -> D -> E, plus shortcut A -> D
 fn build_shortest_path_graph() -> Graph {
     let mut g = Graph::new();
-    let a = g.add_node("Node", props(&[("name", "A")])).unwrap();
-    let b = g.add_node("Node", props(&[("name", "B")])).unwrap();
-    let c = g.add_node("Node", props(&[("name", "C")])).unwrap();
-    let d = g.add_node("Node", props(&[("name", "D")])).unwrap();
-    let e = g.add_node("Node", props(&[("name", "E")])).unwrap();
-    g.add_edge("NEXT", a, b, Properties::new()).unwrap();
-    g.add_edge("NEXT", b, c, Properties::new()).unwrap();
-    g.add_edge("NEXT", c, d, Properties::new()).unwrap();
-    g.add_edge("NEXT", d, e, Properties::new()).unwrap();
-    g.add_edge("SHORTCUT", a, d, Properties::new()).unwrap(); // shortcut
+    let node_a = g.add_node("Node", props(&[("name", "A")])).unwrap();
+    let node_b = g.add_node("Node", props(&[("name", "B")])).unwrap();
+    let node_c = g.add_node("Node", props(&[("name", "C")])).unwrap();
+    let node_d = g.add_node("Node", props(&[("name", "D")])).unwrap();
+    let node_e = g.add_node("Node", props(&[("name", "E")])).unwrap();
+    g.add_edge("NEXT", node_a, node_b, Properties::new()).unwrap();
+    g.add_edge("NEXT", node_b, node_c, Properties::new()).unwrap();
+    g.add_edge("NEXT", node_c, node_d, Properties::new()).unwrap();
+    g.add_edge("NEXT", node_d, node_e, Properties::new()).unwrap();
+    g.add_edge("SHORTCUT", node_a, node_d, Properties::new()).unwrap(); // shortcut
     g
 }
 
@@ -434,14 +434,14 @@ fn shortest_path_throughput_guard() {
         let _ = execute_query(&g, &query).unwrap();
     }
     let enterprise_elapsed = start.elapsed();
-    let enterprise_qps = iterations as f64 / enterprise_elapsed.as_secs_f64();
+    let enterprise_qps = f64::from(iterations) / enterprise_elapsed.as_secs_f64();
 
     let start = std::time::Instant::now();
     for _ in 0..iterations {
         let _ = tessera_graph::gql::execute(&g, &query).unwrap();
     }
     let mit_elapsed = start.elapsed();
-    let mit_qps = iterations as f64 / mit_elapsed.as_secs_f64();
+    let mit_qps = f64::from(iterations) / mit_elapsed.as_secs_f64();
 
     eprintln!(
         "shortestPath throughput: enterprise={enterprise_qps:.0} qps, mit={mit_qps:.0} qps, \
@@ -487,16 +487,16 @@ fn variable_hop_bare_var_return_delegates_to_mit_core() {
 #[test]
 fn bidirectional_bfs_two_paths_same_frontier_layer_picks_optimal() {
     let mut g = Graph::new();
-    let a = g.add_node("Node", props(&[("name", "A")])).unwrap();
-    let b = g.add_node("Node", props(&[("name", "B")])).unwrap();
-    let c = g.add_node("Node", props(&[("name", "C")])).unwrap();
-    let d = g.add_node("Node", props(&[("name", "D")])).unwrap();
-    let e = g.add_node("Node", props(&[("name", "E")])).unwrap();
-    g.add_edge("R", a, b, Properties::new()).unwrap();
-    g.add_edge("R", b, c, Properties::new()).unwrap();
-    g.add_edge("R", a, d, Properties::new()).unwrap();
-    g.add_edge("R", d, c, Properties::new()).unwrap();
-    g.add_edge("R", c, e, Properties::new()).unwrap();
+    let node_a = g.add_node("Node", props(&[("name", "A")])).unwrap();
+    let node_b = g.add_node("Node", props(&[("name", "B")])).unwrap();
+    let node_c = g.add_node("Node", props(&[("name", "C")])).unwrap();
+    let node_d = g.add_node("Node", props(&[("name", "D")])).unwrap();
+    let node_e = g.add_node("Node", props(&[("name", "E")])).unwrap();
+    g.add_edge("R", node_a, node_b, Properties::new()).unwrap();
+    g.add_edge("R", node_b, node_c, Properties::new()).unwrap();
+    g.add_edge("R", node_a, node_d, Properties::new()).unwrap();
+    g.add_edge("R", node_d, node_c, Properties::new()).unwrap();
+    g.add_edge("R", node_c, node_e, Properties::new()).unwrap();
 
     let query = parse_query(
         "MATCH (a:Node {name:'A'}) MATCH (b:Node {name:'E'}) RETURN shortestPath(a, b)",
@@ -521,14 +521,14 @@ fn bidirectional_bfs_two_paths_same_frontier_layer_picks_optimal() {
 #[test]
 fn bidirectional_bfs_diamond_returns_length_3() {
     let mut g = Graph::new();
-    let a = g.add_node("Node", props(&[("name", "A")])).unwrap();
-    let b = g.add_node("Node", props(&[("name", "B")])).unwrap();
-    let c = g.add_node("Node", props(&[("name", "C")])).unwrap();
-    let d = g.add_node("Node", props(&[("name", "D")])).unwrap();
-    g.add_edge("R", a, b, Properties::new()).unwrap();
-    g.add_edge("R", a, c, Properties::new()).unwrap();
-    g.add_edge("R", b, d, Properties::new()).unwrap();
-    g.add_edge("R", c, d, Properties::new()).unwrap();
+    let node_a = g.add_node("Node", props(&[("name", "A")])).unwrap();
+    let node_b = g.add_node("Node", props(&[("name", "B")])).unwrap();
+    let node_c = g.add_node("Node", props(&[("name", "C")])).unwrap();
+    let node_d = g.add_node("Node", props(&[("name", "D")])).unwrap();
+    g.add_edge("R", node_a, node_b, Properties::new()).unwrap();
+    g.add_edge("R", node_a, node_c, Properties::new()).unwrap();
+    g.add_edge("R", node_b, node_d, Properties::new()).unwrap();
+    g.add_edge("R", node_c, node_d, Properties::new()).unwrap();
 
     let query = parse_query(
         "MATCH (a:Node {name:'A'}) MATCH (b:Node {name:'D'}) RETURN shortestPath(a, b)",

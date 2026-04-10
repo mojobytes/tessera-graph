@@ -1,6 +1,6 @@
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
-//! Tests validating that WAL recovery provides durability without explicit flush().
+//! Tests validating that WAL recovery provides durability without explicit `flush()`.
 //!
 //! These tests underpin the deferred-flush optimisation: if WAL recovery can
 //! reconstruct all mutations, then per-mutation `flush()` in the Bolt handler
@@ -44,6 +44,7 @@ fn wal_recovery_preserves_node_without_flush() {
             1,
             "WAL recovery must reconstruct the unflushed node"
         );
+        drop(g);
     }
 }
 
@@ -76,6 +77,7 @@ fn wal_recovery_preserves_graph_topology_without_flush() {
         let g = arc.read().unwrap();
         assert_eq!(g.node_count(), 3, "WAL recovery must reconstruct 3 nodes");
         assert_eq!(g.edge_count(), 2, "WAL recovery must reconstruct 2 edges");
+        drop(g);
     }
 }
 
@@ -114,6 +116,7 @@ fn wal_recovery_after_partial_flush() {
             5,
             "WAL recovery must reconstruct both flushed and unflushed nodes"
         );
+        drop(g);
     }
 }
 
@@ -141,5 +144,6 @@ fn wal_recovery_preserves_label_without_flush() {
         assert_eq!(g.node_count(), 1);
         let node = g.node(original_id).unwrap();
         assert_eq!(node.label(), "Person");
+        drop(g);
     }
 }

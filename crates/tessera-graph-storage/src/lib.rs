@@ -2,6 +2,7 @@
 //!
 // Copyright 2026 BelowZero Security OU. All rights reserved.
 
+pub mod adj_index;
 pub mod backup;
 pub mod cache;
 pub mod error;

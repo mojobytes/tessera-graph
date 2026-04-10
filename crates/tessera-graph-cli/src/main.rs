@@ -246,6 +246,9 @@ where
                 if args.continue_on_error {
                     error_count += 1;
                     eprintln!("Error in statement #{}: {e}", count + error_count);
+                    // Send RESET to recover from FAILED state so subsequent
+                    // statements are not rejected with "request ignored".
+                    let _ = session.client.reset().await;
                 } else {
                     query_err = Some(e);
                     break;
@@ -611,7 +614,7 @@ mod tests {
 
     #[test]
     fn progress_interval_constant_is_positive() {
-        assert!(PROGRESS_INTERVAL > 0);
+        const _: () = assert!(PROGRESS_INTERVAL > 0);
     }
 
     #[test]

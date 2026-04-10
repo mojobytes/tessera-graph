@@ -352,8 +352,8 @@ async fn bolt_run_pull_mutation_is_flushed() {
         drop(shutdown_tx);
     }
 
-    // Small wait to ensure flush completes.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // Wait for the handler task to complete and flush.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     // --- Second session: verify the node survived ---
     let registry2 = Arc::new(TenantRegistry::new(dir.path(), config));
@@ -560,10 +560,10 @@ async fn bolt_goodbye_closes_connection() {
 
 // ── Transaction tests ─────────────────────────────────────────────────────────
 // Explicit transactions (BEGIN/COMMIT/ROLLBACK) are NOT implemented.
-// BEGIN must respond FAILURE so clients don't silently lose rollback semantics.
+// BEGIN now responds SUCCESS — it opens a batch for deferred WAL sync.
 
 #[tokio::test]
-async fn bolt_begin_responds_failure() {
+async fn bolt_begin_responds_success() {
     let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
@@ -576,13 +576,13 @@ async fn bolt_begin_responds_failure() {
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
     let resp = bolt_recv(&mut reader).await;
     assert!(
-        matches!(resp, BoltResponse::Failure { .. }),
-        "BEGIN must respond FAILURE (explicit transactions not supported), got {resp:?}"
+        matches!(resp, BoltResponse::Success { .. }),
+        "BEGIN must respond SUCCESS (batch mode), got {resp:?}"
     );
 }
 
 #[tokio::test]
-async fn bolt_after_begin_failure_run_is_ignored() {
+async fn bolt_run_inside_begin_succeeds() {
     let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
@@ -592,58 +592,56 @@ async fn bolt_after_begin_failure_run_is_ignored() {
         BoltResponse::Success { .. }
     ));
 
-    // BEGIN enters FAILED state
+    // BEGIN opens batch
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
-    assert!(matches!(
-        bolt_recv(&mut reader).await,
-        BoltResponse::Failure { .. }
-    ));
-
-    // RUN in FAILED state must be IGNORED
-    bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
-    let resp = bolt_recv(&mut reader).await;
-    assert!(
-        matches!(resp, BoltResponse::Ignored),
-        "RUN after BEGIN failure must be IGNORED, got {resp:?}"
-    );
-}
-
-#[tokio::test]
-async fn bolt_after_begin_failure_reset_recovers() {
-    let (_dir, ctx) = test_context();
-    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
-
-    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
     assert!(matches!(
         bolt_recv(&mut reader).await,
         BoltResponse::Success { .. }
     ));
 
-    // BEGIN fails
-    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
-    assert!(matches!(
-        bolt_recv(&mut reader).await,
-        BoltResponse::Failure { .. }
-    ));
-
-    // RESET recovers
-    bolt_send(&mut writer, &BoltRequest::Reset).await;
-    assert!(matches!(
-        bolt_recv(&mut reader).await,
-        BoltResponse::Success { .. }
-    ));
-
-    // RUN should work again
+    // RUN inside batch succeeds
     bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
     let resp = bolt_recv(&mut reader).await;
     assert!(
         matches!(resp, BoltResponse::Success { .. }),
-        "RUN after RESET should succeed, got {resp:?}"
+        "RUN inside BEGIN must succeed, got {resp:?}"
     );
 }
 
 #[tokio::test]
-async fn bolt_commit_without_begin_returns_ignored() {
+async fn bolt_begin_then_commit_then_run_works() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // BEGIN → COMMIT cycle
+    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+    bolt_send(&mut writer, &BoltRequest::Commit).await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
+
+    // RUN should work after COMMIT
+    bolt_send(&mut writer, &run_query("MATCH (n) RETURN n")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "RUN after COMMIT should succeed, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn bolt_commit_without_begin_returns_failure() {
     let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
@@ -656,13 +654,13 @@ async fn bolt_commit_without_begin_returns_ignored() {
     bolt_send(&mut writer, &BoltRequest::Commit).await;
     let resp = bolt_recv(&mut reader).await;
     assert!(
-        matches!(resp, BoltResponse::Ignored),
-        "COMMIT without BEGIN must be IGNORED, got {resp:?}"
+        matches!(resp, BoltResponse::Failure { .. }),
+        "COMMIT without BEGIN must be FAILURE, got {resp:?}"
     );
 }
 
 #[tokio::test]
-async fn bolt_rollback_without_begin_returns_ignored() {
+async fn bolt_rollback_without_begin_returns_failure() {
     let (_dir, ctx) = test_context();
     let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
 
@@ -675,8 +673,8 @@ async fn bolt_rollback_without_begin_returns_ignored() {
     bolt_send(&mut writer, &BoltRequest::Rollback).await;
     let resp = bolt_recv(&mut reader).await;
     assert!(
-        matches!(resp, BoltResponse::Ignored),
-        "ROLLBACK without BEGIN must be IGNORED, got {resp:?}"
+        matches!(resp, BoltResponse::Failure { .. }),
+        "ROLLBACK without BEGIN must be FAILURE, got {resp:?}"
     );
 }
 
@@ -836,6 +834,7 @@ async fn setup_5_nodes() -> (
                 .add_node("Person", props! { "name" => format!("P{i}") })
                 .unwrap(); // OK: test
         }
+        drop(graph);
     }
 
     let ctx = test_context_with_registry(registry);
@@ -924,7 +923,7 @@ async fn pull_n_then_pull_all_returns_remaining() {
 
 // ── DISCARD tests ────────────────────────────────────────────────────────────
 
-/// Regression guard: DISCARD after partial PULL must clean up pending_result.
+/// Regression guard: DISCARD after partial PULL must clean up `pending_result`.
 #[tokio::test]
 async fn discard_after_partial_pull_clears_cursor_and_next_run_works() {
     let (mut writer, mut reader, _shutdown, _dir) = setup_5_nodes().await;
@@ -1177,5 +1176,165 @@ async fn create_then_match_with_id_function() {
         matches!(records[0].first(), Some(PackStreamValue::Int(_))),
         "expected integer node ID, got {:?}",
         records[0]
+    );
+}
+
+// ── BEGIN / COMMIT / ROLLBACK tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn begin_commit_batch_creates_nodes() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    // Authenticate
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(matches!(resp, BoltResponse::Success { .. }));
+
+    // BEGIN
+    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "BEGIN should return SUCCESS, got {resp:?}"
+    );
+
+    // Create 100 nodes inside the batch
+    let n = 100;
+    for i in 0..n {
+        bolt_send(&mut writer, &run_query(&format!("CREATE (n:Batch {{i: {i}}})"))
+        ).await;
+        let run_resp = bolt_recv(&mut reader).await;
+        assert!(
+            matches!(run_resp, BoltResponse::Success { .. }),
+            "RUN CREATE failed at i={i}: {run_resp:?}"
+        );
+        bolt_send(&mut writer, &pull()).await;
+        loop {
+            let resp = bolt_recv(&mut reader).await;
+            if matches!(resp, BoltResponse::Success { .. }) {
+                break;
+            }
+        }
+    }
+
+    // COMMIT
+    bolt_send(&mut writer, &BoltRequest::Commit).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "COMMIT should return SUCCESS, got {resp:?}"
+    );
+
+    // Verify all nodes are visible
+    bolt_send(&mut writer, &run_query("MATCH (n:Batch) RETURN n.i")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(matches!(resp, BoltResponse::Success { .. }));
+
+    bolt_send(&mut writer, &pull()).await;
+    let mut count = 0u64;
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        match resp {
+            BoltResponse::Record { .. } => count += 1,
+            BoltResponse::Success { .. } => break,
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    assert_eq!(count, n, "expected {n} nodes after COMMIT");
+}
+
+#[tokio::test]
+async fn nested_begin_returns_failure() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    let _ = bolt_recv(&mut reader).await;
+
+    // First BEGIN succeeds
+    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(matches!(resp, BoltResponse::Success { .. }));
+
+    // Second BEGIN fails
+    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Failure { .. }),
+        "nested BEGIN should fail, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn commit_without_begin_returns_failure() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    let _ = bolt_recv(&mut reader).await;
+
+    bolt_send(&mut writer, &BoltRequest::Commit).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Failure { .. }),
+        "COMMIT without BEGIN should fail, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn rollback_without_begin_returns_failure() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    let _ = bolt_recv(&mut reader).await;
+
+    bolt_send(&mut writer, &BoltRequest::Rollback).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Failure { .. }),
+        "ROLLBACK without BEGIN should fail, got {resp:?}"
+    );
+}
+
+#[tokio::test]
+async fn rollback_after_begin_succeeds() {
+    let (_dir, ctx) = test_context();
+    let (mut writer, mut reader, _shutdown) = spawn_bolt_handler(ctx).await;
+
+    bolt_send(&mut writer, &hello_request("admin", "Admin@Init1!")).await;
+    let _ = bolt_recv(&mut reader).await;
+
+    bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(matches!(resp, BoltResponse::Success { .. }));
+
+    // Create a node inside the batch
+    bolt_send(&mut writer, &run_query("CREATE (n:Tmp)")).await;
+    let _ = bolt_recv(&mut reader).await;
+    bolt_send(&mut writer, &pull()).await;
+    loop {
+        let resp = bolt_recv(&mut reader).await;
+        if matches!(resp, BoltResponse::Success { .. }) {
+            break;
+        }
+    }
+
+    // ROLLBACK
+    bolt_send(&mut writer, &BoltRequest::Rollback).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "ROLLBACK should return SUCCESS, got {resp:?}"
+    );
+
+    // After ROLLBACK, auto-commit queries should work
+    bolt_send(&mut writer, &run_query("MATCH (n:Tmp) RETURN n")).await;
+    let resp = bolt_recv(&mut reader).await;
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "query after ROLLBACK should succeed, got {resp:?}"
     );
 }

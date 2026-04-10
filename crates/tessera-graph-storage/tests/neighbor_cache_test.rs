@@ -2,7 +2,7 @@
 
 //! Integration tests for `NeighborCache` — correctness and performance.
 
-use tessera_graph::{Graph, GraphAccess, NodeId, Properties};
+use tessera_graph::{Edge, Graph, GraphAccess, NodeId, Properties};
 use tessera_graph_storage::cache::NeighborCache;
 
 /// Builds a chain graph: N0→N1→N2→...→N(n-1).
@@ -44,7 +44,7 @@ fn cached_results_match_uncached() {
             .outgoing_edges(node)
             .unwrap_or_default()
             .iter()
-            .map(|e| e.target())
+            .map(Edge::target)
             .collect();
         assert_eq!(cached_out, uncached_out, "outgoing mismatch for {node:?}");
 
@@ -53,7 +53,7 @@ fn cached_results_match_uncached() {
             .incoming_edges(node)
             .unwrap_or_default()
             .iter()
-            .map(|e| e.source())
+            .map(Edge::source)
             .collect();
         assert_eq!(cached_in, uncached_in, "incoming mismatch for {node:?}");
     }
@@ -164,7 +164,7 @@ fn bfs_cache_speedup_vs_uncached() {
     }
     let uncached_time = t0.elapsed();
 
-    let speedup = uncached_time.as_nanos() as f64 / cached_time.as_nanos() as f64;
+    let speedup = uncached_time.as_secs_f64() / cached_time.as_secs_f64();
     eprintln!(
         "BFS 1000-node chain x{iterations}: cached={cached_time:?}, uncached={uncached_time:?}, speedup={speedup:.1}x"
     );
@@ -194,7 +194,7 @@ fn bfs_cached_throughput_regression_guard() {
     }
     let elapsed = t0.elapsed();
 
-    let ops_per_sec = iterations as f64 / elapsed.as_secs_f64();
+    let ops_per_sec = f64::from(iterations) / elapsed.as_secs_f64();
     eprintln!(
         "BFS cached throughput: {iterations} x 1000-node BFS in {elapsed:?} = {ops_per_sec:.0} ops/s"
     );
