@@ -25,6 +25,7 @@ tessera-graph-monitor = { workspace = true }
 tessera-graph-tenant = { workspace = true }
 tessera-graph              = { workspace = true }
 tessera-graph-cypher = { workspace = true }
+tessera-server-core  = { workspace = true }
 fs2                        = "0.4"
 thiserror                  = { workspace = true }
 tokio                      = { workspace = true, features = ["net", "rt-multi-thread", "macros", "sync", "time", "io-util", "signal"] }

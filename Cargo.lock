@@ -2247,8 +2247,8 @@ dependencies = [
  "neo4rs",
  "rustls",
  "tessera-graph",
- "tessera-graph-config",
- "tessera-graph-cypher",
+ "tessera-graph-config 0.3.0",
+ "tessera-graph-cypher 0.3.0",
  "tessera-graph-protocol",
  "tessera-graph-storage",
  "thiserror 2.0.18",
@@ -2280,9 +2280,25 @@ dependencies = [
 
 [[package]]
 name = "tessera-graph-config"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tessera-graph-config"
 version = "0.3.0"
 dependencies = [
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tessera-graph-cypher"
+version = "0.1.0"
+dependencies = [
+ "moka",
+ "tessera-graph",
+ "tessera-graph-config 0.1.0",
 ]
 
 [[package]]
@@ -2291,7 +2307,7 @@ version = "0.3.0"
 dependencies = [
  "moka",
  "tessera-graph",
- "tessera-graph-config",
+ "tessera-graph-config 0.3.0",
 ]
 
 [[package]]
@@ -2336,6 +2352,22 @@ dependencies = [
 
 [[package]]
 name = "tessera-graph-server"
+version = "0.1.0"
+dependencies = [
+ "rustls-pemfile",
+ "tessera-graph",
+ "tessera-graph-config 0.1.0",
+ "tessera-graph-cypher 0.1.0",
+ "tessera-graph-protocol",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "tessera-graph-server"
 version = "0.3.0"
 dependencies = [
  "fs2",
@@ -2345,10 +2377,11 @@ dependencies = [
  "tessera-graph",
  "tessera-graph-audit",
  "tessera-graph-auth",
- "tessera-graph-config",
- "tessera-graph-cypher",
+ "tessera-graph-config 0.3.0",
+ "tessera-graph-cypher 0.3.0",
  "tessera-graph-monitor",
  "tessera-graph-protocol",
+ "tessera-graph-server 0.1.0",
  "tessera-graph-storage",
  "tessera-graph-tenant",
  "thiserror 2.0.18",
@@ -2366,8 +2399,8 @@ dependencies = [
  "tempfile",
  "tessera-graph",
  "tessera-graph-auth",
- "tessera-graph-config",
- "tessera-graph-cypher",
+ "tessera-graph-config 0.3.0",
+ "tessera-graph-cypher 0.3.0",
  "thiserror 2.0.18",
 ]
 

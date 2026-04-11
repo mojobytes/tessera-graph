@@ -18,7 +18,7 @@ use tessera_graph_auth::user::UserStoreHandle;
 use tessera_graph_protocol::tls::TlsConfigBuilder;
 use tessera_graph_server::config::PersistenceConfig;
 use tessera_graph_server::context::ServerContext;
-use tessera_graph_server::listener::TesseraListener;
+use tessera_graph_server::listener::{TesseraListener, serve_enterprise_tls};
 use tessera_graph_tenant::TenantRegistry;
 
 #[tokio::main]
@@ -262,8 +262,8 @@ async fn main() {
     let addr = listener.local_addr().expect("local addr");
     tracing::info!("TesseraGraph listening on {addr} (TLS, Bolt 4.4)");
 
-    if let Err(e) = listener
-        .serve_tls(
+    if let Err(e) = serve_enterprise_tls(
+            listener,
             ctx,
             shutdown_rx,
             max_connections,

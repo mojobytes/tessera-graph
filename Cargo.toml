@@ -36,6 +36,7 @@ tessera-graph-config       = { path = "crates/tessera-graph-config" }
 tessera-graph-cypher       = { path = "crates/tessera-graph-cypher" }
 tessera-graph-replication  = { path = "crates/tessera-graph-replication" }
 tessera-graph-tenant       = { path = "crates/tessera-graph-tenant" }
+tessera-server-core        = { path = "../tessera-graph/crates/tessera-graph-server", package = "tessera-graph-server", features = ["plain-tcp"] }
 # default-features = false: each crate must declare the tokio features it needs.
 # See: https://doc.rust-lang.org/cargo/reference/features.html#feature-unification
 tokio        = { version = "1", default-features = false }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tessera_graph_protocol::BoltClient;
-use tessera_graph_server::TesseraListener;
+use tessera_graph_server::{TesseraListener, serve_enterprise, serve_enterprise_tls};
 use tokio_rustls::rustls;
 use tokio_rustls::rustls::client::danger::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
@@ -73,8 +73,8 @@ async fn e2e_tcp_create_then_match_returns_node() {
 
     // Spawn server (plain TCP, no TLS — isolates protocol logic)
     tokio::spawn(async move {
-        let _ = listener
-            .serve(
+        let _ = serve_enterprise(
+                listener,
                 ctx,
                 shutdown_rx,
                 10,
@@ -138,8 +138,8 @@ async fn e2e_tcp_multiple_creates_then_match_returns_all() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     tokio::spawn(async move {
-        let _ = listener
-            .serve(
+        let _ = serve_enterprise(
+                listener,
                 ctx,
                 shutdown_rx,
                 10,
@@ -219,8 +219,8 @@ async fn e2e_tls_create_then_match_returns_node() {
 
     // Spawn TLS server — exactly as production
     tokio::spawn(async move {
-        let _ = listener
-            .serve_tls(
+        let _ = serve_enterprise_tls(
+                listener,
                 ctx,
                 shutdown_rx,
                 10,
@@ -295,8 +295,8 @@ async fn e2e_tls_5_creates_then_match_returns_all() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     tokio::spawn(async move {
-        let _ = listener
-            .serve_tls(
+        let _ = serve_enterprise_tls(
+                listener,
                 ctx,
                 shutdown_rx,
                 10,

@@ -15,4 +15,4 @@ pub mod startup;
 pub use bolt_handler::BoltConnectionHandler;
 pub use context::ServerContext;
 pub use error::{Result, ServerError};
-pub use listener::TesseraListener;
+pub use listener::{TesseraListener, serve_enterprise, serve_enterprise_tls};

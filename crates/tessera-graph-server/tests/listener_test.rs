@@ -4,7 +4,7 @@ mod common;
 
 use std::time::Duration;
 
-use tessera_graph_server::TesseraListener;
+use tessera_graph_server::{TesseraListener, serve_enterprise};
 
 use common::test_context;
 
@@ -42,15 +42,15 @@ async fn listener_serves_plain_connections() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     tokio::spawn(async move {
-        let _ = listener
-            .serve(
-                ctx,
-                shutdown_rx,
-                10,
-                Duration::from_secs(30),
-                "default".to_owned(),
-            )
-            .await;
+        let _ = serve_enterprise(
+            listener,
+            ctx,
+            shutdown_rx,
+            10,
+            Duration::from_secs(30),
+            "default".to_owned(),
+        )
+        .await;
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -70,15 +70,15 @@ async fn graceful_shutdown_stops_accept_loop() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let server_handle = tokio::spawn(async move {
-        listener
-            .serve(
-                ctx,
-                shutdown_rx,
-                10,
-                Duration::from_secs(30),
-                "default".to_owned(),
-            )
-            .await
+        serve_enterprise(
+            listener,
+            ctx,
+            shutdown_rx,
+            10,
+            Duration::from_secs(30),
+            "default".to_owned(),
+        )
+        .await
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
