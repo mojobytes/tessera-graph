@@ -31,13 +31,17 @@ COPY tessera-graph-enterprise/ tessera-graph-enterprise/
 RUN find tessera-graph/ -name Cargo.toml -exec sed -i '/^\[\[bench\]\]/,/^$/d' {} + \
     && sed -i '/"crates\/tessera-graph-benchmark",/d' tessera-graph-enterprise/Cargo.toml
 
-# Build server and CLI binaries in release mode
+# Build server (enterprise workspace) and CLI (MIT core workspace) in release
+# mode. The enterprise CLI crate has been deleted as part of the 0.5.0 sync —
+# the MIT core CLI is a strict superset (admin commands, layout migration).
 RUN cd tessera-graph-enterprise \
-    && cargo build --release -p tessera-graph-server -p tessera-graph-cli
+    && cargo build --release -p tessera-graph-server \
+    && cd ../tessera-graph \
+    && cargo build --release -p tessera-graph-cli
 
 # Verify binaries
 RUN ls -lh tessera-graph-enterprise/target/release/tessera-graph-server \
-           tessera-graph-enterprise/target/release/tessera-graph-cli
+           tessera-graph/target/release/tessera-graph-cli
 
 # Generate self-signed TLS certificate for development
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/* \
@@ -66,7 +70,7 @@ RUN useradd -m -u 1001 tessera \
 
 # Copy binaries
 COPY --from=builder /build/tessera-graph-enterprise/target/release/tessera-graph-server /usr/local/bin/tessera-graph-server
-COPY --from=builder /build/tessera-graph-enterprise/target/release/tessera-graph-cli /usr/local/bin/tessera-graph-cli
+COPY --from=builder /build/tessera-graph/target/release/tessera-graph-cli /usr/local/bin/tessera-graph-cli
 
 # Copy TLS certificates
 COPY --from=builder /build/certs/server.pem /etc/tessera/certs/server.pem
