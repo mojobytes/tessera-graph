@@ -1,9 +1,65 @@
 # Migration Plan — MIT Core 0.5.0 Sync
 
 **Created:** 2026-05-19
-**Status:** Draft — approved, pending execution
-**Target branch:** `feature/mit-core-0.5.0-sync` (to be created from `develop`)
+**Status:** Phase 1 in progress — blocked on upstream bug in `mojobytes/tessera-graph` 0.5.0
+**Target branch:** `feature/resilience-streaming-quality` (Phase 1 was done here in-place; `feature/mit-core-0.5.0-sync` was never created — see Phase 1 execution log below)
 **Estimated total effort:** 17–33 h across 7 sessions
+
+---
+
+## Execution log
+
+### 2026-05-19 — Phase 1 partially executed (BLOCKED)
+
+Phase 1 of the plan (delete 3 duplicated crates + adapt API + reach `cargo check`/`clippy` green) was executed in-place on `feature/resilience-streaming-quality` because that branch already held the prerequisites (`adj_index.rs` commit, `.gitignore` update, this plan document). 7 commits, all local, none pushed:
+
+- `341c8c4` `fix(storage): commit AdjacencyIndex implementation referenced by lib.rs`
+- `74b7ed8` `chore(gitignore): ignore local agent state and graph export artefacts`
+- `71726d2` `docs(plan): MIT core 0.5.0 sync — 7-phase migration plan` (this file)
+- `c83f177` `refactor(workspace): delete tessera-graph-config — MIT core is functionally identical`
+- `fe5e8ab` `refactor(workspace): delete tessera-graph-cypher — MIT core is superset`
+- `1f14395` `refactor(workspace): delete tessera-graph-cli — MIT core is superset`
+- `6dfa0dd` `refactor(storage,server,import): adapt to MIT core 0.5.0 API`
+
+**Green:**
+- `cargo check --workspace` ✅
+- `cargo clippy --workspace --tests -- -D warnings` ✅
+- `cargo test --workspace --no-run` ✅
+
+**Red — 5 test failures, all caused by an upstream MIT core 0.5.0 bug:**
+- `cypher_compat_starts_with_filters_correctly`
+- `cypher_compat_starts_with_case_insensitive_keyword`
+- `cypher_compat_ends_with_filters_correctly`
+- `cypher_compat_in_with_starts_with`
+- `cypher_compat_string_ops_combined_with_and`
+
+**Root cause** (in `mojobytes/tessera-graph` 0.5.0): the parser in `crates/tessera-graph/src/gql/parser.rs:1220-1248` has explicit `STARTS WITH` / `ENDS WITH` handling but the `peek_ahead(1) == Token::Ident("WITH")` check never matches because the lexer tokenises `WITH` as `Token::With` (reserved keyword for `WITH x AS y` pipelines). The `STARTS WITH` / `ENDS WITH` parsing is **dead code** in 0.5.0. See `.private/error-log.md` entry `[2026-05-19]` for the full diagnosis and proposed fix.
+
+**Blocker resolution path:**
+
+1. Open an issue in `mojobytes/tessera-graph` with the bug report drafted at session end (title: `fix(gql): STARTS WITH / ENDS WITH unreachable in parser — peek_ahead checks Ident("WITH") but lexer emits Token::With`).
+2. Apply the proposed fix in the MIT core: change the condition to accept both `Token::With` and `Token::Ident("WITH")`. Add the 5 missing tests upstream (`STARTS WITH`, `ENDS WITH`, `CONTAINS`, `IN [...]`, combined-with-AND).
+3. Once the MIT core fix lands, rerun `cargo test --workspace` from this enterprise repo — should be green without touching any enterprise code.
+4. Push the 7 commits → reopen the work on PR #1 → run Phase 1 §3.5 (fix CI workflow) → merge.
+
+**Remaining Phase 1 work (not blocked by the upstream bug):**
+
+- Step 9 of the original §3.1 list: fix `.github/workflows/ci.yml` (`actions/checkout` cannot use `path: ../tessera-graph` — see Phase 1 §3.5 below).
+- Step 10: push, validate green CI, merge PR #1.
+
+## Phase 1 — §3.5: Fix CI workflow (deferred from Phase 1, blocked by upstream)
+
+The current `.github/workflows/ci.yml` clones the MIT core via `actions/checkout@v4` with `path: ../tessera-graph`. This fails at runtime with `"Repository path is not under '/home/runner/work/.../tessera-graph-enterprise'"` because `actions/checkout` only accepts paths inside `$GITHUB_WORKSPACE`.
+
+**Two viable fixes:**
+
+A. **Shell-step clone** — replace the second `actions/checkout` with a `run:` step that does `git clone https://x-access-token:${{ secrets.GH_PAT }}@github.com/mojobytes/tessera-graph.git ../tessera-graph`. Requires a PAT with read access to the MIT core repo (or `GITHUB_TOKEN` if the MIT core is public). Preserves the current `../tessera-graph` layout, no Cargo.toml changes needed.
+
+B. **Restructure layout** — move the MIT core into a subdirectory of the enterprise repo (e.g. `vendor/tessera-graph/`) and update the 3 `path =` entries in `Cargo.toml`. `actions/checkout` can then clone with `path: vendor/tessera-graph`. Breaks every local developer who has the current `../tessera-graph` layout.
+
+**Recommendation:** A. Less disruptive to local dev. The PAT (if needed) can be the same one already used by `tessera-bench` for Bolt benchmarks.
+
+---
 
 ---
 
