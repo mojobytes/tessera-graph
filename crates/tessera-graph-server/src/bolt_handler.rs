@@ -690,6 +690,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                     })
                     .map_err(|e| e.to_string())
                 }
+                // The MIT core 0.5.0 added three statement variants
+                // (`Pipeline`, `Admin`, `ConstReturn`) that the enterprise
+                // handler does not yet route. They are rejected here with a
+                // clear error rather than executed silently — wiring them is
+                // tracked under Phase 2 of the 0.5.0 sync plan
+                // (`.private/migration-plan-mit-core-0.5.0.md` §4).
+                GqlStatement::Pipeline(_) => {
+                    Err("WITH pipeline queries are not yet supported by the enterprise Bolt handler".to_owned())
+                }
+                GqlStatement::Admin(_) => {
+                    Err("admin statements (CREATE USER, GRANT, etc.) are not yet wired in the enterprise Bolt handler".to_owned())
+                }
+                GqlStatement::ConstReturn(_) => {
+                    Err("RETURN-only statements are not yet supported by the enterprise Bolt handler".to_owned())
+                }
             };
 
         let (columns, rows) = match exec_result {

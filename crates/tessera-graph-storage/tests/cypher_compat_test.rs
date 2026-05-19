@@ -68,7 +68,7 @@ fn cypher_compat_handles_backtick_ident() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -86,7 +86,7 @@ fn cypher_compat_handles_backtick_with_spaces() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -104,7 +104,7 @@ fn cypher_compat_strips_block_comments() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -165,7 +165,7 @@ fn cypher_compat_starts_with_filters_correctly() {
                     .all(|v| matches!(v, GqlValue::Str(s) if s.starts_with("Al")))
             );
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -185,7 +185,7 @@ fn cypher_compat_starts_with_case_insensitive_keyword() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 1);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -209,7 +209,7 @@ fn cypher_compat_ends_with_filters_correctly() {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].get("n.name"), Some(&GqlValue::Str("Alice".into())));
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -237,7 +237,7 @@ fn cypher_compat_contains_filters_correctly() {
                 Some(&GqlValue::Str("Malcolm".into()))
             );
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -261,7 +261,7 @@ fn cypher_compat_in_operator_with_string_list() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 2);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -282,7 +282,7 @@ fn cypher_compat_in_operator_with_int_list() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 2);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -301,7 +301,7 @@ fn cypher_compat_in_operator_empty_list_matches_nothing() {
             let rows = gql::execute(&g, &q).unwrap();
             assert_eq!(rows.len(), 0);
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -323,7 +323,7 @@ fn cypher_compat_id_function_returns_int() {
                 "id(n) should return an integer"
             );
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -349,7 +349,7 @@ fn cypher_compat_labels_function_returns_list() {
                 other => panic!("expected List, got {other:?}"),
             }
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -371,7 +371,7 @@ fn cypher_compat_type_function_returns_edge_label() {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].get("type(r)"), Some(&GqlValue::Str("KNOWS".into())));
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -575,7 +575,7 @@ fn cypher_compat_string_ops_combined_with_and() {
                 Some(&GqlValue::Str("Alexander".into()))
             );
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -596,7 +596,7 @@ fn cypher_compat_in_with_starts_with() {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].get("n.name"), Some(&GqlValue::Str("Alice".into())));
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }
 
@@ -636,6 +636,6 @@ fn cypher_compat_id_used_in_where_clause() {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].get("n.name"), Some(&GqlValue::Str("Alice".into())));
         }
-        GqlStatement::Mutation(_) => panic!("expected Query"),
+        other => panic!("expected Query, got: {other:?}"),
     }
 }

@@ -68,9 +68,18 @@ pub fn import_gql<G: GraphAccess>(graph: &mut G, gql_text: &str) -> ImportResult
                     .edges_created
                     .saturating_add(usize::try_from(result.edges_created).unwrap_or(usize::MAX));
             }
-            GqlStatement::Query(_) => {
-                // Read-only queries are silently skipped.
-            }
+            // Anything that is not a graph-data mutation is skipped:
+            //   - Query / Pipeline / ConstReturn: read-only, no state change
+            //     to apply during import.
+            //   - Admin: targets the server's authorization catalogue
+            //     (CREATE USER, GRANT, etc.), not the user graph being
+            //     imported. Skipping keeps the importer focused on graph
+            //     data and avoids leaking import-time identity into the
+            //     catalogue.
+            GqlStatement::Query(_)
+            | GqlStatement::Pipeline(_)
+            | GqlStatement::ConstReturn(_)
+            | GqlStatement::Admin(_) => {}
         }
     }
 

@@ -10,7 +10,7 @@ use tessera_graph_storage::gql::execute_mut;
 
 fn run_mutation(graph: &mut Graph, query: &str) -> tessera_graph::Result<GqlMutationResult> {
     let stmt = gql::parse_statement(query)?;
-    let ms = stmt.as_mutation().expect("expected a mutation statement");
+    let ms = stmt.into_mutation().expect("expected a mutation statement");
     execute_mut(graph, &ms)
 }
 
@@ -228,6 +228,7 @@ fn set_clause_combined_with_mutation_returns_error() {
         CreateClause, Expr, Literal, MutationClause, MutationStatement, SetAssignment, SetClause,
     };
     let stmt = MutationStatement {
+        unwind_clause: None,
         match_clause: None,
         set_clause: Some(SetClause {
             assignments: vec![SetAssignment {
@@ -288,6 +289,7 @@ fn set_multiple_properties_counts_each_assignment() {
 fn delete_unbound_variable_returns_error() {
     use tessera_graph::gql::{DeleteClause, MutationClause, MutationStatement};
     let stmt = MutationStatement {
+        unwind_clause: None,
         match_clause: None,
         set_clause: None,
         mutation: MutationClause::Delete(DeleteClause {
@@ -309,6 +311,7 @@ fn set_unbound_variable_returns_error() {
         Expr, Literal, MutationClause, MutationStatement, SetAssignment, SetClause,
     };
     let stmt = MutationStatement {
+        unwind_clause: None,
         match_clause: None,
         set_clause: None,
         mutation: MutationClause::Set(SetClause {
@@ -401,8 +404,9 @@ fn parse_statement_rejects_multi_label_node() {
 
 #[test]
 fn parse_statement_accepts_variable_length_path() {
-    // With extended-gql enabled (default in enterprise), variable-length paths
-    // are parsed successfully and handled by the optimized traversal engine.
+    // Variable-length paths are part of the MIT core default build (the
+    // `extended-gql` feature flag was removed upstream in 0.5.0). They are
+    // parsed successfully and handled by the optimized traversal engine.
     let stmt = gql::parse_statement("MATCH (a)-[*]->(b) RETURN a").unwrap();
     assert!(matches!(stmt, gql::GqlStatement::Query(_)));
 }

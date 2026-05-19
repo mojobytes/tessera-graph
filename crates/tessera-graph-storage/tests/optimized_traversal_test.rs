@@ -16,7 +16,7 @@ fn props(pairs: &[(&str, &str)]) -> Properties {
 fn parse_query(input: &str) -> GqlQuery {
     match gql::parse_statement(input).unwrap() {
         GqlStatement::Query(q) => q,
-        GqlStatement::Mutation(_) => panic!("expected a query statement"),
+        other => panic!("expected a Query statement, got: {other:?}"),
     }
 }
 

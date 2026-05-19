@@ -13,10 +13,18 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+// `eval_set_value` is deprecated upstream (MIT core 0.5.0). The enterprise
+// SET execution path will be migrated to `apply_pipeline_set` (which
+// evaluates full Expr trees against a Binding context) in Phase 2 of the
+// 0.5.0 sync — see `.private/migration-plan-mit-core-0.5.0.md` §4. Until
+// then, the literal-only helper still produces correct results for every
+// SET statement the enterprise pipeline emits.
+#[allow(deprecated)]
+use tessera_graph::gql::eval_set_value;
 use tessera_graph::gql::{
     CreatePattern, DeleteClause, EdgeLength, Expr, GqlQuery, GqlResult, GqlRow, GqlValue,
     Literal, MergeClause, MutationClause, MutationStatement, SetClause, compile_match_for_mutation,
-    eval_set_value, literal_to_property, literal_vec_to_properties,
+    literal_to_property, resolve_create_props,
 };
 use tessera_graph::{Direction, Error, GqlMutationResult, GraphAccess, NodeId, Property};
 
@@ -72,14 +80,8 @@ fn has_bare_var_return(query: &GqlQuery) -> bool {
         .any(|item| matches!(&item.expr, Expr::Var(_)))
 }
 
-#[cfg(feature = "extended-gql")]
 fn has_shortest_path_call(expr: &Expr) -> bool {
     matches!(expr, Expr::FunctionCall { name, .. } if name == "shortestpath")
-}
-
-#[cfg(not(feature = "extended-gql"))]
-fn has_shortest_path_call(_expr: &Expr) -> bool {
-    false
 }
 
 // ── Optimized Query Execution ────────────────────────────────────────────────
@@ -107,11 +109,8 @@ pub fn execute_query<G: GraphAccess + ?Sized>(
     }
 
     // Check if this is a shortestPath query
-    #[cfg(feature = "extended-gql")]
-    {
-        if let Some(result) = try_execute_shortest_path(graph, query)? {
-            return Ok(result);
-        }
+    if let Some(result) = try_execute_shortest_path(graph, query)? {
+        return Ok(result);
     }
 
     execute_variable_hop_query(graph, query, &|n, d| neighbor_ids_uncached(graph, n, d))
@@ -137,11 +136,8 @@ pub fn execute_query_cached<G: GraphAccess>(
         return tessera_graph::gql::execute(graph, query);
     }
 
-    #[cfg(feature = "extended-gql")]
-    {
-        if let Some(result) = try_execute_shortest_path_cached(graph, cache, query)? {
-            return Ok(result);
-        }
+    if let Some(result) = try_execute_shortest_path_cached(graph, cache, query)? {
+        return Ok(result);
     }
 
     execute_variable_hop_query(
@@ -176,11 +172,8 @@ pub fn execute_query_with_shared_cache<G: GraphAccess + ?Sized>(
 
     let ck = ClearanceKey::from(clearance);
 
-    #[cfg(feature = "extended-gql")]
-    {
-        if let Some(result) = try_execute_shortest_path_shared(graph, cache, &ck, query)? {
-            return Ok(result);
-        }
+    if let Some(result) = try_execute_shortest_path_shared(graph, cache, &ck, query)? {
+        return Ok(result);
     }
 
     execute_variable_hop_query(
@@ -196,7 +189,6 @@ pub fn execute_query_with_shared_cache<G: GraphAccess + ?Sized>(
 ///
 /// Returns `Ok(Some(result))` if the query contains a shortestPath call,
 /// `Ok(None)` if it doesn't (caller should try other execution paths).
-#[cfg(feature = "extended-gql")]
 #[allow(clippy::unnecessary_wraps)] // Result needed for consistency with execute_query call site
 fn try_execute_shortest_path<G: GraphAccess + ?Sized>(
     graph: &G,
@@ -268,7 +260,6 @@ fn try_execute_shortest_path<G: GraphAccess + ?Sized>(
 
 /// Cached variant of `try_execute_shortest_path` — uses `NeighborCache` for
 /// BFS neighbor resolution instead of full `Edge` deserialization.
-#[cfg(feature = "extended-gql")]
 #[allow(clippy::unnecessary_wraps)]
 fn try_execute_shortest_path_cached<G: GraphAccess>(
     graph: &G,
@@ -335,7 +326,6 @@ fn try_execute_shortest_path_cached<G: GraphAccess>(
 }
 
 /// `SharedNeighborCache` variant of shortest path execution.
-#[cfg(feature = "extended-gql")]
 #[allow(clippy::unnecessary_wraps)]
 fn try_execute_shortest_path_shared<G: GraphAccess + ?Sized>(
     graph: &G,
@@ -404,7 +394,6 @@ fn try_execute_shortest_path_shared<G: GraphAccess + ?Sized>(
 
 /// Resolves a variable name to matching node IDs by scanning MATCH clause
 /// patterns for node bindings with that variable name.
-#[cfg(feature = "extended-gql")]
 fn resolve_var_ids<G: GraphAccess + ?Sized>(
     graph: &G,
     var_name: &str,
@@ -428,7 +417,6 @@ fn resolve_var_ids<G: GraphAccess + ?Sized>(
 }
 
 /// Finds node IDs matching a label + inline property constraints.
-#[cfg(feature = "extended-gql")]
 fn resolve_by_label_props<G: GraphAccess + ?Sized>(
     graph: &G,
     labels: &[String],
@@ -1012,7 +1000,6 @@ fn compile_literal(lit: &Literal) -> GqlValue {
         Literal::Str(s) => GqlValue::Str(s.clone()),
         Literal::Bool(b) => GqlValue::Bool(*b),
         Literal::Null => GqlValue::Null,
-        #[cfg(feature = "extended-gql")]
         Literal::List(items) => GqlValue::List(items.iter().map(compile_literal).collect()),
     }
 }
@@ -1024,7 +1011,6 @@ fn expr_surface_name(expr: &Expr) -> String {
         Expr::Literal(Literal::Str(s)) => format!("'{s}'"),
         Expr::Var(v) => v.clone(),
         Expr::PropAccess { var, prop } => format!("{var}.{prop}"),
-        #[cfg(feature = "extended-gql")]
         Expr::FunctionCall { name, args } => {
             let arg_strs: Vec<String> = args.iter().map(expr_surface_name).collect();
             format!("{}({})", name, arg_strs.join(", "))
@@ -1112,7 +1098,16 @@ fn execute_create<G: GraphAccess>(
     for pattern in &clause.patterns {
         match pattern {
             CreatePattern::Node { var, label, props } => {
-                let properties = literal_vec_to_properties(props);
+                // Top-level CREATE has no MATCH context — evaluate prop
+                // expressions with an empty PatternMatch. Literal expressions
+                // resolve fine; variable references resolve to Null and are
+                // silently skipped by `resolve_create_props`.
+                let properties = resolve_create_props(
+                    props,
+                    &tessera_graph::PatternMatch::empty(),
+                    graph,
+                    None,
+                );
                 let id = graph.add_node(label, properties)?;
                 result.nodes_created += 1;
                 if let Some(v) = var {
@@ -1135,7 +1130,12 @@ fn execute_create<G: GraphAccess>(
                         "unbound variable '{target_var}' in CREATE edge"
                     ))
                 })?;
-                let properties = literal_vec_to_properties(rel_props);
+                let properties = resolve_create_props(
+                    rel_props,
+                    &tessera_graph::PatternMatch::empty(),
+                    graph,
+                    None,
+                );
                 graph.add_edge(rel_label, source, target, properties)?;
                 result.edges_created += 1;
             }
@@ -1209,6 +1209,8 @@ fn execute_set<G: GraphAccess>(
         let ids = node_var_multi.get(assignment.var.as_str()).ok_or_else(|| {
             Error::GqlMutationError(format!("unbound variable '{}' in SET", assignment.var))
         })?;
+        // See import comment for rationale of using a deprecated helper here.
+        #[allow(deprecated)]
         let value = eval_set_value(&assignment.value)?;
         for &id in ids {
             per_node

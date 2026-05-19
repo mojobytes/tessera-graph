@@ -23,7 +23,7 @@ fn run_through_secure(
 ) -> tessera_graph::Result<tessera_graph::GqlMutationResult> {
     let mut sg = SecureGraph::new(g, c);
     let stmt = gql::parse_statement(query).unwrap();
-    let ms = stmt.as_mutation().expect("mutation expected");
+    let ms = stmt.into_mutation().expect("mutation expected");
     execute_mut(&mut sg, &ms)
 }
 
@@ -90,7 +90,7 @@ fn match_only_returns_nodes_visible_to_clearance() {
 fn existing_execute_mut_on_plain_graph_still_works() {
     let mut g = Graph::new();
     let stmt = gql::parse_statement("CREATE (n:Person {name: 'Alice'})").unwrap();
-    let ms = stmt.as_mutation().unwrap();
+    let ms = stmt.into_mutation().unwrap();
     execute_mut(&mut g, &ms).unwrap();
     assert_eq!(g.node_count(), 1);
 }
