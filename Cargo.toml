@@ -8,7 +8,6 @@ members = [
     "crates/tessera-graph-streaming",
     "crates/tessera-graph-monitor",
     "crates/tessera-graph-audit",
-    "crates/tessera-graph-config",
     "crates/tessera-graph-replication",
     "crates/tessera-graph-tenant",
     "crates/tessera-graph-cypher",
@@ -32,7 +31,7 @@ tessera-graph-import       = { path = "crates/tessera-graph-import" }
 tessera-graph-streaming    = { path = "crates/tessera-graph-streaming" }
 tessera-graph-monitor      = { path = "crates/tessera-graph-monitor" }
 tessera-graph-audit        = { path = "crates/tessera-graph-audit" }
-tessera-graph-config       = { path = "crates/tessera-graph-config" }
+tessera-graph-config       = { path = "../tessera-graph/crates/tessera-graph-config" }
 tessera-graph-cypher       = { path = "crates/tessera-graph-cypher" }
 tessera-graph-replication  = { path = "crates/tessera-graph-replication" }
 tessera-graph-tenant       = { path = "crates/tessera-graph-tenant" }
