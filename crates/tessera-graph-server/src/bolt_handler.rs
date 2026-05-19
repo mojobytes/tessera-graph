@@ -34,10 +34,6 @@ use tessera_graph_tenant::{DatabaseAddress, DatabaseName, TenantId};
 use crate::context::ServerContext;
 use crate::error::{Result, ServerError};
 
-/// Generic auth-failure message sent over the wire.
-/// Must never include usernames, passwords, or internal details.
-const AUTH_FAILURE_MSG: &str = "authentication failed";
-
 /// Global connection counter for unique `connection_id` in HELLO responses.
 static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -349,7 +345,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
                 .auth_failure
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return self
-                .send_failure("Neo.ClientError.Security.Unauthorized", AUTH_FAILURE_MSG)
+                .send_failure("Neo.ClientError.Security.Unauthorized", Self::auth_failure_msg())
                 .await;
         };
 
@@ -381,7 +377,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
             return self
                 .send_failure(
                     "Neo.TransientError.General.DatabaseUnavailable",
-                    AUTH_FAILURE_MSG,
+                    Self::auth_failure_msg(),
                 )
                 .await;
         };
@@ -432,6 +428,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
     ///
     /// Returns `Err(())` on any authentication failure, so the caller can
     /// send the generic failure message without leaking details.
+    ///
+    /// Generic auth-failure message sent over the wire. Must never include
+    /// usernames, passwords, or internal details — CWE-204 (observable
+    /// response discrepancy) mandates that successful and failed auth
+    /// attempts are indistinguishable to the caller.
+    #[inline]
+    const fn auth_failure_msg() -> &'static str {
+        "authentication failed"
+    }
+
     async fn authenticate(
         &self,
         principal: &str,
@@ -546,9 +552,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send + Sync> BoltConnectionHandler<S> {
         };
 
         // --- Parse (server-wide LRU cache) ---
+        // `params_signature = 0`: empty parameter map signature. We reject
+        // non-empty params upstream, so this branch never aliases a cache
+        // entry across different bindings.
         let stmt = match tessera_graph_cypher::parse_with_mode_cached(
             query,
             tessera_graph_config::QueryLanguage::CypherCompat,
+            0,
             self.ctx.query_cache(),
         ) {
             Ok(s) => s,
