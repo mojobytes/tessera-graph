@@ -4,3 +4,15 @@
 *.crt
 *.env
 .env.*
+
+# Local IDE / agent state
+/.claude/
+
+# Graph export artefacts at the repository root.
+# These are produced by the CLI / import scripts during local testing and
+# can grow to hundreds of MB. They must never be committed.
+/nodes.csv
+/edges.csv
+/nodes.cypher
+/edges.cypher
+/graph.json
