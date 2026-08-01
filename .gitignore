@@ -1,0 +1,33 @@
+/target
+*.swp
+*.swo
+.DS_Store
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Private working dir — NEVER commit (error logs, benchmarks, probes)
+# (covers the former per-file .private/* and .private/**/bin|obj rules)
+.private/
+
+# proptest-regressions/ is deliberately NOT listed here (issue #67).
+# When a property test fails, proptest saves the shrunk input that broke it.
+# Committing those files turns each found bug into a permanent, reproducible
+# regression case that reruns on every machine and in CI; ignoring them would
+# discard the minimal case as soon as anyone cleaned their working tree.
+# The absence of an entry below is intentional — please do not "fix" it.
+#
+# Most of the saved cases came from deliberately mutating the codecs to check
+# the tests actually bite, not from bugs found in passing code. They are worth
+# keeping anyway: each one is the exact input that broke a specific guard, so
+# if that guard is ever removed again the failure surfaces on the first case
+# instead of waiting for random generation to rediscover it.

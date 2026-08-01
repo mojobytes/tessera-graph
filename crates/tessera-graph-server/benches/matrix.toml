@@ -1,0 +1,79 @@
+# Lock-contention benchmark matrix — the single source of truth for which
+# scenarios exist and which are runnable in-process.
+#
+# Scenario 1 (transport = "in-process", runnable = true): the harness in
+# `bench_support` builds an `Arc<RwLock<Graph>>` directly and spawns threads,
+# isolating the lock-contention variable with no network/Docker/TLS noise.
+#
+# Scenario 2 (transport = "bolt-docker-tls", runnable = false): declared here so
+# the axis space is complete, executed by a future Bolt-in-Docker harness. Not a
+# deferral — it is a prioritisation the user set, owned by us, with an explicit
+# trigger recorded in RUNBOOK.md and the tracked task
+# "Scenario 2: Bolt-in-Docker lock-contention benchmark". The in-process runner
+# skips these points with an explicit message; it never runs or silently drops
+# them.
+#
+# The `name` key is always derived from the axes at runtime (MatrixPoint::name);
+# no hand-written name lives in this file, so a name can never drift from the
+# axes it describes.
+
+# ── Scenario 1: in-process (runnable) ────────────────────────────────────────
+
+[[point]]
+scenario = "match-create"
+readers = 4
+writers = 2
+dataset_size = 1000
+variant = "two-lock-current"
+transport = "in-process"
+runnable = true
+
+[[point]]
+scenario = "match-create"
+readers = 4
+writers = 2
+dataset_size = 1000
+variant = "single-lock-a"
+transport = "in-process"
+runnable = true
+
+[[point]]
+scenario = "match-set"
+readers = 4
+writers = 2
+dataset_size = 1000
+variant = "two-lock-current"
+transport = "in-process"
+runnable = true
+
+[[point]]
+scenario = "match-set"
+readers = 4
+writers = 2
+dataset_size = 1000
+variant = "single-lock-a"
+transport = "in-process"
+runnable = true
+
+# ── Scenario 2: Bolt-in-Docker (declared, not runnable in-process) ────────────
+# Trigger: run when an end-to-end production-fidelity number is needed, or
+# before the final Option A vs Option B decision if that decision depends on
+# network-path fidelity. Owner: us. See RUNBOOK.md § "Scenario 2".
+
+[[point]]
+scenario = "match-create"
+readers = 4
+writers = 2
+dataset_size = 1000
+variant = "two-lock-current"
+transport = "bolt-docker-tls"
+runnable = false
+
+[[point]]
+scenario = "match-create"
+readers = 4
+writers = 2
+dataset_size = 1000
+variant = "single-lock-a"
+transport = "bolt-docker-tls"
+runnable = false
