@@ -41,6 +41,20 @@ pub trait FreeListStore {
     fn write_page_raw(&mut self, file: DataFile, page_id: PageId, data: &PageBuf) -> Result<()>;
     fn meta_ref(&self) -> &GraphMeta;
     fn meta_mut_ref(&mut self) -> &mut GraphMeta;
+
+    /// Records this file's free-list bookkeeping durably.
+    ///
+    /// The state lives in the metadata page, which only `flush` writes, so
+    /// without this a release that is not followed by a flush does not survive
+    /// a crash — the page returns neither live nor reusable.
+    ///
+    /// The whole state is written, not a delta: it is three small numbers, and
+    /// a full snapshot is idempotent on replay, so a torn sequence of records
+    /// can never leave the list half-updated. Backends with no journal
+    /// implement this as a no-op.
+    fn journal_free_list_state(&mut self, _file: DataFile) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// Takes one reusable page off `file`'s free directory, if any.
@@ -68,6 +82,7 @@ pub fn take_free_page<S: FreeListStore + ?Sized>(
     if spare != FREE_SPARE_EMPTY {
         store.meta_mut_ref().set_free_spare_page(file, FREE_SPARE_EMPTY);
         decrement_free_count(store, file);
+        store.journal_free_list_state(file)?;
         return Ok(Some(spare));
     }
 
@@ -84,6 +99,7 @@ pub fn take_free_page<S: FreeListStore + ?Sized>(
         let encoded = free_directory_codec::encode(&dir, file_magic(file))?;
         store.write_page_raw(file, head, &encoded)?;
         decrement_free_count(store, file);
+        store.journal_free_list_state(file)?;
         return Ok(Some(id));
     }
 
@@ -92,6 +108,7 @@ pub fn take_free_page<S: FreeListStore + ?Sized>(
     // leaking the very space it exists to reclaim.
     let next = dir.next;
     store.meta_mut_ref().set_free_directory_head(file, next);
+    store.journal_free_list_state(file)?;
     Ok(Some(head))
 }
 
@@ -115,7 +132,7 @@ pub fn release_page<S: FreeListStore + ?Sized>(
     if store.meta_ref().free_spare_page(file) == FREE_SPARE_EMPTY {
         store.meta_mut_ref().set_free_spare_page(file, page_id);
         increment_free_count(store, file);
-        return Ok(());
+        return store.journal_free_list_state(file);
     }
 
     let head = store.meta_ref().free_directory_head(file);
@@ -129,7 +146,7 @@ pub fn release_page<S: FreeListStore + ?Sized>(
         let encoded = free_directory_codec::encode(&dir, file_magic(file))?;
         store.write_page_raw(file, page_id, &encoded)?;
         store.meta_mut_ref().set_free_directory_head(file, page_id);
-        return Ok(());
+        return store.journal_free_list_state(file);
     }
 
     let buf = store.read_page_raw(file, head)?;
@@ -140,7 +157,7 @@ pub fn release_page<S: FreeListStore + ?Sized>(
         let encoded = free_directory_codec::encode(&dir, file_magic(file))?;
         store.write_page_raw(file, head, &encoded)?;
         increment_free_count(store, file);
-        return Ok(());
+        return store.journal_free_list_state(file);
     }
 
     // Head is full: the released page becomes a new head linking to the old
@@ -149,7 +166,7 @@ pub fn release_page<S: FreeListStore + ?Sized>(
     let encoded = free_directory_codec::encode(&new_head, file_magic(file))?;
     store.write_page_raw(file, page_id, &encoded)?;
     store.meta_mut_ref().set_free_directory_head(file, page_id);
-    Ok(())
+    store.journal_free_list_state(file)
 }
 
 /// Saturating so a miscounted release can never wrap the counter to ~4 billion,
@@ -159,11 +176,12 @@ pub fn release_page<S: FreeListStore + ?Sized>(
 /// tally is maintained independently of the directory pages and the metadata
 /// spare slot, and nothing reconciles the two — deliberately, since walking the
 /// chain to count is the I/O this design exists to avoid. So the figure
-/// [`crate::Graph::reusable_overflow_page_count`] reports is an estimate that a
-/// crash before flush can leave stale (see the known limit documented on
-/// `FileBackend`'s `FreeListStore` impl). It is safe to be wrong: the count is
-/// only ever read for reporting, never to decide whether a page may be handed
-/// out — that decision reads the directory itself.
+/// [`crate::Graph::reusable_overflow_page_count`] reports is an estimate.
+///
+/// It is safe for it to be wrong: the count is only ever read for reporting,
+/// never to decide whether a page may be handed out — that decision reads the
+/// directory itself. (Verified: its only non-bookkeeping reader is the public
+/// accessor.)
 fn decrement_free_count<S: FreeListStore + ?Sized>(store: &mut S, file: DataFile) {
     let current = store.meta_ref().free_page_count(file);
     store.meta_mut_ref().set_free_page_count(file, current.saturating_sub(1));

@@ -197,7 +197,8 @@ const fn set_lsn(record: &mut WalRecord, lsn: u64) {
         | WalRecord::Checkpoint { lsn: l }
         | WalRecord::Begin { lsn: l, .. }
         | WalRecord::Commit { lsn: l, .. }
-        | WalRecord::Rollback { lsn: l, .. } => *l = lsn,
+        | WalRecord::Rollback { lsn: l, .. }
+        | WalRecord::FreeListState { lsn: l, .. } => *l = lsn,
     }
 }
 

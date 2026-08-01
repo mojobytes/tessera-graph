@@ -143,13 +143,7 @@ impl FileBackend {
         let pool = BufferPool::new(config.memory_limit_bytes);
 
         // Register all data file handles with the pool
-        for df in [
-            DataFile::Nodes,
-            DataFile::Edges,
-            DataFile::Adjacency,
-            DataFile::Strings,
-            DataFile::Overflow,
-        ] {
+        for df in crate::storage::backend::ALL_DATA_FILES {
             let file = open_data_file(&dir, df.file_name())?;
             pool.register_file(df, file);
         }
@@ -246,28 +240,49 @@ impl FileBackend {
         }
     }
 
-    /// Replays WAL records into pages, extending page counts as needed.
-    /// Returns the number of records replayed. The caller is responsible
-    /// for truncating the WAL after recovery.
+    /// Applies one journalled free-list snapshot to `meta`.
     ///
-    /// Uses [`WalReader::read_all`] for forward-scanning: corrupt records
-    /// are skipped and valid records after them are still recovered.
-    fn recover_from_wal(
-        wal_path: &std::path::Path,
+    /// This bookkeeping lives in the metadata page, which only `flush` writes,
+    /// so replaying it is what stops a page freed since the last flush from
+    /// coming back neither live nor reusable.
+    ///
+    /// Each record carries a file's whole state, so replaying in order leaves
+    /// the last one per file standing — the state as of the crash — and a torn
+    /// sequence can never half-apply.
+    ///
+    /// Returns whether anything was applied. An unrecognised file index is
+    /// skipped rather than treated as corruption: a journal written by a build
+    /// with more data files must not stop this one from opening.
+    fn replay_free_list_state(
+        meta: &mut GraphMeta,
+        file_index: u8,
+        directory_head: u32,
+        spare_page: u32,
+        free_count: u32,
+    ) -> bool {
+        let Some(file) = crate::storage::backend::ALL_DATA_FILES
+            .get(file_index as usize)
+            .copied()
+        else {
+            return false;
+        };
+        meta.set_free_directory_head(file, directory_head);
+        meta.set_free_spare_page(file, spare_page);
+        meta.set_free_page_count(file, free_count);
+        true
+    }
+
+    /// Applies already-read WAL records to pages and metadata.
+    ///
+    /// Split from [`Self::recover_from_wal`] so that reading the journal and
+    /// applying it stay separately readable; the dispatch below is long by
+    /// nature — one arm per record type.
+    fn replay_records(
         pool: &BufferPool,
         meta: &mut GraphMeta,
+        records: Vec<WalRecord>,
+        committed: &std::collections::HashSet<u64>,
     ) -> Result<u64> {
-        let result = WalReader::read_all(wal_path)?;
-
-        if result.skipped_corrupt_regions > 0 {
-            eprintln!(
-                "[tessera-graph] WARN: WAL recovery skipped {} corrupt region(s); \
-                 {} valid record(s) recovered",
-                result.skipped_corrupt_regions,
-                result.records.len(),
-            );
-        }
-
         let mut replayed = 0u64;
 
         // A data record is replayed only if durable: an auto-commit write
@@ -276,10 +291,9 @@ impl FileBackend {
         // `Commit` exists, per `committed_txn_ids`). An in-flight write whose
         // transaction begun but never committed across a crash is dropped,
         // giving atomic transactional recovery.
-        let committed = result.committed_txn_ids;
         let is_durable = |txn_id: Option<u64>| txn_id.is_none_or(|id| committed.contains(&id));
 
-        for record in result.records {
+        for record in records {
             match record {
                 WalRecord::WriteNode { lsn, page_id, slot_idx, slot, txn_id } => {
                     if !is_durable(txn_id) {
@@ -339,6 +353,23 @@ impl FileBackend {
                     pool.put_page(DataFile::Overflow, page_id, &data)?;
                     replayed += 1;
                 }
+                WalRecord::FreeListState {
+                    file_index,
+                    directory_head,
+                    spare_page,
+                    free_count,
+                    ..
+                } => {
+                    if Self::replay_free_list_state(
+                        meta,
+                        file_index,
+                        directory_head,
+                        spare_page,
+                        free_count,
+                    ) {
+                        replayed += 1;
+                    }
+                }
                 WalRecord::Checkpoint { .. }
                 | WalRecord::Begin { .. }
                 | WalRecord::Commit { .. }
@@ -353,15 +384,41 @@ impl FileBackend {
             }
         }
 
+        Ok(replayed)
+    }
+
+    /// Replays WAL records into pages, extending page counts as needed.
+    /// Returns the number of records replayed. The caller is responsible
+    /// for truncating the WAL after recovery.
+    ///
+    /// Uses [`WalReader::read_all`] for forward-scanning: corrupt records
+    /// are skipped and valid records after them are still recovered.
+    fn recover_from_wal(
+        wal_path: &std::path::Path,
+        pool: &BufferPool,
+        meta: &mut GraphMeta,
+    ) -> Result<u64> {
+        let result = WalReader::read_all(wal_path)?;
+
+        if result.skipped_corrupt_regions > 0 {
+            eprintln!(
+                "[tessera-graph] WARN: WAL recovery skipped {} corrupt region(s); \
+                 {} valid record(s) recovered",
+                result.skipped_corrupt_regions,
+                result.records.len(),
+            );
+        }
+
+        let replayed = Self::replay_records(
+            pool,
+            meta,
+            result.records,
+            &result.committed_txn_ids,
+        )?;
+
         if replayed > 0 {
             // Flush recovered pages to disk.
-            for df in [
-                DataFile::Nodes,
-                DataFile::Edges,
-                DataFile::Adjacency,
-                DataFile::Strings,
-                DataFile::Overflow,
-            ] {
+            for df in crate::storage::backend::ALL_DATA_FILES {
                 pool.flush_file(df)?;
             }
         }
@@ -758,25 +815,23 @@ impl StorageBackend for FileBackend {
 /// own `allocate_page` (which calls into that algorithm, so routing back
 /// through it would recurse).
 ///
-/// Directory writes go through the same journalled path as ordinary page
-/// writes, so a directory page's CONTENTS survive a crash.
+/// Both halves of a release are journalled, so it survives a crash whole.
 ///
-/// # Known limit: the free-list state itself is not journalled
+/// A directory page's CONTENTS travel as an ordinary page write. The
+/// bookkeeping that makes those contents reachable — which page heads the
+/// directory, which page sits in the metadata spare slot, how many are free —
+/// lives in [`GraphMeta`], which only `flush` writes, so it travels separately
+/// as [`WalRecord::FreeListState`] (replayed in `recover_from_wal`).
 ///
-/// Which page heads that directory, which page is held in the metadata spare
-/// slot, and how many pages are free all live in [`GraphMeta`], and that is
-/// written only by `flush` — no WAL record carries it. A release that is not
-/// followed by a flush therefore does not survive a crash: the page comes back
-/// neither live nor reusable, i.e. leaked.
+/// Journalling only the page was not enough, and the gap was not hypothetical:
+/// a release not followed by a flush left the page neither live nor reusable
+/// after recovery — leaked, i.e. the very defect the free list exists to
+/// remove, reappearing on the recovery path. Verified by running it before the
+/// fix, and pinned by `freed_pages_survive_a_crash_before_flush`.
 ///
-/// This is bounded (only what was freed since the last flush) and it is a leak,
-/// never corruption: losing free-list state can only make a page look BUSIER
-/// than it is, so no live record's pages are ever handed to another writer.
-/// Closing it needs a WAL record for the free-list state, replayed in
-/// `recover_from_wal`. Pinned by the integration test
-/// `a_crash_before_flush_leaks_freed_pages_rather_than_corrupting_them`, which
-/// turns red both when the limit is fixed and if the failure mode ever becomes
-/// worse than a leak.
+/// Each record carries the file's whole free-list state rather than a delta.
+/// Replay is therefore idempotent and order-independent per file — the last
+/// record wins — so a torn sequence can never leave the list half-applied.
 impl crate::storage::free_list::FreeListStore for FileBackend {
     fn read_page_raw(&self, file: DataFile, page_id: PageId) -> Result<PageBuf> {
         self.pool.get_page(file, page_id)
@@ -820,6 +875,24 @@ impl crate::storage::free_list::FreeListStore for FileBackend {
 
     fn meta_mut_ref(&mut self) -> &mut GraphMeta {
         &mut self.meta
+    }
+
+    fn journal_free_list_state(&mut self, file: DataFile) -> Result<()> {
+        let Some(ref mut wal) = self.wal else {
+            return Ok(());
+        };
+        // File index fits a u8: there are five data files.
+        #[allow(clippy::cast_possible_truncation)]
+        let file_index = file.index() as u8;
+        wal.append(WalRecord::FreeListState {
+            lsn: 0,
+            file_index,
+            directory_head: self.meta.free_directory_head(file),
+            spare_page: self.meta.free_spare_page(file),
+            free_count: self.meta.free_page_count(file),
+        })?;
+        self.note_wal_growth();
+        Ok(())
     }
 }
 

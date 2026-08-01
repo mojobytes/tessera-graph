@@ -425,21 +425,12 @@ fn a_commit_does_not_release_pages_a_live_reader_may_still_need() {
 }
 
 #[test]
-fn a_crash_before_flush_leaks_freed_pages_rather_than_corrupting_them() {
-    // Pins a KNOWN LIMIT, not a desired behaviour.
-    //
+fn freed_pages_survive_a_crash_before_flush() {
     // Which pages are free lives in the metadata page, and that page is only
-    // written by `flush` — no journal record carries it. So a release that is
-    // not followed by a flush does not survive a crash: the page comes back
-    // neither live nor reusable, i.e. leaked.
-    //
-    // Two things make that acceptable for now and worth pinning rather than
-    // hiding: the loss is bounded by what was freed since the last flush, and
-    // it is a leak, never corruption — recovery can only make a page look
-    // BUSIER than it is, so no live record's pages are ever handed to another
-    // writer. Closing it properly needs a journal record for the free-list
-    // state; this test is what will turn red the day that lands, and the day
-    // anything makes the failure mode worse than a leak.
+    // written by `flush`. Without a journal record carrying that state, a
+    // release not followed by a flush did not survive a crash: the page came
+    // back neither live nor reusable — leaked, i.e. the very defect the free
+    // list exists to remove, reappearing on the recovery path.
     let tmp = TempDir::new().unwrap();
     let v = overflowing_value("a");
 
@@ -447,7 +438,7 @@ fn a_crash_before_flush_leaks_freed_pages_rather_than_corrupting_them() {
         let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
         let id = g.add_node("P", props! { "name" => v.as_str() }).unwrap();
         g.flush().unwrap(); // the node is durable
-        g.remove_node(id).unwrap(); // freed, but NOT flushed
+        g.remove_node(id).unwrap(); // freed, but deliberately NOT flushed
         assert_eq!(
             g.reusable_overflow_page_count(),
             1,
@@ -456,14 +447,69 @@ fn a_crash_before_flush_leaks_freed_pages_rather_than_corrupting_them() {
     }
 
     // Reopening replays the journal — this is the crash-recovery path.
-    let g = Graph::open(tmp.path(), &test_config()).unwrap();
+    let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
 
-    assert_eq!(g.node_count(), 0, "the delete itself is journalled and must survive");
+    assert_eq!(g.node_count(), 0, "the delete itself must survive");
     assert_eq!(
         g.reusable_overflow_page_count(),
-        0,
-        "KNOWN LIMIT: the free-list state is not journalled, so the freed page \
-         is leaked rather than reusable. If this ever reads non-zero, the limit \
-         has been fixed and this test should assert the fix instead."
+        1,
+        "the page freed before the crash must still be reusable after recovery"
+    );
+
+    // And it must actually be handed back out rather than merely counted.
+    let before = g.overflow_page_count();
+    g.add_node("P", props! { "name" => overflowing_value("b").as_str() })
+        .unwrap();
+    assert_eq!(
+        g.overflow_page_count(),
+        before,
+        "the recovered free page must be reused instead of growing the file"
+    );
+}
+
+#[test]
+fn a_crash_mid_sequence_recovers_the_latest_free_list_state() {
+    // Several releases and reuses in a row, then a crash. Each journal record
+    // carries the whole state rather than a delta, so replaying them in order
+    // must land on the state as of the crash — not an intermediate one, and
+    // never a half-applied list.
+    let tmp = TempDir::new().unwrap();
+
+    let (expected_pages, expected_reusable) = {
+        let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
+        let mut ids = Vec::new();
+        for i in 0..80 {
+            ids.push(
+                g.add_node(
+                    "P",
+                    props! { "name" => overflowing_value(&format!("n{i}")).as_str() },
+                )
+                .unwrap(),
+            );
+        }
+        g.flush().unwrap();
+
+        // Churn: delete half, add some back, delete more. No flush after this.
+        for id in ids.iter().step_by(2) {
+            g.remove_node(*id).unwrap();
+        }
+        for i in 0..20 {
+            g.add_node(
+                "P",
+                props! { "name" => overflowing_value(&format!("m{i}")).as_str() },
+            )
+            .unwrap();
+        }
+        for id in ids.iter().skip(1).step_by(4) {
+            g.remove_node(*id).unwrap();
+        }
+        (g.overflow_page_count(), g.reusable_overflow_page_count())
+    };
+
+    let g = Graph::open(tmp.path(), &test_config()).unwrap();
+    assert_eq!(
+        (g.overflow_page_count(), g.reusable_overflow_page_count()),
+        (expected_pages, expected_reusable),
+        "recovery must reproduce the free-list state as of the crash"
     );
 }

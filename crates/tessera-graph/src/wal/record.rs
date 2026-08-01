@@ -19,6 +19,7 @@ const TAG_WRITE_OVERFLOW_PAGE: u8 = 0x08;
 const TAG_BEGIN: u8 = 0x09;
 const TAG_COMMIT: u8 = 0x0A;
 const TAG_ROLLBACK: u8 = 0x0B;
+const TAG_FREE_LIST_STATE: u8 = 0x0C;
 
 /// A WAL record representing a single atomic operation.
 #[derive(Debug, Clone)]
@@ -85,6 +86,29 @@ pub enum WalRecord {
     Commit { lsn: u64, txn_id: u64 },
     /// Transaction rollback marker.
     Rollback { lsn: u64, txn_id: u64 },
+    /// One data file's free-page bookkeeping: which page heads its free
+    /// directory, which page is held in the metadata spare slot, and how many
+    /// pages are free.
+    ///
+    /// This state lives in the metadata page, which is written only by `flush`.
+    /// Without this record a release that is not followed by a flush does not
+    /// survive a crash: the page comes back neither live nor reusable, i.e.
+    /// leaked — the very defect the free list exists to remove, reappearing on
+    /// the recovery path.
+    ///
+    /// Carries no `txn_id`: page reuse is a physical, backend-level concern
+    /// with no transactional identity. A released page belongs to no
+    /// transaction, and replaying its release is always safe — worst case the
+    /// page is listed as free when nothing points at it, which is exactly what
+    /// being free means.
+    FreeListState {
+        lsn: u64,
+        /// Index of the data file, per `DataFile::index`.
+        file_index: u8,
+        directory_head: u32,
+        spare_page: u32,
+        free_count: u32,
+    },
 }
 
 impl WalRecord {
@@ -102,7 +126,8 @@ impl WalRecord {
             | Self::Checkpoint { lsn }
             | Self::Begin { lsn, .. }
             | Self::Commit { lsn, .. }
-            | Self::Rollback { lsn, .. } => *lsn,
+            | Self::Rollback { lsn, .. }
+            | Self::FreeListState { lsn, .. } => *lsn,
         }
     }
 }
@@ -210,6 +235,12 @@ fn decode_id(payload: &[u8], label: &'static str) -> Result<u64> {
 /// - `TombstoneNode`/`TombstoneEdge`: 4 + 1 + 8 + 8 + (1|9) + 4 = 26 or 34
 /// - `WriteAdjPage`/`WriteStringPage`/`WriteOverflowPage`: 4 + 1 + 8 + 4 + 4096 + (1|9) + 4 = 4118 or 4126
 /// - `Checkpoint`: 4 + 1 + 8 + 4 = 17 (control variant, no `txn_id`)
+/// - `FreeListState`: 4 + 1 + 8 + 1 + 4 + 4 + 4 + 4 = 30 (no `txn_id`)
+///
+/// One `FreeListState` accompanies each free-list change, which in the worst
+/// case is one per page release. At 30 bytes against the 4118 of the page write
+/// that release already journals, that is under 1% added to what the journal
+/// carries anyway — small enough not to move the checkpoint threshold.
 #[must_use]
 pub fn encode(record: &WalRecord) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -258,6 +289,14 @@ pub fn encode(record: &WalRecord) -> Vec<u8> {
         }
         WalRecord::Rollback { lsn, txn_id } => {
             encode_id(&mut buf, TAG_ROLLBACK, *lsn, *txn_id);
+        }
+        WalRecord::FreeListState { lsn, file_index, directory_head, spare_page, free_count } => {
+            buf.push(TAG_FREE_LIST_STATE);
+            buf.extend_from_slice(&lsn.to_le_bytes());
+            buf.push(*file_index);
+            buf.extend_from_slice(&directory_head.to_le_bytes());
+            buf.extend_from_slice(&spare_page.to_le_bytes());
+            buf.extend_from_slice(&free_count.to_le_bytes());
         }
     }
 
@@ -356,6 +395,19 @@ pub fn decode(buf: &[u8]) -> Result<(WalRecord, usize)> {
         TAG_ROLLBACK => {
             let txn_id = decode_id(payload, "truncated Rollback payload")?;
             WalRecord::Rollback { lsn, txn_id }
+        }
+        TAG_FREE_LIST_STATE => {
+            // 1 (file index) + 4 + 4 + 4
+            if payload.len() < 13 {
+                return Err(wal_error("truncated FreeListState payload"));
+            }
+            WalRecord::FreeListState {
+                lsn,
+                file_index: payload[0],
+                directory_head: u32::from_le_bytes(payload[1..5].try_into().unwrap()),
+                spare_page: u32::from_le_bytes(payload[5..9].try_into().unwrap()),
+                free_count: u32::from_le_bytes(payload[9..13].try_into().unwrap()),
+            }
         }
         _ => return Err(wal_error("unknown record tag")),
     };
@@ -597,6 +649,89 @@ mod tests {
             }
             other => panic!("expected WriteStringPage, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_journal_without_free_list_records_still_decodes() {
+        // Upgrade path: a journal written before this record existed contains
+        // only the older tags, and every one of them must still decode. The
+        // reverse (an older binary meeting the new tag) is a hard error by
+        // design — an unknown record cannot be safely ignored during recovery.
+        for record in [
+            WalRecord::WriteOverflowPage {
+                lsn: 1,
+                page_id: 0,
+                data: make_page(0x11),
+                txn_id: None,
+            },
+            WalRecord::TombstoneNode { lsn: 2, node_id: 5, txn_id: None },
+            WalRecord::Checkpoint { lsn: 3 },
+        ] {
+            let bytes = encode(&record);
+            assert!(
+                decode(&bytes).is_ok(),
+                "a pre-existing record type stopped decoding: {record:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn encode_decode_free_list_state() {
+        // Every field must survive: this record is what makes a page freed
+        // since the last flush still reusable after a crash, so a field lost in
+        // the codec silently reintroduces the leak.
+        let record = WalRecord::FreeListState {
+            lsn: 11,
+            file_index: 4,
+            directory_head: 0xDEAD_BEEF,
+            spare_page: 0x0102_0304,
+            free_count: 42_000,
+        };
+        let bytes = encode(&record);
+        let (decoded, _) = decode(&bytes).unwrap();
+        match decoded {
+            WalRecord::FreeListState {
+                lsn,
+                file_index,
+                directory_head,
+                spare_page,
+                free_count,
+            } => {
+                assert_eq!(lsn, 11);
+                assert_eq!(file_index, 4);
+                assert_eq!(directory_head, 0xDEAD_BEEF);
+                assert_eq!(spare_page, 0x0102_0304);
+                assert_eq!(free_count, 42_000);
+            }
+            other => panic!("expected FreeListState, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn free_list_state_rejects_a_truncated_payload() {
+        // A short record must be reported, not read past its end: the payload
+        // is fixed-width, so anything shorter is corruption.
+        let record = WalRecord::FreeListState {
+            lsn: 1,
+            file_index: 0,
+            directory_head: 1,
+            spare_page: 2,
+            free_count: 3,
+        };
+        let bytes = encode(&record);
+        // Drop two payload bytes and re-stamp length and CRC so the failure is
+        // attributable to the length check rather than to the checksum.
+        let mut truncated = bytes[..bytes.len() - 4 - 2].to_vec();
+        let crc = crc32fast::hash(&truncated[4..]);
+        truncated.extend_from_slice(&crc.to_le_bytes());
+        #[allow(clippy::cast_possible_truncation)]
+        let record_len = (truncated.len() - 4) as u32;
+        truncated[0..4].copy_from_slice(&record_len.to_le_bytes());
+
+        assert!(
+            decode(&truncated).is_err(),
+            "a truncated FreeListState must be rejected, not partially read"
+        );
     }
 
     #[test]
