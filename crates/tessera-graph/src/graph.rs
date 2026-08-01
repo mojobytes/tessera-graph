@@ -1060,10 +1060,10 @@ impl Graph {
         use crate::mvcc::{EntityKey, EntitySnapshot};
         match (key, state) {
             (EntityKey::Node(id), Some(EntitySnapshot::Deleted) | None) => {
-                self.tombstone_slot_inner(id.0, SlotLayout::NODE, false)
+                self.tombstone_slot_inner(id.0, SlotLayout::NODE, false, true)
             }
             (EntityKey::Edge(id), Some(EntitySnapshot::Deleted) | None) => {
-                self.tombstone_slot_inner(id.0, SlotLayout::EDGE, false)
+                self.tombstone_slot_inner(id.0, SlotLayout::EDGE, false, true)
             }
             (EntityKey::Node(_), Some(EntitySnapshot::Node(node))) => {
                 let (mut slot_buf, overflow) = node_codec::encode_node_slot(node)?;
@@ -4672,13 +4672,33 @@ impl Graph {
 
     /// Tombstones a slot (sets flags byte to `SLOT_TOMBSTONE`).
     fn tombstone_slot(&mut self, id: u64, layout: SlotLayout) -> Result<()> {
-        self.tombstone_slot_inner(id, layout, true)
+        self.tombstone_slot_inner(id, layout, true, true)
     }
 
     /// Tombstones the page slot for `id`, logging to the WAL only when `log_wal`
     /// is set. See [`Graph::write_slot_to_page_inner`] for why the vacuum passes
     /// `log_wal = false`.
-    fn tombstone_slot_inner(&mut self, id: u64, layout: SlotLayout, log_wal: bool) -> Result<()> {
+    /// Tombstones a slot.
+    ///
+    /// `log_wal` journals the tombstone; `may_release` says whether the
+    /// record's property-overflow pages can be handed back now.
+    ///
+    /// The two are deliberately separate. They coincided once — releasing when
+    /// journalling — and that conflated a provisional MVCC tombstone (whose
+    /// record a live snapshot may still resolve, so releasing would pull pages
+    /// out from under a reader) with the vacuum materialising an already
+    /// invisible delete (where releasing is exactly the point). Sharing one
+    /// flag meant the vacuum never released anything, so under explicit
+    /// transactions a delete leaked its pages permanently — the very defect
+    /// this module exists to remove, surviving in the one path the auto-commit
+    /// fix did not cover.
+    fn tombstone_slot_inner(
+        &mut self,
+        id: u64,
+        layout: SlotLayout,
+        log_wal: bool,
+        may_release: bool,
+    ) -> Result<()> {
         let SlotLayout { slot_size, file, magic_bytes, page_type } = layout;
         if log_wal {
             self.wal_log_tombstone(file, id)?;
@@ -4698,12 +4718,11 @@ impl Graph {
         // Read before the tombstone is stamped: afterwards the slot no longer
         // reports its overflow reference.
         //
-        // Only for the durable delete path (`log_wal`). An MVCC tombstone is
-        // provisional — a reader whose snapshot predates it must still resolve
-        // the record — so releasing there would pull pages out from under a
-        // live reader. The vacuum handles that case, once no snapshot can need
-        // the version.
-        let released_chain = if log_wal {
+        // Gated on `may_release`, not on journalling: a provisional MVCC
+        // tombstone must NOT release (a reader whose snapshot predates it still
+        // resolves the record), while the vacuum materialising an already
+        // invisible delete MUST.
+        let released_chain = if may_release {
             match file {
                 DataFile::Nodes => self
                     .existing_node_prop_overflow(id)
@@ -9937,3 +9956,4 @@ mod constraint_enforcement_tests {
         assert_eq!(g.outgoing_edges(a).unwrap().len(), 1);
     }
 }
+

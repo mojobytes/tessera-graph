@@ -154,6 +154,16 @@ pub fn release_page<S: FreeListStore + ?Sized>(
 
 /// Saturating so a miscounted release can never wrap the counter to ~4 billion,
 /// which would advertise a file as almost entirely reusable.
+///
+/// Saturating bounds the arithmetic; it does NOT make the count accurate. The
+/// tally is maintained independently of the directory pages and the metadata
+/// spare slot, and nothing reconciles the two — deliberately, since walking the
+/// chain to count is the I/O this design exists to avoid. So the figure
+/// [`crate::Graph::reusable_overflow_page_count`] reports is an estimate that a
+/// crash before flush can leave stale (see the known limit documented on
+/// `FileBackend`'s `FreeListStore` impl). It is safe to be wrong: the count is
+/// only ever read for reporting, never to decide whether a page may be handed
+/// out — that decision reads the directory itself.
 fn decrement_free_count<S: FreeListStore + ?Sized>(store: &mut S, file: DataFile) {
     let current = store.meta_ref().free_page_count(file);
     store.meta_mut_ref().set_free_page_count(file, current.saturating_sub(1));

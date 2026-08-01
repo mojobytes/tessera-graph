@@ -316,3 +316,154 @@ fn shrinking_a_node_below_the_inline_cap_releases_its_chain() {
         "the released page must be reused instead of growing the file"
     );
 }
+
+// ── Under explicit transactions ─────────────────────────────────────────
+//
+// A commit must NOT release anything: a reader whose snapshot predates it can
+// still resolve the previous version. The release belongs to the vacuum, which
+// only runs once no live snapshot can need that version. These pin the vacuum
+// actually doing it — without them the transactional path silently keeps the
+// very defect the auto-commit path had.
+
+#[test]
+fn vacuuming_a_transactional_delete_releases_its_pages() {
+    let mut g = Graph::new();
+    g.enable_mvcc();
+
+    let insert = g.begin_txn().unwrap();
+    let mut ids = Vec::new();
+    for i in 0..60 {
+        ids.push(
+            g.add_node_in_txn(
+                insert,
+                "P",
+                props! { "name" => overflowing_value(&format!("n{i}")).as_str() },
+            )
+            .unwrap(),
+        );
+    }
+    g.commit_txn(insert).unwrap();
+    g.vacuum_once().unwrap();
+    let after_insert = g.overflow_page_count();
+    assert!(after_insert > 0, "test is not exercising the overflow path");
+
+    let delete = g.begin_txn().unwrap();
+    for id in &ids {
+        g.remove_node_in_txn(delete, *id).unwrap();
+    }
+    g.commit_txn(delete).unwrap();
+    g.vacuum_once().unwrap();
+
+    // Before the fix this was flatly zero: the vacuum released nothing, so a
+    // transactional delete leaked its pages permanently.
+    //
+    // Not compared for exact equality with `after_insert` because the free list
+    // spends one page on the directory that records the rest — that page is not
+    // "reusable", it is in use keeping the accounting. What matters is that the
+    // pages come back at all.
+    let reusable = g.reusable_overflow_page_count();
+    assert!(
+        reusable > 0,
+        "the vacuum must release the deleted nodes' pages (got {reusable} reusable \
+         of {after_insert} held)"
+    );
+
+    // And they must actually be handed back out: new overflowing nodes have to
+    // land on them rather than extend the file.
+    let before_refill = g.overflow_page_count();
+    let refill = g.begin_txn().unwrap();
+    for i in 0..40 {
+        g.add_node_in_txn(
+            refill,
+            "Q",
+            props! { "name" => overflowing_value(&format!("r{i}")).as_str() },
+        )
+        .unwrap();
+    }
+    g.commit_txn(refill).unwrap();
+    assert_eq!(
+        g.overflow_page_count(),
+        before_refill,
+        "40 new overflowing nodes must reuse the released pages, not grow the file"
+    );
+}
+
+#[test]
+fn a_commit_does_not_release_pages_a_live_reader_may_still_need() {
+    // The other half of the contract: releasing at commit time would pull
+    // pages out from under a transaction that started earlier.
+    let mut g = Graph::new();
+    g.enable_mvcc();
+
+    let setup = g.begin_txn().unwrap();
+    let id = g
+        .add_node_in_txn(setup, "P", props! { "name" => overflowing_value("a").as_str() })
+        .unwrap();
+    g.commit_txn(setup).unwrap();
+    g.vacuum_once().unwrap();
+
+    // A reader that must keep seeing the original value.
+    let reader = g.begin_txn().unwrap();
+
+    let writer = g.begin_txn().unwrap();
+    let mut node = g.node_in_txn(writer, id).unwrap();
+    node.properties_mut()
+        .insert("name".into(), Property::String(overflowing_value("b")));
+    g.update_node_in_txn(writer, id, &node).unwrap();
+    g.commit_txn(writer).unwrap();
+    // Vacuum cannot reclaim past the reader's snapshot.
+    g.vacuum_once().unwrap();
+
+    match g.node_in_txn(reader, id).unwrap().properties().get("name") {
+        Some(Property::String(s)) => assert_eq!(
+            *s,
+            overflowing_value("a"),
+            "the older snapshot must still resolve its own version"
+        ),
+        other => panic!("the reader lost the node's properties: {other:?}"),
+    }
+}
+
+#[test]
+fn a_crash_before_flush_leaks_freed_pages_rather_than_corrupting_them() {
+    // Pins a KNOWN LIMIT, not a desired behaviour.
+    //
+    // Which pages are free lives in the metadata page, and that page is only
+    // written by `flush` — no journal record carries it. So a release that is
+    // not followed by a flush does not survive a crash: the page comes back
+    // neither live nor reusable, i.e. leaked.
+    //
+    // Two things make that acceptable for now and worth pinning rather than
+    // hiding: the loss is bounded by what was freed since the last flush, and
+    // it is a leak, never corruption — recovery can only make a page look
+    // BUSIER than it is, so no live record's pages are ever handed to another
+    // writer. Closing it properly needs a journal record for the free-list
+    // state; this test is what will turn red the day that lands, and the day
+    // anything makes the failure mode worse than a leak.
+    let tmp = TempDir::new().unwrap();
+    let v = overflowing_value("a");
+
+    {
+        let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
+        let id = g.add_node("P", props! { "name" => v.as_str() }).unwrap();
+        g.flush().unwrap(); // the node is durable
+        g.remove_node(id).unwrap(); // freed, but NOT flushed
+        assert_eq!(
+            g.reusable_overflow_page_count(),
+            1,
+            "before the crash the page is recorded as reusable"
+        );
+    }
+
+    // Reopening replays the journal — this is the crash-recovery path.
+    let g = Graph::open(tmp.path(), &test_config()).unwrap();
+
+    assert_eq!(g.node_count(), 0, "the delete itself is journalled and must survive");
+    assert_eq!(
+        g.reusable_overflow_page_count(),
+        0,
+        "KNOWN LIMIT: the free-list state is not journalled, so the freed page \
+         is leaked rather than reusable. If this ever reads non-zero, the limit \
+         has been fixed and this test should assert the fix instead."
+    );
+}

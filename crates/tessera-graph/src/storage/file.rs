@@ -759,9 +759,24 @@ impl StorageBackend for FileBackend {
 /// through it would recurse).
 ///
 /// Directory writes go through the same journalled path as ordinary page
-/// writes. That matters: if a crash replayed the release of a page but not the
-/// directory update recording it, the page would be neither live nor reusable —
-/// leaked exactly as before this change.
+/// writes, so a directory page's CONTENTS survive a crash.
+///
+/// # Known limit: the free-list state itself is not journalled
+///
+/// Which page heads that directory, which page is held in the metadata spare
+/// slot, and how many pages are free all live in [`GraphMeta`], and that is
+/// written only by `flush` — no WAL record carries it. A release that is not
+/// followed by a flush therefore does not survive a crash: the page comes back
+/// neither live nor reusable, i.e. leaked.
+///
+/// This is bounded (only what was freed since the last flush) and it is a leak,
+/// never corruption: losing free-list state can only make a page look BUSIER
+/// than it is, so no live record's pages are ever handed to another writer.
+/// Closing it needs a WAL record for the free-list state, replayed in
+/// `recover_from_wal`. Pinned by the integration test
+/// `a_crash_before_flush_leaks_freed_pages_rather_than_corrupting_them`, which
+/// turns red both when the limit is fixed and if the failure mode ever becomes
+/// worse than a leak.
 impl crate::storage::free_list::FreeListStore for FileBackend {
     fn read_page_raw(&self, file: DataFile, page_id: PageId) -> Result<PageBuf> {
         self.pool.get_page(file, page_id)
