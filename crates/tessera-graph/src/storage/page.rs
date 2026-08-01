@@ -35,6 +35,12 @@ pub enum PageType {
     /// itself drawn from that file — so a directory page is distinguishable
     /// from live data only by this stamp.
     FreeDirectory = 7,
+    /// Shared property slab page: packs the overflowed property blobs of
+    /// several entities behind a directory, instead of dedicating a whole
+    /// 4096-byte page to one entity's blob. Lives under `DataFile::Overflow`
+    /// alongside the chained format and shares its `magic::OVERFLOW` stamp, so
+    /// this `page_type` is the only thing telling the two apart.
+    PropertySlab = 8,
 }
 
 pub mod magic {

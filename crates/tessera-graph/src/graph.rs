@@ -19,6 +19,7 @@ use crate::storage::codec::node_codec::{
     self, NODE_SLOT_SIZE, SLOTS_PER_PAGE, SLOT_LIVE, SLOT_TOMBSTONE,
 };
 use crate::storage::codec::overflow_codec;
+use crate::storage::codec::prop_slab_codec;
 use crate::index::codec as index_codec;
 use crate::index::{LabelIndex, PropertyIndex};
 use crate::storage::codec::string_codec::StringHeap;
@@ -71,6 +72,13 @@ struct SlotOverflowRequest<'a> {
     /// still points at hands its pages to the next writer and corrupts that
     /// record silently.
     previous_prop_overflow: Option<u32>,
+    /// Which entity this slot belongs to.
+    ///
+    /// Needed because overflowed properties are packed several entities to a
+    /// page: the page's directory is keyed by entity, so storing or reading a
+    /// blob requires knowing whose it is. The id alone is ambiguous — nodes and
+    /// edges are numbered independently — hence the kind travels with it.
+    entity: (u64, prop_slab_codec::EntityKind),
 }
 
 /// Physical page layout of one entity kind's slots. The four fields always
@@ -185,6 +193,14 @@ pub struct Graph {
     /// its slot, not here. Outgoing and incoming keep separate open slabs
     /// because the node slot stores an independent head per direction.
     open_slab: [Option<PageId>; 2],
+    /// The overflow page currently accepting packed property blobs.
+    ///
+    /// Same role as `open_slab` above, for the same reason: without it every
+    /// entity whose properties overflow would allocate a page of its own and
+    /// the packing would pack nothing. Also rebuilt lazily and equally
+    /// disposable — an entity's real location is the page id in its slot, so a
+    /// stale or forgotten value costs at most an extra page, never correctness.
+    prop_slab_open_page: Option<PageId>,
     node_exists: HashSet<u64>,
     edge_exists: HashSet<u64>,
     string_heap: StringHeap,
@@ -297,6 +313,7 @@ impl Graph {
             adj_cache: AdjCache::new(DEFAULT_ADJ_CACHE_CAPACITY),
             adj_tail_cache: crate::adj_tail_cache::AdjTailCache::new(DEFAULT_ADJ_CACHE_CAPACITY),
             open_slab: [None; 2],
+            prop_slab_open_page: None,
             node_exists: HashSet::new(),
             edge_exists: HashSet::new(),
             string_heap: StringHeap::new(),
@@ -371,6 +388,7 @@ impl Graph {
             adj_cache: AdjCache::new(config.adj_cache_capacity),
             adj_tail_cache: crate::adj_tail_cache::AdjTailCache::new(config.adj_cache_capacity),
             open_slab: [None; 2],
+            prop_slab_open_page: None,
             node_exists: HashSet::new(),
             edge_exists: HashSet::new(),
             string_heap,
@@ -1057,6 +1075,7 @@ impl Graph {
                         props_overflowed: overflow.props_overflowed,
                         props_bytes: overflow.props_bytes.as_deref(),
                         previous_prop_overflow: None,
+                        entity: (node.id.0, prop_slab_codec::EntityKind::Node),
                     },
                     node_codec::patch_overflow,
                 )?;
@@ -1080,6 +1099,7 @@ impl Graph {
                         props_overflowed: overflow.props_overflowed,
                         props_bytes: overflow.props_bytes.as_deref(),
                         previous_prop_overflow: None,
+                        entity: (edge.id.0, prop_slab_codec::EntityKind::Edge),
                     },
                     edge_codec::patch_edge_overflow,
                 )?;
@@ -3295,6 +3315,7 @@ impl Graph {
                 props_overflowed: overflow.props_overflowed,
                 props_bytes: overflow.props_bytes.as_deref(),
                 previous_prop_overflow: previous,
+                entity: (node.id.0, prop_slab_codec::EntityKind::Node),
             },
             node_codec::patch_overflow,
         )?;
@@ -3321,7 +3342,10 @@ impl Graph {
         };
 
         let resolved_props = if node_codec::slot_needs_prop_resolve(&slot) {
-            Some(overflow_codec::read_overflow(self.storage.as_ref(), prop_overflow_ref)?)
+            Some(self.read_overflowed_props(
+                (id, prop_slab_codec::EntityKind::Node),
+                prop_overflow_ref,
+            )?)
         } else {
             None
         };
@@ -3364,7 +3388,10 @@ impl Graph {
         let needs_overflow = !keys.is_empty() && node_codec::slot_needs_prop_resolve(&slot);
         let resolved_props = if needs_overflow {
             let prop_overflow_ref = node_codec::slot_prop_overflow_ref(&slot);
-            Some(overflow_codec::read_overflow(self.storage.as_ref(), prop_overflow_ref)?)
+            Some(self.read_overflowed_props(
+                (id, prop_slab_codec::EntityKind::Node),
+                prop_overflow_ref,
+            )?)
         } else {
             None
         };
@@ -3441,6 +3468,7 @@ impl Graph {
                 props_overflowed: overflow.props_overflowed,
                 props_bytes: overflow.props_bytes.as_deref(),
                 previous_prop_overflow: previous,
+                entity: (edge.id.0, prop_slab_codec::EntityKind::Edge),
             },
             edge_codec::patch_edge_overflow,
         )?;
@@ -3467,7 +3495,10 @@ impl Graph {
         };
 
         let resolved_props = if edge_codec::edge_slot_needs_prop_resolve(&slot) {
-            Some(overflow_codec::read_overflow(self.storage.as_ref(), prop_overflow_ref)?)
+            Some(self.read_overflowed_props(
+                (id, prop_slab_codec::EntityKind::Edge),
+                prop_overflow_ref,
+            )?)
         } else {
             None
         };
@@ -3847,6 +3878,7 @@ impl Graph {
                 props_overflowed: overflow.props_overflowed,
                 props_bytes: overflow.props_bytes.as_deref(),
                 previous_prop_overflow: self.existing_node_prop_overflow(node_id),
+                entity: (node_id, prop_slab_codec::EntityKind::Node),
             },
             node_codec::patch_overflow,
         )?;
@@ -4233,6 +4265,7 @@ impl Graph {
             props_overflowed,
             props_bytes,
             previous_prop_overflow,
+            entity,
         } = req;
         let label_overflow_ref = if label_overflowed {
             self.string_heap.append(self.storage.as_mut(), label)?
@@ -4247,8 +4280,7 @@ impl Graph {
         let mut new_prop_overflow: Option<u32> = None;
         if props_overflowed {
             if let Some(bytes) = props_bytes {
-                new_prop_overflow =
-                    Some(overflow_codec::write_overflow(self.storage.as_mut(), bytes)?);
+                new_prop_overflow = Some(self.store_overflowed_props(entity, bytes)?);
             }
         }
         let prop_overflow_page = new_prop_overflow.unwrap_or(0);
@@ -4265,7 +4297,7 @@ impl Graph {
             // Compared as options, so "shrank back inline" (None) counts as a
             // change even when the old chain happened to start at page 0.
             if new_prop_overflow != Some(old) {
-                overflow_codec::free_overflow_chain(self.storage.as_mut(), old)?;
+                self.release_overflowed_props(entity, old)?;
             }
         }
 
@@ -4274,6 +4306,121 @@ impl Graph {
         }
 
         Ok(())
+    }
+
+    /// Reads back an entity's overflowed properties from `page_id`.
+    ///
+    /// Overflow pages come in two shapes — a page shared by several entities,
+    /// and a chain dedicated to one oversized blob — so the page itself decides
+    /// how to read it. A shared page whose directory has no live entry for this
+    /// entity yields empty bytes rather than an error: that is what a stale
+    /// reference means, and returning whoever occupies that space now would be
+    /// worse than returning nothing.
+    fn read_overflowed_props(
+        &self,
+        entity: (u64, prop_slab_codec::EntityKind),
+        page_id: u32,
+    ) -> Result<Vec<u8>> {
+        let (entity_id, kind) = entity;
+        if prop_slab_codec::is_slab_page(self.storage.as_ref(), page_id).unwrap_or(false) {
+            return Ok(
+                prop_slab_codec::read_blob(self.storage.as_ref(), page_id, entity_id, kind)?
+                    .unwrap_or_default(),
+            );
+        }
+        overflow_codec::read_overflow(self.storage.as_ref(), page_id)
+    }
+
+    /// Stores an entity's overflowed properties and returns the page holding them.
+    ///
+    /// Blobs that fit a page are packed several entities to a page; only blobs
+    /// too large for that keep the chained format. Packing is what removes the
+    /// waste at the source — before it, a 39-byte property set occupied a whole
+    /// 4096-byte page, an amplification of 105x.
+    ///
+    /// The page with room is remembered between calls, so the common case costs
+    /// one page read rather than a scan of the overflow file. When that page
+    /// fills, the next allocation replaces it — and since allocation now
+    /// prefers a recycled page, a workload that keeps rewriting entities cycles
+    /// through the same pages instead of extending the file.
+    fn store_overflowed_props(
+        &mut self,
+        entity: (u64, prop_slab_codec::EntityKind),
+        bytes: &[u8],
+    ) -> Result<u32> {
+        let (entity_id, kind) = entity;
+
+        if bytes.len() > prop_slab_codec::MAX_PACKED_BLOB {
+            // Too large to share a page. The chained format already uses its
+            // pages efficiently at this size, so there is nothing to gain.
+            return overflow_codec::write_overflow(self.storage.as_mut(), bytes);
+        }
+
+        // Try the page last known to have room.
+        if let Some(page_id) = self.prop_slab_open_page {
+            if self.slab_page_has_room(page_id, bytes.len()) {
+                prop_slab_codec::write_blob(self.storage.as_mut(), page_id, entity_id, kind, bytes)?;
+                return Ok(page_id);
+            }
+        }
+
+        // None, or the remembered one is full: take a fresh page. This prefers
+        // a page off the free list before growing the file.
+        let page_id = self.storage.allocate_page(DataFile::Overflow)?;
+        prop_slab_codec::init_page(self.storage.as_mut(), page_id)?;
+        prop_slab_codec::write_blob(self.storage.as_mut(), page_id, entity_id, kind, bytes)?;
+        self.prop_slab_open_page = Some(page_id);
+        Ok(page_id)
+    }
+
+    /// Whether a slab page can still take a blob of `len` bytes.
+    ///
+    /// Answers `false` for a page that is not a slab at all, so a remembered id
+    /// that has since been recycled into a chained page is simply abandoned
+    /// rather than written over.
+    fn slab_page_has_room(&self, page_id: u32, len: usize) -> bool {
+        if page_id >= self.storage.page_count(DataFile::Overflow) {
+            return false;
+        }
+        let Ok(buf) = self.storage.read_page(DataFile::Overflow, page_id) else {
+            return false;
+        };
+        let header = crate::storage::page::PageHeader::read_from(&buf);
+        if header.page_type != crate::storage::page::PageType::PropertySlab as u16 {
+            return false;
+        }
+        prop_slab_codec::has_room_for(&buf[PAGE_HEADER_SIZE..], len)
+    }
+
+    /// Releases whatever an entity had stored at `page_id`.
+    ///
+    /// Handles both shapes: a packed blob is removed from its page's directory
+    /// (and the page returned to the free list once nothing live remains), a
+    /// chain is released whole.
+    fn release_overflowed_props(
+        &mut self,
+        entity: (u64, prop_slab_codec::EntityKind),
+        page_id: u32,
+    ) -> Result<()> {
+        let (entity_id, kind) = entity;
+
+        if prop_slab_codec::is_slab_page(self.storage.as_ref(), page_id).unwrap_or(false) {
+            let still_live =
+                prop_slab_codec::free_blob(self.storage.as_mut(), page_id, entity_id, kind)?;
+            if !still_live {
+                // Nothing left on the page, so the whole page is reusable.
+                // Forget it first: handing it to the free list while it is
+                // still remembered as "the page with room" would let the next
+                // write land on a page that has been given away.
+                if self.prop_slab_open_page == Some(page_id) {
+                    self.prop_slab_open_page = None;
+                }
+                self.storage.free_page(DataFile::Overflow, page_id)?;
+            }
+            return Ok(());
+        }
+
+        overflow_codec::free_overflow_chain(self.storage.as_mut(), page_id)
     }
 
     /// The property-overflow chain a stored node currently points at, if any.
@@ -4558,8 +4705,12 @@ impl Graph {
         // the version.
         let released_chain = if log_wal {
             match file {
-                DataFile::Nodes => self.existing_node_prop_overflow(id),
-                DataFile::Edges => self.existing_edge_prop_overflow(id),
+                DataFile::Nodes => self
+                    .existing_node_prop_overflow(id)
+                    .map(|p| (p, prop_slab_codec::EntityKind::Node)),
+                DataFile::Edges => self
+                    .existing_edge_prop_overflow(id)
+                    .map(|p| (p, prop_slab_codec::EntityKind::Edge)),
                 _ => None,
             }
         } else {
@@ -4574,8 +4725,8 @@ impl Graph {
 
         // After the tombstone is durable: if this failed midway, a chain that
         // is still referenced by a live slot would have been handed away.
-        if let Some(chain) = released_chain {
-            overflow_codec::free_overflow_chain(self.storage.as_mut(), chain)?;
+        if let Some((page_id, kind)) = released_chain {
+            self.release_overflowed_props((id, kind), page_id)?;
         }
 
         Ok(())
@@ -4708,6 +4859,7 @@ impl Graph {
                         props_overflowed: overflow.props_overflowed,
                         props_bytes: overflow.props_bytes.as_deref(),
                         previous_prop_overflow: None,
+                        entity: (node.id.0, prop_slab_codec::EntityKind::Node),
                     },
                     node_codec::patch_overflow,
                 )?;
@@ -4733,6 +4885,7 @@ impl Graph {
                         props_overflowed: overflow.props_overflowed,
                         props_bytes: overflow.props_bytes.as_deref(),
                         previous_prop_overflow: None,
+                        entity: (edge.id.0, prop_slab_codec::EntityKind::Edge),
                     },
                     edge_codec::patch_edge_overflow,
                 )?;
@@ -5951,6 +6104,7 @@ mod tests {
             adj_cache: AdjCache::new(1024),
             adj_tail_cache: crate::adj_tail_cache::AdjTailCache::new(1024),
             open_slab: [None; 2],
+            prop_slab_open_page: None,
             node_exists: HashSet::new(),
             edge_exists: HashSet::new(),
             string_heap: crate::storage::codec::string_codec::StringHeap::new(),
@@ -6842,6 +6996,7 @@ mod tests {
             adj_cache: AdjCache::new(1024),
             adj_tail_cache: crate::adj_tail_cache::AdjTailCache::new(1024),
             open_slab: [None; 2],
+            prop_slab_open_page: None,
             node_exists: HashSet::new(),
             edge_exists: HashSet::new(),
             string_heap: crate::storage::codec::string_codec::StringHeap::new(),
@@ -6968,6 +7123,7 @@ mod tests {
             adj_cache: AdjCache::new(1024),
             adj_tail_cache: crate::adj_tail_cache::AdjTailCache::new(1024),
             open_slab: [None; 2],
+            prop_slab_open_page: None,
             node_exists: HashSet::new(),
             edge_exists: HashSet::new(),
             string_heap: crate::storage::codec::string_codec::StringHeap::new(),

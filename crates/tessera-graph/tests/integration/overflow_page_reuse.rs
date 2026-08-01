@@ -60,25 +60,15 @@ fn updating_an_overflowed_node_does_not_grow_the_file_without_bound() {
         g.update_node(id, &node).unwrap();
     }
 
-    // The new chain is written before the old one is released — the reverse
-    // order would let the new write land on the pages the old chain just gave
-    // up, and a failure midway would leave the slot pointing at a chain that
-    // had already been handed away. So the first update has nothing to reuse
-    // yet and the file reaches two pages: one live, one now recycled. Every
-    // update after that alternates between the two.
+    // Since overflowed properties are packed several entities to a page, a
+    // rewrite reclaims the entity's own previous bytes within the page it
+    // already occupies — no second page is needed at all.
     //
-    // What matters is that this is a constant, not a slope: before the fix the
-    // same loop reached 51 pages and kept climbing.
-    let after_updates = g.overflow_page_count();
+    // Before any of this work the same loop reached 51 pages and kept climbing.
     assert_eq!(
-        after_updates,
-        after_insert + 1,
-        "50 updates must settle at one spare page, not grow per update"
-    );
-    assert_eq!(
-        g.reusable_overflow_page_count(),
-        1,
-        "the page not currently in use must be recorded as reusable"
+        g.overflow_page_count(),
+        after_insert,
+        "50 updates of one node must not grow the file at all"
     );
 
     // Reuse must not corrupt what it reuses.
@@ -121,6 +111,78 @@ fn overflow_growth_does_not_scale_with_the_number_of_updates() {
         "overflow footprint must not depend on how many times an entity was \
          rewritten (10 updates: {few} pages, 100 updates: {many} pages)"
     );
+}
+
+#[test]
+fn many_overflowed_nodes_share_pages_instead_of_taking_one_each() {
+    // The origin waste: a node whose properties exceed the inline cap used to
+    // take a whole 4096-byte page, so 200 nodes cost 200 pages regardless of
+    // how little each one stored.
+    let tmp = TempDir::new().unwrap();
+    let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
+
+    let n = 200_u32;
+    for i in 0..n {
+        g.add_node(
+            "P",
+            props! { "name" => overflowing_value(&format!("n{i}")).as_str() },
+        )
+        .unwrap();
+    }
+
+    let pages = g.overflow_page_count();
+    assert!(
+        pages < n / 4,
+        "200 nodes of ~70 bytes must share pages, not take one each \
+         (got {pages} pages for {n} nodes)"
+    );
+}
+
+#[test]
+fn packing_keeps_every_node_readable() {
+    // Packing puts many entities' bytes in one page behind a directory; a
+    // mistake there returns another entity's properties rather than an error.
+    let tmp = TempDir::new().unwrap();
+    let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
+
+    let mut ids = Vec::new();
+    for i in 0..100_u32 {
+        let v = overflowing_value(&format!("node{i}"));
+        ids.push((
+            g.add_node("P", props! { "name" => v.as_str() }).unwrap(),
+            v,
+        ));
+    }
+
+    for (id, expected) in &ids {
+        match g.node(*id).unwrap().properties().get("name") {
+            Some(Property::String(s)) => assert_eq!(s, expected),
+            other => panic!("node {id:?} lost its properties: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn packed_properties_survive_a_reopen() {
+    let tmp = TempDir::new().unwrap();
+    let mut ids = Vec::new();
+
+    {
+        let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
+        for i in 0..50_u32 {
+            let v = overflowing_value(&format!("keep{i}"));
+            ids.push((g.add_node("P", props! { "name" => v.as_str() }).unwrap(), v));
+        }
+        g.flush().unwrap();
+    }
+
+    let g = Graph::open(tmp.path(), &test_config()).unwrap();
+    for (id, expected) in &ids {
+        match g.node(*id).unwrap().properties().get("name") {
+            Some(Property::String(s)) => assert_eq!(s, expected),
+            other => panic!("node {id:?} lost its properties across reopen: {other:?}"),
+        }
+    }
 }
 
 #[test]
