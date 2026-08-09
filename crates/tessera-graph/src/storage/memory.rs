@@ -1,12 +1,12 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashMap;
 
+use crate::Error;
 use crate::error::Result;
 use crate::storage::backend::{DataFile, PageId, StorageBackend};
 use crate::storage::meta::GraphMeta;
-use crate::storage::page::{new_page_buf, PageBuf};
-use crate::Error;
+use crate::storage::page::{PageBuf, new_page_buf};
 
 /// In-memory storage backend. All pages live in a `HashMap`.
 ///
@@ -234,11 +234,15 @@ mod tests {
 
         let mut data1 = new_page_buf();
         data1[0] = 0x11;
-        backend.write_page(DataFile::Edges, page_id, &data1).unwrap();
+        backend
+            .write_page(DataFile::Edges, page_id, &data1)
+            .unwrap();
 
         let mut data2 = new_page_buf();
         data2[0] = 0x22;
-        backend.write_page(DataFile::Edges, page_id, &data2).unwrap();
+        backend
+            .write_page(DataFile::Edges, page_id, &data2)
+            .unwrap();
 
         let read_back = backend.read_page(DataFile::Edges, page_id).unwrap();
         assert_eq!(read_back[0], 0x22);

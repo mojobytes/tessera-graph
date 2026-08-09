@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Behavioral tests for Node/Relationship/Path → `PackStream` struct conversion
 //! (Fase B C2). Asserts the Bolt struct tags `0x4E`/`0x52`/`0x50`/`0x72` and

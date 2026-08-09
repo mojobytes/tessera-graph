@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashMap;
 use std::fmt;
@@ -20,7 +20,7 @@ impl Property {
     /// allocation (it ignores capacity slack), which is the right bias for a
     /// defensive cap: it never under-charges the payload itself.
     #[must_use]
-    pub fn approx_heap_size(&self) -> usize {
+    pub const fn approx_heap_size(&self) -> usize {
         match self {
             Self::String(s) => s.len(),
             Self::Bytes(b) => b.len(),

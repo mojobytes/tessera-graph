@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Exception hierarchy for the `tessera_graph` Python module.
 //!
@@ -7,8 +7,8 @@
 //! - `EdgeNotFoundError(TesseraError)` — raised when an edge ID does not exist.
 //! - `GqlSyntaxError(TesseraError)` — raised on malformed GQL input.
 
-use pyo3::prelude::*;
 use pyo3::create_exception;
+use pyo3::prelude::*;
 
 create_exception!(tessera_graph, TesseraError, pyo3::exceptions::PyException);
 create_exception!(tessera_graph, NodeNotFoundError, TesseraError);
@@ -18,15 +18,9 @@ create_exception!(tessera_graph, GqlSyntaxError, TesseraError);
 /// Converts a `tessera_graph::Error` into the appropriate Python exception.
 pub fn to_py_err(err: tessera_graph::Error) -> PyErr {
     match &err {
-        tessera_graph::Error::NodeNotFound(_) => {
-            NodeNotFoundError::new_err(err.to_string())
-        }
-        tessera_graph::Error::EdgeNotFound(_) => {
-            EdgeNotFoundError::new_err(err.to_string())
-        }
-        tessera_graph::Error::GqlSyntaxError { .. } => {
-            GqlSyntaxError::new_err(err.to_string())
-        }
+        tessera_graph::Error::NodeNotFound(_) => NodeNotFoundError::new_err(err.to_string()),
+        tessera_graph::Error::EdgeNotFound(_) => EdgeNotFoundError::new_err(err.to_string()),
+        tessera_graph::Error::GqlSyntaxError { .. } => GqlSyntaxError::new_err(err.to_string()),
         _ => TesseraError::new_err(err.to_string()),
     }
 }

@@ -21,16 +21,14 @@ use tessera_graph_protocol::packstream::PackStreamValue;
 
 use tessera_graph_cypher::cache::QueryCache;
 
-use crate::audit::{
-    AccessDeniedReason, AuditSink, AuthFailureReason, CloseReason, QueryOutcome,
-};
+use crate::audit::{AccessDeniedReason, AuditSink, AuthFailureReason, CloseReason, QueryOutcome};
 use crate::auth::{AccessLevel, AuthError, AuthProvider, UserStore};
 use crate::error::Result;
 use crate::graph_accessor::GraphAccessor;
 use crate::params::bolt_dict_to_value_map;
-use crate::wire::gql_value_to_packstream;
-use crate::registry_handle::MultiTenantHandle;
 use crate::registry::{DbHandle, GraphRegistry, RegistryError};
+use crate::registry_handle::MultiTenantHandle;
+use crate::wire::gql_value_to_packstream;
 
 /// Maximum number of mutations before an implicit batch is auto-flushed.
 const AUTO_FLUSH_OPS: u32 = 500;
@@ -322,12 +320,10 @@ pub(crate) struct PendingResult {
     stats: Option<tessera_graph::gql::GqlMutationResult>,
 }
 
-impl PendingResult {
-}
+impl PendingResult {}
 
 /// Global connection counter.
-static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(1);
+static CONNECTION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 impl<S, A: ?Sized> BoltHandler<S, A>
 where
@@ -428,11 +424,9 @@ where
         // rationale on the shared clone.
         let bandwidth = crate::rate_limited_io::BandwidthLimiter::new(max_bytes_per_second);
         let read_half = crate::rate_limited_io::RateLimited::new(read_half, bandwidth.clone());
-        let write_half =
-            crate::rate_limited_io::RateLimited::new(write_half, bandwidth.clone());
+        let write_half = crate::rate_limited_io::RateLimited::new(write_half, bandwidth.clone());
 
-        let connection_id =
-            CONNECTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let connection_id = CONNECTION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // The caller supplies the two roles separately. `registry` is the
         // abstract seam every edition has, and it is the only thing the
@@ -465,8 +459,7 @@ where
             db_handle: None,
             session_accessor: None,
             accessor_factory: Arc::new(|h| {
-                Arc::new(crate::DefaultGraphAccessor::new(h.graph()))
-                    as Arc<dyn GraphAccessor>
+                Arc::new(crate::DefaultGraphAccessor::new(h.graph())) as Arc<dyn GraphAccessor>
             }),
             authenticated: false,
             authenticated_user: None,
@@ -553,7 +546,10 @@ where
         // Flush any pending implicit batch so mutations are durable even if
         // the client disconnects without a clean GOODBYE.
         let _ = self.flush_pending_batch();
-        let user = self.authenticated_user.as_ref().map(|u| u.username.as_str());
+        let user = self
+            .authenticated_user
+            .as_ref()
+            .map(|u| u.username.as_str());
         self.audit
             .connection_close(self.connection_id, user, reason, self.queries_executed);
         inner_result
@@ -667,7 +663,10 @@ where
                 Ok(false)
             }
             BoltRequest::Run {
-                query, params, extra, ..
+                query,
+                params,
+                extra,
+                ..
             } => self.handle_run(&query, params, &extra).await,
             BoltRequest::Pull { extra } => self.handle_pull(&extra).await,
             BoltRequest::Discard { extra } => self.handle_discard(&extra).await,
@@ -687,10 +686,7 @@ where
     // signatures or leak intermediate state we deliberately keep
     // local; the body stays cohesive.
     #[allow(clippy::too_many_lines)]
-    async fn handle_hello(
-        &mut self,
-        extra: &[(String, PackStreamValue)],
-    ) -> Result<bool> {
+    async fn handle_hello(&mut self, extra: &[(String, PackStreamValue)]) -> Result<bool> {
         // v0.6.0 Fase 2 Task 5 eje 1 — auth-IP throttle.
         // Short-circuit BEFORE evaluating credentials so an attacker cannot
         // burn CPU on argon2 with arbitrary inputs once they've hit the cap.
@@ -698,11 +694,12 @@ where
             if rl.auth_cap_active().await && rl.is_auth_blocked(ip).await {
                 crate::metrics::rate_limit_hit("auth_ip");
                 let failures = rl.auth_failures_in_window(ip).await;
-                self.audit.auth_throttled(crate::audit::AuthThrottledDetails {
-                    client_ip: ip.to_string(),
-                    failures_in_window: failures,
-                    retry_after_seconds: 60,
-                });
+                self.audit
+                    .auth_throttled(crate::audit::AuthThrottledDetails {
+                        client_ip: ip.to_string(),
+                        failures_in_window: failures,
+                        retry_after_seconds: 60,
+                    });
                 self.failed = true;
                 self.send_failure(
                     "Neo.ClientError.Security.AuthorizationExpired",
@@ -771,9 +768,7 @@ where
         // the same key.
         let username = principal.trim().to_ascii_lowercase();
         let is_admin = match self.auth_store.list_users().await {
-            Ok(users) => users
-                .iter()
-                .any(|u| u.username == username && u.is_admin),
+            Ok(users) => users.iter().any(|u| u.username == username && u.is_admin),
             Err(_) => false,
         };
 
@@ -790,12 +785,8 @@ where
         // so misconfigured clients fail at the first RUN with a clearer
         // error than a HELLO-time rejection would give.
         self.authenticated = true;
-        self.audit.auth_success_with_database(
-            self.connection_id,
-            &username,
-            principal,
-            None,
-        );
+        self.audit
+            .auth_success_with_database(self.connection_id, &username, principal, None);
         crate::metrics::auth_attempt("success");
         // v0.6.0 Fase 2 Task 5 eje 1 — successful auth clears the failure
         // window for this IP so a legitimate user who mistyped a few times
@@ -868,10 +859,7 @@ where
     ///   the pre-Task-10-bis HELLO path did, preserving the wire
     ///   contract for every error code other than the location of the
     ///   `db` argument.
-    async fn try_bind_database(
-        &mut self,
-        run_extra: &[(String, PackStreamValue)],
-    ) -> Result<bool> {
+    async fn try_bind_database(&mut self, run_extra: &[(String, PackStreamValue)]) -> Result<bool> {
         // Clone the registry Arc into a local so the match below stays readable.
         let registry = self.registry.clone();
 
@@ -1048,10 +1036,7 @@ where
         // statement reached `dispatch_admin`. The detection is a cheap
         // prefix match (no full parse, no cache interaction); the canonical
         // parse + dispatch still happens below.
-        let skip_db_bind = matches!(
-            tessera_graph_cypher::try_parse_admin(query),
-            Ok(Some(_))
-        );
+        let skip_db_bind = matches!(tessera_graph_cypher::try_parse_admin(query), Ok(Some(_)));
 
         // v0.5.0 Task 10-bis: multi-database routing happens on the
         // first RUN of the session, not on HELLO. `extra["db"]` is the
@@ -1086,15 +1071,19 @@ where
             if !self.query_bucket.try_take(1, now) {
                 let tokens_available = self.query_bucket.available(now);
                 let user = self.current_username().to_owned();
-                let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+                let database = self
+                    .db_handle
+                    .as_ref()
+                    .map(|h| h.database_name().to_owned());
                 crate::metrics::rate_limit_hit("query_conn");
-                self.audit.query_throttled(crate::audit::QueryThrottledDetails {
-                    connection_id: self.connection_id,
-                    user,
-                    statement_sha256: stmt_hash.clone(),
-                    database,
-                    tokens_available,
-                });
+                self.audit
+                    .query_throttled(crate::audit::QueryThrottledDetails {
+                        connection_id: self.connection_id,
+                        user,
+                        statement_sha256: stmt_hash.clone(),
+                        database,
+                        tokens_available,
+                    });
                 self.failed = true;
                 self.send_failure(
                     "Neo.ClientError.Security.TooManyRequests",
@@ -1131,15 +1120,15 @@ where
                         error_code: "Neo.ClientError.Statement.TypeError".to_owned(),
                     },
                 );
-                let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+                let database = self
+                    .db_handle
+                    .as_ref()
+                    .map(|h| h.database_name().to_owned());
                 crate::metrics::query_executed(database.as_deref(), "error");
                 self.queries_executed += 1;
                 self.failed = true;
-                self.send_failure(
-                    "Neo.ClientError.Statement.TypeError",
-                    &e.to_string(),
-                )
-                .await?;
+                self.send_failure("Neo.ClientError.Statement.TypeError", &e.to_string())
+                    .await?;
                 return Ok(false);
             }
         };
@@ -1159,7 +1148,10 @@ where
             Err(e) => {
                 let elapsed_ms = elapsed_ms(started);
                 let user = self.current_username().to_owned();
-                let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+                let database = self
+                    .db_handle
+                    .as_ref()
+                    .map(|h| h.database_name().to_owned());
                 self.drain_slow_query_drops(started);
                 self.audit.emit_query_pair(
                     &mut self.slow_gate,
@@ -1182,11 +1174,8 @@ where
                 crate::metrics::query_executed(database.as_deref(), "error");
                 self.queries_executed += 1;
                 self.failed = true;
-                self.send_failure(
-                    "Neo.ClientError.Statement.SyntaxError",
-                    &e.to_string(),
-                )
-                .await?;
+                self.send_failure("Neo.ClientError.Statement.SyntaxError", &e.to_string())
+                    .await?;
                 return Ok(false);
             }
         };
@@ -1214,7 +1203,10 @@ where
                     error_code: code.to_owned(),
                 },
             );
-            let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+            let database = self
+                .db_handle
+                .as_ref()
+                .map(|h| h.database_name().to_owned());
             crate::metrics::query_executed(database.as_deref(), "error");
             self.queries_executed += 1;
             self.failed = true;
@@ -1324,10 +1316,7 @@ where
                 // read-after-write on the same connection sees its own writes.
                 if self.batch_state.dirty_count > 0 {
                     if let Err(e) = self.dispatch_end_batch() {
-                        tracing::warn!(
-                            conn = self.connection_id,
-                            "flush before read failed: {e}"
-                        );
+                        tracing::warn!(conn = self.connection_id, "flush before read failed: {e}");
                     }
                     self.batch_state.reset_dirty();
                 }
@@ -1379,7 +1368,10 @@ where
 
                 // Auto-flush: if threshold reached, issue a single WAL sync
                 // and re-open a new implicit batch for subsequent mutations.
-                if self.batch_state.should_auto_flush(AUTO_FLUSH_OPS, AUTO_FLUSH_WINDOW) {
+                if self
+                    .batch_state
+                    .should_auto_flush(AUTO_FLUSH_OPS, AUTO_FLUSH_WINDOW)
+                {
                     tracing::debug!(
                         dirty = self.batch_state.dirty_count,
                         "auto-flushing implicit batch"
@@ -1477,7 +1469,10 @@ where
         tracing::Span::current().record("duration_ms", elapsed_ms);
         {
             let user = self.current_username().to_owned();
-            let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+            let database = self
+                .db_handle
+                .as_ref()
+                .map(|h| h.database_name().to_owned());
             let outcome: &'static str = if exec_result.is_ok() {
                 "success"
             } else {
@@ -1536,10 +1531,7 @@ where
                 self.pending_result = Some(pending);
 
                 self.send_response(&BoltResponse::Success {
-                    metadata: vec![(
-                        "fields".to_owned(),
-                        PackStreamValue::List(fields),
-                    )],
+                    metadata: vec![("fields".to_owned(), PackStreamValue::List(fields))],
                 })
                 .await?;
             }
@@ -1596,13 +1588,14 @@ where
                         .query_timeout
                         .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
                     crate::metrics::query_timed_out(database.as_deref());
-                    self.audit.query_timed_out(crate::audit::QueryTimedOutDetails {
-                        connection_id: self.connection_id,
-                        user,
-                        statement_sha256: stmt_hash.clone(),
-                        database,
-                        timeout_ms,
-                    });
+                    self.audit
+                        .query_timed_out(crate::audit::QueryTimedOutDetails {
+                            connection_id: self.connection_id,
+                            user,
+                            statement_sha256: stmt_hash.clone(),
+                            database,
+                            timeout_ms,
+                        });
                     (
                         "Neo.ClientError.Statement.ExecutionFailed",
                         sanitize_engine_error_for_wire(rest),
@@ -1629,16 +1622,20 @@ where
             if !self.query_bucket.try_take(1, now) {
                 let tokens_available = self.query_bucket.available(now);
                 let user = self.current_username().to_owned();
-                let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+                let database = self
+                    .db_handle
+                    .as_ref()
+                    .map(|h| h.database_name().to_owned());
                 let stmt_hash = self.last_stmt_hash.clone().unwrap_or_default();
                 crate::metrics::rate_limit_hit("query_conn");
-                self.audit.query_throttled(crate::audit::QueryThrottledDetails {
-                    connection_id: self.connection_id,
-                    user,
-                    statement_sha256: stmt_hash,
-                    database,
-                    tokens_available,
-                });
+                self.audit
+                    .query_throttled(crate::audit::QueryThrottledDetails {
+                        connection_id: self.connection_id,
+                        user,
+                        statement_sha256: stmt_hash,
+                        database,
+                        tokens_available,
+                    });
                 self.failed = true;
                 self.send_failure(
                     "Neo.ClientError.Security.TooManyRequests",
@@ -1677,7 +1674,9 @@ where
         // Write Records without flushing — single flush at the end keeps
         // the syscall count at 1 for the whole batch.
         for row in &pending.rows[pending.cursor..end] {
-            let data = encode_response(&BoltResponse::Record { fields: row.clone() })?;
+            let data = encode_response(&BoltResponse::Record {
+                fields: row.clone(),
+            })?;
             self.writer
                 .write_message_no_flush(&data)
                 .await
@@ -1697,7 +1696,8 @@ where
         if let Some(stats) = stats_snapshot {
             metadata.push(("stats".to_owned(), mutation_stats_to_dict(&stats)));
         }
-        self.send_response(&BoltResponse::Success { metadata }).await?;
+        self.send_response(&BoltResponse::Success { metadata })
+            .await?;
 
         Ok(false)
     }
@@ -1711,16 +1711,20 @@ where
             if !self.query_bucket.try_take(1, now) {
                 let tokens_available = self.query_bucket.available(now);
                 let user = self.current_username().to_owned();
-                let database = self.db_handle.as_ref().map(|h| h.database_name().to_owned());
+                let database = self
+                    .db_handle
+                    .as_ref()
+                    .map(|h| h.database_name().to_owned());
                 let stmt_hash = self.last_stmt_hash.clone().unwrap_or_default();
                 crate::metrics::rate_limit_hit("query_conn");
-                self.audit.query_throttled(crate::audit::QueryThrottledDetails {
-                    connection_id: self.connection_id,
-                    user,
-                    statement_sha256: stmt_hash,
-                    database,
-                    tokens_available,
-                });
+                self.audit
+                    .query_throttled(crate::audit::QueryThrottledDetails {
+                        connection_id: self.connection_id,
+                        user,
+                        statement_sha256: stmt_hash,
+                        database,
+                        tokens_available,
+                    });
                 self.failed = true;
                 self.send_failure(
                     "Neo.ClientError.Security.TooManyRequests",
@@ -1766,7 +1770,8 @@ where
         if let Some(stats) = stats_snapshot {
             metadata.push(("stats".to_owned(), mutation_stats_to_dict(&stats)));
         }
-        self.send_response(&BoltResponse::Success { metadata }).await?;
+        self.send_response(&BoltResponse::Success { metadata })
+            .await?;
         Ok(false)
     }
 
@@ -1787,10 +1792,7 @@ where
             }
         }
         if let Err(e) = self.flush_pending_batch() {
-            tracing::warn!(
-                conn = self.connection_id,
-                "flush during RESET failed: {e}"
-            );
+            tracing::warn!(conn = self.connection_id, "flush during RESET failed: {e}");
         }
         self.send_response(&BoltResponse::Success { metadata: vec![] })
             .await?;
@@ -1902,17 +1904,11 @@ where
     /// even on failure, because Bolt allows a new RUN after a Failure
     /// provided the client has RESET or the handler surfaces it as a
     /// non-fatal error.
-    async fn dispatch_admin(
-        &mut self,
-        stmt: tessera_graph::gql::AdminStatement,
-    ) -> Result<bool> {
+    async fn dispatch_admin(&mut self, stmt: tessera_graph::gql::AdminStatement) -> Result<bool> {
         let Some(user) = self.authenticated_user.clone() else {
             self.failed = true;
-            self.send_failure(
-                "Neo.ClientError.Security.Unauthorized",
-                "not authenticated",
-            )
-            .await?;
+            self.send_failure("Neo.ClientError.Security.Unauthorized", "not authenticated")
+                .await?;
             return Ok(false);
         };
 
@@ -2014,7 +2010,7 @@ where
         &mut self,
         stmt: Box<tessera_graph::gql::CallStatement>,
     ) -> Result<bool> {
-        use tessera_graph::call::{resolve_procedure, ProcedureKind};
+        use tessera_graph::call::{ProcedureKind, resolve_procedure};
 
         // Los procedimientos de copia en caliente son asíncronos, cuelgan del
         // gestor concreto y sólo los sirve un administrador — no pasan por el
@@ -2060,7 +2056,6 @@ where
         Ok(false)
     }
 
-
     // ── Session-aware graph dispatchers ────────────────────────────────
     //
     // Every RUN executes against the per-session `session_accessor` (wrapping
@@ -2101,9 +2096,10 @@ where
                 self.max_result_rows,
                 deadline,
             ),
-            None => self
-                .current_accessor()
-                .execute_query(q, params, self.max_result_rows, deadline),
+            None => {
+                self.current_accessor()
+                    .execute_query(q, params, self.max_result_rows, deadline)
+            }
         }
     }
 
@@ -2112,7 +2108,10 @@ where
         m: &tessera_graph::gql::MutationStatement,
         params: HashMap<String, tessera_graph::gql::GqlValue>,
     ) -> std::result::Result<
-        (Vec<crate::graph_accessor::ResultRow>, tessera_graph::gql::GqlMutationResult),
+        (
+            Vec<crate::graph_accessor::ResultRow>,
+            tessera_graph::gql::GqlMutationResult,
+        ),
         String,
     > {
         let deadline = self.compute_deadline();
@@ -2120,7 +2119,9 @@ where
             Some(txn_id) => self
                 .current_accessor()
                 .execute_mutation_in_txn(txn_id, m, params, deadline),
-            None => self.current_accessor().execute_mutation(m, params, deadline),
+            None => self
+                .current_accessor()
+                .execute_mutation(m, params, deadline),
         }
     }
 
@@ -2129,7 +2130,10 @@ where
         pq: &tessera_graph::gql::PipelineQuery,
         params: HashMap<String, tessera_graph::gql::GqlValue>,
     ) -> std::result::Result<
-        (Vec<crate::graph_accessor::ResultRow>, tessera_graph::gql::GqlMutationResult),
+        (
+            Vec<crate::graph_accessor::ResultRow>,
+            tessera_graph::gql::GqlMutationResult,
+        ),
         String,
     > {
         let deadline = self.compute_deadline();
@@ -2141,9 +2145,10 @@ where
                 self.max_result_rows,
                 deadline,
             ),
-            None => self
-                .current_accessor()
-                .execute_pipeline(pq, params, self.max_result_rows, deadline),
+            None => {
+                self.current_accessor()
+                    .execute_pipeline(pq, params, self.max_result_rows, deadline)
+            }
         }
     }
 
@@ -2161,9 +2166,12 @@ where
                 self.max_result_rows,
                 deadline,
             ),
-            None => self
-                .current_accessor()
-                .execute_const_return(c, params, self.max_result_rows, deadline),
+            None => self.current_accessor().execute_const_return(
+                c,
+                params,
+                self.max_result_rows,
+                deadline,
+            ),
         }
     }
 
@@ -2216,7 +2224,6 @@ where
             .map_or("", |u| u.username.as_str())
     }
 
-
     /// Marca la sesión como fallida y manda el fallo.
     ///
     /// Único punto de la puerta hacia el gemelo de edición que esta edición
@@ -2243,19 +2250,18 @@ where
     /// so `closed_window_drops` reports unconditionally when drops
     /// accumulated; a window with zero drops stays silent.
     fn drop(&mut self) {
-        self.drain_slow_query_drops(
-            std::time::Instant::now() + std::time::Duration::from_secs(61),
-        );
+        self.drain_slow_query_drops(std::time::Instant::now() + std::time::Duration::from_secs(61));
         // v0.6.0 Fase 2 Task 5 eje 4 — one aggregate bandwidth-throttle
         // audit entry per connection, emitted only when the cap actually
         // slowed I/O at least once. Silent when the cap never bit.
         let total_sleeps = self.bandwidth.sleep_count();
         if total_sleeps > 0 {
-            self.audit.bandwidth_throttled(crate::audit::BandwidthThrottledDetails {
-                connection_id: self.connection_id,
-                total_sleeps,
-                total_sleep_duration_ms: self.bandwidth.total_sleep_ms(),
-            });
+            self.audit
+                .bandwidth_throttled(crate::audit::BandwidthThrottledDetails {
+                    connection_id: self.connection_id,
+                    total_sleeps,
+                    total_sleep_duration_ms: self.bandwidth.total_sleep_ms(),
+                });
         }
     }
 }
@@ -2344,8 +2350,7 @@ pub fn map_sideeffect_free_engine_error(msg: &str) -> (&'static str, String) {
             "Neo.ClientError.Schema.ConstraintValidationFailed",
             sanitize_engine_error_for_wire(rest),
         )
-    } else if let Some(rest) =
-        msg.strip_prefix(crate::graph_accessor::ENGINE_TXN_MEMORY_CAP_PREFIX)
+    } else if let Some(rest) = msg.strip_prefix(crate::graph_accessor::ENGINE_TXN_MEMORY_CAP_PREFIX)
     {
         // Issue #43 A11: the transaction outgrew its memory cap and was rolled
         // back. Reported as TRANSIENT on purpose — the driver may retry, and
@@ -2354,9 +2359,7 @@ pub fn map_sideeffect_free_engine_error(msg: &str) -> (&'static str, String) {
             "Neo.TransientError.General.MemoryPoolOutOfMemory",
             sanitize_engine_error_for_wire(rest),
         )
-    } else if let Some(rest) =
-        msg.strip_prefix(crate::graph_accessor::ENGINE_BATCH_LIMIT_PREFIX)
-    {
+    } else if let Some(rest) = msg.strip_prefix(crate::graph_accessor::ENGINE_BATCH_LIMIT_PREFIX) {
         // Issue #43 A12: the batch exceeded its cap. NOT transient — replaying
         // the same oversized batch fails identically; the client must split it.
         (
@@ -2418,10 +2421,7 @@ pub fn map_sideeffect_free_engine_error(msg: &str) -> (&'static str, String) {
 /// can pin the contract without round-tripping through Bolt.
 #[must_use]
 pub fn sanitize_engine_error_for_wire(message: &str) -> String {
-    if message.contains("poisoned")
-        || message.contains("corrupt")
-        || message.contains("checksum")
-    {
+    if message.contains("poisoned") || message.contains("corrupt") || message.contains("checksum") {
         return "internal storage error".to_owned();
     }
     if message.contains("NodeId(")
@@ -2442,9 +2442,7 @@ pub fn sanitize_engine_error_for_wire(message: &str) -> String {
 /// `DatabaseInUse`) are not access-denied events — they have their
 /// own observability story (counters in `RegistryStats`,
 /// transient-error wire codes) — so this returns `None` for them.
-const fn registry_error_to_access_denied_reason(
-    e: &RegistryError,
-) -> Option<AccessDeniedReason> {
+const fn registry_error_to_access_denied_reason(e: &RegistryError) -> Option<AccessDeniedReason> {
     match e {
         RegistryError::Unauthorized => Some(AccessDeniedReason::Unauthorized),
         RegistryError::DatabaseNotFound(_) => Some(AccessDeniedReason::DatabaseNotFound),
@@ -2635,8 +2633,7 @@ fn gql_result_to_pending_with_columns(
     // Union of all column names across every row, so a column missing from
     // `rows[0]` (because PropAccess produced Null there) is still surfaced.
     let mut columns: Vec<String> = preferred_columns.to_vec();
-    let mut seen: std::collections::HashSet<&str> =
-        columns.iter().map(String::as_str).collect();
+    let mut seen: std::collections::HashSet<&str> = columns.iter().map(String::as_str).collect();
     let mut extras: Vec<&str> = Vec::new();
     for row in rows {
         for k in row.keys() {
@@ -2771,7 +2768,10 @@ mod tests {
         );
         let (code, wire) = super::map_sideeffect_free_engine_error(&msg);
         assert_eq!(code, "Neo.ClientError.Request.Invalid");
-        assert!(wire.contains("Event"), "the offending label must reach the client: {wire}");
+        assert!(
+            wire.contains("Event"),
+            "the offending label must reach the client: {wire}"
+        );
         assert!(
             !wire.contains("__TG_"),
             "the internal sentinel must never reach the wire: {wire}"
@@ -2818,7 +2818,10 @@ mod tests {
         );
         let (code, wire) = super::map_sideeffect_free_engine_error(&msg);
         assert_eq!(code, "Neo.ClientError.Schema.ConstraintValidationFailed");
-        assert!(!wire.contains("__TG_"), "sentinel must not reach the wire: {wire}");
+        assert!(
+            !wire.contains("__TG_"),
+            "sentinel must not reach the wire: {wire}"
+        );
     }
 
     /// The neighbouring pure mappings, pinned alongside so a future edit to the
@@ -2913,8 +2916,7 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>(_: &T) {}
 
         let factory: super::AccessorFactory = Arc::new(|h| {
-            Arc::new(crate::DefaultGraphAccessor::new(h.graph()))
-                as Arc<dyn crate::GraphAccessor>
+            Arc::new(crate::DefaultGraphAccessor::new(h.graph())) as Arc<dyn crate::GraphAccessor>
         });
         assert_send_sync(&factory);
     }

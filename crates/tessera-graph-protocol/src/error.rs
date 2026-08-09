@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 /// Error type for protocol operations.
 #[derive(Debug, thiserror::Error)]

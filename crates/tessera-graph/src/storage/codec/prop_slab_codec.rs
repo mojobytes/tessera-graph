@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Shared property slab: several entities' overflowed properties per page.
 //!
@@ -204,7 +204,12 @@ fn compact(payload: &mut [u8]) {
         write_dir_entry(
             payload,
             i,
-            &DirEntry { entity_id: entry.entity_id, kind: entry.kind, offset: write_at, len: bytes.len() },
+            &DirEntry {
+                entity_id: entry.entity_id,
+                kind: entry.kind,
+                offset: write_at,
+                len: bytes.len(),
+            },
         );
     }
 
@@ -314,7 +319,12 @@ pub fn write_blob(
     write_dir_entry(
         payload,
         count,
-        &DirEntry { entity_id, kind: kind.as_byte(), offset, len: blob.len() },
+        &DirEntry {
+            entity_id,
+            kind: kind.as_byte(),
+            offset,
+            len: blob.len(),
+        },
     );
 
     // Count fits a u16: the directory cannot hold more entries than the page
@@ -323,7 +333,13 @@ pub fn write_blob(
     let new_count = (count + 1) as u16;
     payload[0..2].copy_from_slice(&new_count.to_le_bytes());
 
-    finalize_page(&mut buf, magic::OVERFLOW, PROP_SLAB_VERSION, PageType::PropertySlab, 0);
+    finalize_page(
+        &mut buf,
+        magic::OVERFLOW,
+        PROP_SLAB_VERSION,
+        PageType::PropertySlab,
+        0,
+    );
     backend.write_page(DataFile::Overflow, page_id, &buf)
 }
 
@@ -399,7 +415,13 @@ pub fn free_blob(
     }
 
     if changed {
-        finalize_page(&mut buf, magic::OVERFLOW, PROP_SLAB_VERSION, PageType::PropertySlab, 0);
+        finalize_page(
+            &mut buf,
+            magic::OVERFLOW,
+            PROP_SLAB_VERSION,
+            PageType::PropertySlab,
+            0,
+        );
         backend.write_page(DataFile::Overflow, page_id, &buf)?;
     }
 
@@ -412,7 +434,13 @@ pub fn free_blob(
 /// count has to be zeroed explicitly rather than assumed.
 pub fn init_page(backend: &mut dyn StorageBackend, page_id: PageId) -> Result<()> {
     let mut buf = new_page_buf();
-    finalize_page(&mut buf, magic::OVERFLOW, PROP_SLAB_VERSION, PageType::PropertySlab, 0);
+    finalize_page(
+        &mut buf,
+        magic::OVERFLOW,
+        PROP_SLAB_VERSION,
+        PageType::PropertySlab,
+        0,
+    );
     backend.write_page(DataFile::Overflow, page_id, &buf)
 }
 
@@ -510,12 +538,18 @@ mod tests {
         // old bytes and must be placed elsewhere on the page.
         write_blob(&mut b, p, 2, EntityKind::Node, b"two-much-longer-now").unwrap();
 
-        assert_eq!(read_blob(&b, p, 1, EntityKind::Node).unwrap().as_deref(), Some(&b"one"[..]));
+        assert_eq!(
+            read_blob(&b, p, 1, EntityKind::Node).unwrap().as_deref(),
+            Some(&b"one"[..])
+        );
         assert_eq!(
             read_blob(&b, p, 2, EntityKind::Node).unwrap().as_deref(),
             Some(&b"two-much-longer-now"[..])
         );
-        assert_eq!(read_blob(&b, p, 3, EntityKind::Node).unwrap().as_deref(), Some(&b"three"[..]));
+        assert_eq!(
+            read_blob(&b, p, 3, EntityKind::Node).unwrap().as_deref(),
+            Some(&b"three"[..])
+        );
     }
 
     #[test]
@@ -564,14 +598,22 @@ mod tests {
         // Rewrite the survivors enough to force compaction.
         for _ in 0..40 {
             for i in (1..20_usize).step_by(2) {
-                write_blob(&mut b, p, i as u64, EntityKind::Node, expected[i].as_bytes())
-                    .unwrap();
+                write_blob(
+                    &mut b,
+                    p,
+                    i as u64,
+                    EntityKind::Node,
+                    expected[i].as_bytes(),
+                )
+                .unwrap();
             }
         }
 
         for i in (1..20_usize).step_by(2) {
             assert_eq!(
-                read_blob(&b, p, i as u64, EntityKind::Node).unwrap().as_deref(),
+                read_blob(&b, p, i as u64, EntityKind::Node)
+                    .unwrap()
+                    .as_deref(),
                 Some(expected[i].as_bytes()),
                 "entity {i} was lost or corrupted by compaction"
             );

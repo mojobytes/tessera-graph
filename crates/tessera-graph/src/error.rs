@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::fmt;
 
@@ -79,7 +79,9 @@ pub enum Error {
         reason: &'static str,
     },
 
-    #[error("checksum mismatch in {file} (page {page_id}): expected {expected:#010X}, got {actual:#010X}")]
+    #[error(
+        "checksum mismatch in {file} (page {page_id}): expected {expected:#010X}, got {actual:#010X}"
+    )]
     ChecksumMismatch {
         file: &'static str,
         page_id: u32,
@@ -121,7 +123,11 @@ pub enum Error {
     InvalidPattern(String),
 
     #[error("GQL syntax error at line {line}, col {col}: {message}")]
-    GqlSyntaxError { line: u32, col: u32, message: String },
+    GqlSyntaxError {
+        line: u32,
+        col: u32,
+        message: String,
+    },
 
     #[error("GQL unsupported feature: {0}")]
     GqlUnsupported(String),
@@ -211,7 +217,11 @@ pub enum Error {
     #[error(
         "transaction {txn_id} exceeded the memory cap ({used_bytes} > {cap_bytes} bytes) and was aborted"
     )]
-    TxnMemoryCapExceeded { txn_id: u64, used_bytes: u64, cap_bytes: u64 },
+    TxnMemoryCapExceeded {
+        txn_id: u64,
+        used_bytes: u64,
+        cap_bytes: u64,
+    },
 
     /// A write inside an explicit transaction targeted a node whose label was
     /// declared append-only (issue #43). These nodes are exempt from MVCC
@@ -275,7 +285,11 @@ mod tests {
 
     #[test]
     fn gql_error_variants_display() {
-        let e = Error::GqlSyntaxError { line: 1, col: 5, message: "unexpected token".into() };
+        let e = Error::GqlSyntaxError {
+            line: 1,
+            col: 5,
+            message: "unexpected token".into(),
+        };
         assert!(e.to_string().contains("line 1"));
         assert!(e.to_string().contains("col 5"));
 
@@ -301,10 +315,7 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("Cannot delete node"), "message: {msg}");
         assert!(msg.contains('7'), "message: {msg}");
-        assert!(
-            msg.contains("still has relationships"),
-            "message: {msg}"
-        );
+        assert!(msg.contains("still has relationships"), "message: {msg}");
     }
 
     #[test]
@@ -331,16 +342,22 @@ mod tests {
 
     #[test]
     fn mvcc_error_variants_display() {
-        assert!(Error::MvccNotEnabled
-            .to_string()
-            .contains("MVCC is not enabled"));
+        assert!(
+            Error::MvccNotEnabled
+                .to_string()
+                .contains("MVCC is not enabled")
+        );
         assert_eq!(
             Error::TxnNotActive(7).to_string(),
             "transaction 7 is not active"
         );
         assert_eq!(
-            Error::TxnMemoryCapExceeded { txn_id: 3, used_bytes: 300, cap_bytes: 200 }
-                .to_string(),
+            Error::TxnMemoryCapExceeded {
+                txn_id: 3,
+                used_bytes: 300,
+                cap_bytes: 200
+            }
+            .to_string(),
             "transaction 3 exceeded the memory cap (300 > 200 bytes) and was aborted"
         );
     }

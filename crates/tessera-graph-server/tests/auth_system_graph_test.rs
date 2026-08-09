@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Pruebas del almacén de identidad sobre el grafo de sistema — **la parte que
 //! esta edición sí ofrece**: cuentas locales, contraseñas y autenticación.
@@ -76,7 +76,10 @@ async fn invalid_username_characters_rejected() {
 async fn username_over_63_chars_rejected() {
     let store = fresh_store();
     let pw = SecretString::new("hunter22!x".to_owned());
-    let err = store.create_user(&"a".repeat(64), &pw, false).await.unwrap_err();
+    let err = store
+        .create_user(&"a".repeat(64), &pw, false)
+        .await
+        .unwrap_err();
     assert!(matches!(err, AuthStoreError::InvalidUsername { .. }));
 }
 
@@ -135,7 +138,10 @@ async fn auth_rejects_wrong_password() {
     let pw = SecretString::new("correct-horse".to_owned());
     store.create_user("alice", &pw, false).await.unwrap();
 
-    let err = provider.authenticate("alice", "wrong-pass").await.unwrap_err();
+    let err = provider
+        .authenticate("alice", "wrong-pass")
+        .await
+        .unwrap_err();
     assert!(matches!(err, AuthError::InvalidCredentials));
 }
 
@@ -143,7 +149,10 @@ async fn auth_rejects_wrong_password() {
 async fn auth_rejects_unknown_user_after_dummy_verify() {
     let (provider, _) = fresh_pair();
     let start = std::time::Instant::now();
-    let err = provider.authenticate("ghost", "anything").await.unwrap_err();
+    let err = provider
+        .authenticate("ghost", "anything")
+        .await
+        .unwrap_err();
     let elapsed = start.elapsed();
     assert!(matches!(err, AuthError::UnknownUser));
     // The dummy argon2 verify must have run — otherwise the miss path
@@ -208,8 +217,16 @@ async fn set_password_reauth_roundtrip() {
     let second = SecretString::new("second-password".to_owned());
     store.set_password("alice", &second).await.unwrap();
 
-    assert!(provider.authenticate("alice", "second-password").await.is_ok());
-    let err = provider.authenticate("alice", "first-password").await.unwrap_err();
+    assert!(
+        provider
+            .authenticate("alice", "second-password")
+            .await
+            .is_ok()
+    );
+    let err = provider
+        .authenticate("alice", "first-password")
+        .await
+        .unwrap_err();
     assert!(matches!(err, AuthError::InvalidCredentials));
 }
 
@@ -221,7 +238,10 @@ async fn set_enabled_false_prevents_auth() {
     store.create_user("alice", &pw, false).await.unwrap();
 
     store.set_enabled("alice", false).await.unwrap();
-    let err = provider.authenticate("alice", "hunter22!x").await.unwrap_err();
+    let err = provider
+        .authenticate("alice", "hunter22!x")
+        .await
+        .unwrap_err();
     assert!(matches!(err, AuthError::UserDisabled));
 }
 

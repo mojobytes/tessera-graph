@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 #[allow(unused)]
 mod helpers;
@@ -21,7 +21,12 @@ fn bench_neighbor_query(c: &mut Criterion) {
             &degree,
             |b, &degree| {
                 let (g, center) = star_graph(degree);
-                b.iter(|| g.neighbors(center).direction(Direction::Outgoing).collect().unwrap());
+                b.iter(|| {
+                    g.neighbors(center)
+                        .direction(Direction::Outgoing)
+                        .collect()
+                        .unwrap()
+                });
             },
         );
 
@@ -103,33 +108,25 @@ fn bench_traversal_tree(c: &mut Criterion) {
         let (g, root) = binary_tree_graph(depth);
         let node_count = (1_usize << depth) - 1;
 
-        group.bench_with_input(
-            BenchmarkId::new("bfs", node_count),
-            &depth,
-            |b, _| {
-                b.iter(|| {
-                    g.traverse(root)
-                        .direction(Direction::Outgoing)
-                        .bfs()
-                        .collect()
-                        .unwrap()
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("bfs", node_count), &depth, |b, _| {
+            b.iter(|| {
+                g.traverse(root)
+                    .direction(Direction::Outgoing)
+                    .bfs()
+                    .collect()
+                    .unwrap()
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("dfs", node_count),
-            &depth,
-            |b, _| {
-                b.iter(|| {
-                    g.traverse(root)
-                        .direction(Direction::Outgoing)
-                        .dfs()
-                        .collect()
-                        .unwrap()
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("dfs", node_count), &depth, |b, _| {
+            b.iter(|| {
+                g.traverse(root)
+                    .direction(Direction::Outgoing)
+                    .dfs()
+                    .collect()
+                    .unwrap()
+            });
+        });
     }
 
     group.finish();
@@ -213,18 +210,14 @@ fn bench_shortest_path(c: &mut Criterion) {
         let end = matrix[side - 1][side - 1];
         let total_nodes = side * side;
 
-        group.bench_with_input(
-            BenchmarkId::new("grid", total_nodes),
-            &side,
-            |b, _| {
-                b.iter(|| {
-                    g.shortest_path(start, end)
-                        .direction(Direction::Outgoing)
-                        .find()
-                        .unwrap()
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("grid", total_nodes), &side, |b, _| {
+            b.iter(|| {
+                g.shortest_path(start, end)
+                    .direction(Direction::Outgoing)
+                    .find()
+                    .unwrap()
+            });
+        });
     }
 
     // Same node — trivial case
@@ -320,18 +313,14 @@ fn bench_subgraph(c: &mut Criterion) {
         let (g, root) = binary_tree_graph(depth);
         let node_count = (1_usize << depth) - 1;
 
-        group.bench_with_input(
-            BenchmarkId::new("full_tree", node_count),
-            &depth,
-            |b, _| {
-                b.iter(|| {
-                    g.subgraph(root)
-                        .direction(Direction::Outgoing)
-                        .extract()
-                        .unwrap()
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("full_tree", node_count), &depth, |b, _| {
+            b.iter(|| {
+                g.subgraph(root)
+                    .direction(Direction::Outgoing)
+                    .extract()
+                    .unwrap()
+            });
+        });
 
         group.bench_with_input(
             BenchmarkId::new("depth_limited_3", node_count),

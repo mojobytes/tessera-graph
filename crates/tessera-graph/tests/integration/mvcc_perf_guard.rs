@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Performance regression guard for Block 4 MVCC (Phase 3, Cycle 17).
 //!

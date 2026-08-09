@@ -4,8 +4,9 @@ description = "Cypher compatibility layer for TesseraGraph"
 version.workspace     = true
 edition.workspace     = true
 authors.workspace     = true
-license.workspace     = true
+license-file          = "../tessera-graph-server/LICENSE"
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 tessera-graph  = { workspace = true }

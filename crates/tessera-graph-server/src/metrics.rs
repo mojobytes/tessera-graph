@@ -471,16 +471,12 @@ pub(crate) fn query_duration(database: Option<&str>, kind: &'static str, secs: f
     .record(secs);
 }
 
-
 /// The histogram uses the default buckets installed by
 /// `PrometheusBuilder` which cover ~5 ms to ~50 ms — adequate for
 /// SSD-backed fsync latencies. Per-bucket tuning is deferred to
 /// production telemetry as documented for `query_duration_seconds`
 /// in Task 1 C6.
-pub(crate) fn wal_fsync_observed(
-    _cause: tessera_graph::FsyncCause,
-    duration: std::time::Duration,
-) {
+pub(crate) fn wal_fsync_observed(_cause: tessera_graph::FsyncCause, duration: std::time::Duration) {
     histogram!(WAL_FSYNC_DURATION_SECONDS).record(duration.as_secs_f64());
 }
 

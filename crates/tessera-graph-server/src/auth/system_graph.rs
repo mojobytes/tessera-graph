@@ -33,8 +33,8 @@ use tessera_graph::{Graph, NodeId, Properties, Property};
 // Local user management only. Grants, the catalogue and their types moved to
 // `authorization_store.rs`; this import list is the visible line of the split.
 use super::{
-    AuthStoreError, MAX_PASSWORD_LEN, MIN_PASSWORD_LEN, SecretString,
-    UserAuthRecord, UserStore, UserSummary, hash_password,
+    AuthStoreError, MAX_PASSWORD_LEN, MIN_PASSWORD_LEN, SecretString, UserAuthRecord, UserStore,
+    UserSummary, hash_password,
 };
 
 // Etiquetas de la parte de identidad del grafo de sistema.
@@ -90,9 +90,7 @@ pub(super) fn validate_username(raw: &str) -> Result<String, AuthStoreError> {
         });
     }
     for c in chars {
-        let ok = c.is_ascii_lowercase()
-            || c.is_ascii_digit()
-            || matches!(c, '_' | '.' | '-');
+        let ok = c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.' | '-');
         if !ok {
             return Err(AuthStoreError::InvalidUsername {
                 reason: format!("char {c:?} not in [a-z0-9_.-]"),
@@ -138,8 +136,6 @@ fn bool_prop(props: &Properties, key: &str) -> Option<bool> {
         _ => None,
     }
 }
-
-
 
 /// Identity store backed by a dedicated `tessera_graph::Graph`.
 ///
@@ -257,7 +253,6 @@ impl SystemGraphAuthStore {
             .map_err(|_| AuthStoreError::Backend("system graph lock poisoned".to_owned()))?;
         Ok(g.nodes_by_label(WILDCARD_LABEL).len())
     }
-
 }
 
 /// Compatibility alias for the renamed [`super::LocalAuthProvider`].
@@ -293,8 +288,8 @@ impl UserStore for SystemGraphAuthStore {
             }
         }
 
-        let phc = hash_password(password_plain)
-            .map_err(|e| AuthStoreError::Backend(e.to_string()))?;
+        let phc =
+            hash_password(password_plain).map_err(|e| AuthStoreError::Backend(e.to_string()))?;
         let id = Uuid::now_v7().to_string();
         let created_at = now_rfc3339();
 
@@ -309,8 +304,14 @@ impl UserStore for SystemGraphAuthStore {
             props.insert("password_hash".to_owned(), Property::String(phc.clone()));
             props.insert("enabled".to_owned(), Property::Bool(true));
             props.insert("is_admin".to_owned(), Property::Bool(is_admin));
-            props.insert("created_at".to_owned(), Property::String(created_at.clone()));
-            props.insert("updated_at".to_owned(), Property::String(created_at.clone()));
+            props.insert(
+                "created_at".to_owned(),
+                Property::String(created_at.clone()),
+            );
+            props.insert(
+                "updated_at".to_owned(),
+                Property::String(created_at.clone()),
+            );
             g.add_node(USER_LABEL, props)
                 .map_err(|e| AuthStoreError::Backend(e.to_string()))?
         };
@@ -374,8 +375,8 @@ impl UserStore for SystemGraphAuthStore {
     ) -> Result<(), AuthStoreError> {
         let username = validate_username(username)?;
         validate_password(password_plain)?;
-        let phc = hash_password(password_plain)
-            .map_err(|e| AuthStoreError::Backend(e.to_string()))?;
+        let phc =
+            hash_password(password_plain).map_err(|e| AuthStoreError::Backend(e.to_string()))?;
         let updated_at = now_rfc3339();
 
         let node_id = {
@@ -408,11 +409,7 @@ impl UserStore for SystemGraphAuthStore {
         Ok(())
     }
 
-    async fn set_enabled(
-        &self,
-        username: &str,
-        enabled: bool,
-    ) -> Result<(), AuthStoreError> {
+    async fn set_enabled(&self, username: &str, enabled: bool) -> Result<(), AuthStoreError> {
         let username = validate_username(username)?;
         let node_id = {
             let users = self
@@ -453,11 +450,7 @@ impl UserStore for SystemGraphAuthStore {
         Ok(())
     }
 
-    async fn set_admin(
-        &self,
-        username: &str,
-        is_admin: bool,
-    ) -> Result<(), AuthStoreError> {
+    async fn set_admin(&self, username: &str, is_admin: bool) -> Result<(), AuthStoreError> {
         let username = validate_username(username)?;
         let node_id = {
             let users = self
@@ -532,12 +525,7 @@ impl UserStore for SystemGraphAuthStore {
             id: u.id.clone(),
         }))
     }
-
 }
-
-
-
-
 
 #[cfg(test)]
 mod split_trait_contract_tests {

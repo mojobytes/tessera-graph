@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 //! Unit tests for the `rate_limiter` module (v0.6.0 Task 5 C2).
 //!
 //! All timing-sensitive tests use `MockClock`. Wall-clock is never read.
@@ -24,7 +24,10 @@ fn sliding_window_under_cap_admits() {
     for i in 0..5 {
         assert!(w.try_add(clock.now()), "admission {i} of 5 must pass");
     }
-    assert!(!w.try_add(clock.now()), "6th admission within the window must fail");
+    assert!(
+        !w.try_add(clock.now()),
+        "6th admission within the window must fail"
+    );
 }
 
 #[test]
@@ -60,7 +63,10 @@ fn token_bucket_try_take_under_capacity_succeeds() {
     let mut b = TokenBucket::new(100u64, Duration::from_secs(1));
     // Initial fill = capacity = 100 * 2 = 200.
     for i in 0..200 {
-        assert!(b.try_take(1, clock.now()), "take {i} of 200 must succeed (full bucket)");
+        assert!(
+            b.try_take(1, clock.now()),
+            "take {i} of 200 must succeed (full bucket)"
+        );
     }
     assert!(
         !b.try_take(1, clock.now()),
@@ -80,7 +86,10 @@ fn token_bucket_refills_over_time() {
     // Advance 1 sec → refill 100 tokens (capped at capacity 200).
     clock.advance(Duration::from_secs(1));
     for i in 0..100 {
-        assert!(b.try_take(1, clock.now()), "refilled take {i} of 100 must succeed");
+        assert!(
+            b.try_take(1, clock.now()),
+            "refilled take {i} of 100 must succeed"
+        );
     }
     assert!(
         !b.try_take(1, clock.now()),
@@ -160,9 +169,15 @@ async fn rate_limiter_tracks_auth_failures_per_ip() {
     rl.set_caps(/* auth */ 3, /* conn_per_ip */ 0).await;
 
     for i in 0..3 {
-        assert!(rl.record_auth_failure(ip(1)).await, "fail {i} of 3 must be allowed");
+        assert!(
+            rl.record_auth_failure(ip(1)).await,
+            "fail {i} of 3 must be allowed"
+        );
     }
-    assert!(!rl.record_auth_failure(ip(1)).await, "4th auth failure on ip(1) must throttle");
+    assert!(
+        !rl.record_auth_failure(ip(1)).await,
+        "4th auth failure on ip(1) must throttle"
+    );
     assert!(rl.record_auth_failure(ip(2)).await, "ip(2) starts fresh");
 }
 
@@ -231,7 +246,10 @@ async fn rate_limiter_caps_zero_pass_through() {
     for _ in 0..100 {
         guards.push(rl.try_acquire_connection(ip(1)));
     }
-    assert!(guards.iter().all(Option::is_some), "cap=0 admits all connections");
+    assert!(
+        guards.iter().all(Option::is_some),
+        "cap=0 admits all connections"
+    );
 }
 
 // ── Inspection helpers (used by handle_hello + audit population) ────────
@@ -326,12 +344,17 @@ fn production_constructor_seeds_caps() {
     // applied synchronously. Verify by checking the inspection helpers
     // from a fresh tokio runtime (since the constructor is sync but
     // helpers are async).
-    let rl = RateLimiter::new(/* ip_cap */ 256, /* auth */ 5, /* conn_per_ip */ 16);
+    let rl = RateLimiter::new(
+        /* ip_cap */ 256, /* auth */ 5, /* conn_per_ip */ 16,
+    );
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("runtime");
     rt.block_on(async {
-        assert!(rl.auth_cap_active().await, "auth cap 5 must register as active");
+        assert!(
+            rl.auth_cap_active().await,
+            "auth cap 5 must register as active"
+        );
         assert_eq!(rl.conn_per_ip_cap(), 16, "conn_per_ip cap 16 must be set");
     });
 }

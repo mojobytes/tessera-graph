@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Property-overflow waste — performance impact harness.
 //!
@@ -118,7 +118,9 @@ fn props_of_len(len: usize) -> Properties {
 fn validate_rig() {
     let (mut graph, _dir) = open_graph();
 
-    let inline_id = graph.add_node("P", props_of_len(VALUE_LEN_INLINE)).expect("add");
+    let inline_id = graph
+        .add_node("P", props_of_len(VALUE_LEN_INLINE))
+        .expect("add");
     let after_inline = graph.overflow_page_count();
     assert_eq!(
         after_inline, 0,
@@ -126,7 +128,9 @@ fn validate_rig() {
          but allocated {after_inline} overflow page(s); NODE_PROP_INLINE_MAX={NODE_PROP_INLINE_MAX}"
     );
 
-    let _ = graph.add_node("P", props_of_len(VALUE_LEN_OVERFLOW)).expect("add");
+    let _ = graph
+        .add_node("P", props_of_len(VALUE_LEN_OVERFLOW))
+        .expect("add");
     let after_overflow = graph.overflow_page_count();
     assert_eq!(
         after_overflow, 1,
@@ -137,7 +141,11 @@ fn validate_rig() {
     // And the inline node must still read back correctly, so the two arms
     // really are storing equivalent data by different routes.
     let back = graph.node(inline_id).expect("read back");
-    assert_eq!(back.properties().len(), 1, "rig invalid: inline node lost its property");
+    assert_eq!(
+        back.properties().len(),
+        1,
+        "rig invalid: inline node lost its property"
+    );
 
     println!(
         "rig validated: {VALUE_LEN_INLINE} chars => inline (0 overflow pages), \
@@ -209,7 +217,9 @@ fn run_write(label: &'static str, n: u64, value_len: usize) -> Arm {
     graph.reset_pool_instrumentation();
     let start = Instant::now();
     for _ in 0..n {
-        graph.add_node("P", props_of_len(value_len)).expect("add_node");
+        graph
+            .add_node("P", props_of_len(value_len))
+            .expect("add_node");
     }
     // Live payload: one encoded property set per node. The value plus its key
     // and framing; using the value length alone would understate it, so the
@@ -224,10 +234,9 @@ fn run_write(label: &'static str, n: u64, value_len: usize) -> Arm {
 /// amplification figures are only meaningful if the denominator is the number
 /// of bytes the engine actually stores, framing included.
 fn encoded_len(value_len: usize) -> u64 {
-    let encoded = tessera_graph::storage::codec::property_codec::encode_properties(&props_of_len(
-        value_len,
-    ))
-    .expect("encoding a single small property cannot fail");
+    let encoded =
+        tessera_graph::storage::codec::property_codec::encode_properties(&props_of_len(value_len))
+            .expect("encoding a single small property cannot fail");
     encoded.len() as u64
 }
 
@@ -237,7 +246,12 @@ fn encoded_len(value_len: usize) -> u64 {
 
 /// Updates the same `n` nodes `rounds` times. Live data never grows; every
 /// overflow page gained after the first round is an orphan.
-fn run_churn(label: &'static str, n: u64, rounds: u64, value_len: usize) -> (Arm, Vec<NodeId>, Graph, tempfile::TempDir) {
+fn run_churn(
+    label: &'static str,
+    n: u64,
+    rounds: u64,
+    value_len: usize,
+) -> (Arm, Vec<NodeId>, Graph, tempfile::TempDir) {
     run_churn_with_pool(label, n, rounds, value_len, POOL_DEFAULT)
 }
 
@@ -250,7 +264,11 @@ fn run_churn_with_pool(
 ) -> (Arm, Vec<NodeId>, Graph, tempfile::TempDir) {
     let (mut graph, dir) = open_graph_with_pool(pool_bytes);
     let ids: Vec<NodeId> = (0..n)
-        .map(|_| graph.add_node("P", props_of_len(value_len)).expect("add_node"))
+        .map(|_| {
+            graph
+                .add_node("P", props_of_len(value_len))
+                .expect("add_node")
+        })
         .collect();
 
     graph.reset_pool_instrumentation();
@@ -261,7 +279,8 @@ fn run_churn_with_pool(
             // Same length every round, so the live payload is constant and the
             // only thing that can grow is waste.
             let v = format!("{}{:02}", "y".repeat(value_len.saturating_sub(2)), r % 100);
-            node.properties_mut().insert("name".into(), Property::String(v));
+            node.properties_mut()
+                .insert("name".into(), Property::String(v));
             graph.update_node(id, &node).expect("update");
         }
     }
@@ -289,7 +308,13 @@ fn run_reads(graph: &Graph, label: &'static str, ids: &[NodeId], passes: u64) ->
     }
     assert!(checksum > 0, "reads must observe properties");
     let per_node = encoded_len(VALUE_LEN_OVERFLOW);
-    finish(graph, label, start, passes * ids.len() as u64, ids.len() as u64 * per_node)
+    finish(
+        graph,
+        label,
+        start,
+        passes * ids.len() as u64,
+        ids.len() as u64 * per_node,
+    )
 }
 
 /// A graph holding the same live data as the churned one, written once.
@@ -304,7 +329,11 @@ fn run_fresh_equivalent_with_pool(
 ) -> (Vec<NodeId>, Graph, tempfile::TempDir) {
     let (mut graph, dir) = open_graph_with_pool(pool_bytes);
     let ids: Vec<NodeId> = (0..n)
-        .map(|_| graph.add_node("P", props_of_len(value_len)).expect("add_node"))
+        .map(|_| {
+            graph
+                .add_node("P", props_of_len(value_len))
+                .expect("add_node")
+        })
         .collect();
     (ids, graph, dir)
 }
@@ -386,8 +415,18 @@ fn main() {
         run_churn("(setup) churn x20", n_read, 20, VALUE_LEN_OVERFLOW);
     let (fresh_ids, fresh_graph, _fd) = run_fresh_equivalent(n_read, VALUE_LEN_OVERFLOW);
 
-    print_arm(&run_reads(&fresh_graph, "read / fresh graph", &fresh_ids, passes));
-    print_arm(&run_reads(&churned_graph, "read / churned graph", &churned_ids, passes));
+    print_arm(&run_reads(
+        &fresh_graph,
+        "read / fresh graph",
+        &fresh_ids,
+        passes,
+    ));
+    print_arm(&run_reads(
+        &churned_graph,
+        "read / churned graph",
+        &churned_ids,
+        passes,
+    ));
     println!(
         "\n  (churned graph carries {} overflow pages = {:.2} MB for the same live data \
          as the fresh one)",
@@ -415,8 +454,18 @@ fn main() {
     let (fresh_ids_s, fresh_graph_s, _fds) =
         run_fresh_equivalent_with_pool(n_read, VALUE_LEN_OVERFLOW, POOL_SMALL);
 
-    print_arm(&run_reads(&fresh_graph_s, "read / fresh (8MB)", &fresh_ids_s, passes));
-    print_arm(&run_reads(&churned_graph_s, "read / churned (8MB)", &churned_ids_s, passes));
+    print_arm(&run_reads(
+        &fresh_graph_s,
+        "read / fresh (8MB)",
+        &fresh_ids_s,
+        passes,
+    ));
+    print_arm(&run_reads(
+        &churned_graph_s,
+        "read / churned (8MB)",
+        &churned_ids_s,
+        passes,
+    ));
     println!(
         "\n  (churned graph carries {:.2} MB of overflow against an {:.0} MB pool)",
         (u64::from(churned_arm_s.overflow_pages) * PAGE_SIZE) as f64 / (1024.0 * 1024.0),

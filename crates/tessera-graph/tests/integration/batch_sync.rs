@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use std::time::Instant;
 use tempfile::TempDir;
@@ -145,7 +145,9 @@ fn batch_with_mixed_mutations() {
 
         // Update node
         let mut node_a = g.node(a).unwrap();
-        node_a.properties_mut().insert("x".into(), tessera_graph::Property::I64(42));
+        node_a
+            .properties_mut()
+            .insert("x".into(), tessera_graph::Property::I64(42));
         g.update_node(a, &node_a).unwrap();
 
         // Remove edge

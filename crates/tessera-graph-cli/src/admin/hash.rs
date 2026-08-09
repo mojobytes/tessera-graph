@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! `tessera-graph-cli admin hash` — compute an argon2id PHC hash.
 //!

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Issue #69 probe: does each perf guard's scenario actually exercise the
 //! optimization it claims to protect?
@@ -34,7 +34,7 @@
 
 use std::time::{Duration, Instant};
 
-use tessera_graph::{props, Graph, Properties};
+use tessera_graph::{Graph, Properties, props};
 
 /// Realistic node payload: the kind of data a real node carries. Decoding it
 /// costs something, which is exactly what the guarded optimizations avoid.
@@ -101,9 +101,14 @@ fn build_count(g: &mut Graph, with_props: bool, batched: bool) {
     for _ in 0..1_000 {
         let container = g.add_node("Container", Properties::new()).unwrap();
         for _ in 0..5 {
-            let p = if with_props { realistic_props(i) } else { Properties::new() };
+            let p = if with_props {
+                realistic_props(i)
+            } else {
+                Properties::new()
+            };
             let item = g.add_node("Item", p).unwrap();
-            g.add_edge("CONTAINS", container, item, Properties::new()).unwrap();
+            g.add_edge("CONTAINS", container, item, Properties::new())
+                .unwrap();
             i += 1;
         }
     }
@@ -165,7 +170,11 @@ fn build_expand(g: &mut Graph, with_props: bool) {
     for _ in 0..100 {
         let src = g.add_node("S", Properties::new()).unwrap();
         for _ in 0..20 {
-            let p = if with_props { realistic_props(i) } else { Properties::new() };
+            let p = if with_props {
+                realistic_props(i)
+            } else {
+                Properties::new()
+            };
             let tgt = g.add_node("T", p).unwrap();
             g.add_edge("KNOWS", src, tgt, Properties::new()).unwrap();
             i += 1;
@@ -187,7 +196,11 @@ const IDX_SEL_LAST: &str = "MATCH (p:Person {status: 'Active', id: 42}) RETURN i
 /// Chain-graph patterns of growing hop count: the bindings map grows with the
 /// number of bound variables, which is where `Arc` sharing could pay off.
 const CHAIN_HOPS: [(&str, &str, usize); 3] = [
-    ("2 hops (3 vars bound)", "MATCH (a:N)-[:R]->(b:N)-[:R]->(c:N) RETURN id(c)", 398),
+    (
+        "2 hops (3 vars bound)",
+        "MATCH (a:N)-[:R]->(b:N)-[:R]->(c:N) RETURN id(c)",
+        398,
+    ),
     (
         "4 hops (5 vars bound)",
         "MATCH (a:N)-[:R]->(b:N)-[:R]->(c:N)-[:R]->(d:N)-[:R]->(e:N) RETURN id(e)",
@@ -217,7 +230,11 @@ fn main() {
         .collect();
     println!(
         "\n=== issue #69 probe — disabled: {} ===",
-        if arms.is_empty() { "nothing (baseline)".to_owned() } else { arms.join(", ") }
+        if arms.is_empty() {
+            "nothing (baseline)".to_owned()
+        } else {
+            arms.join(", ")
+        }
     );
 
     println!("\nCOUNT 1-hop pushdown guard (50 iterations):");
@@ -283,7 +300,6 @@ fn main() {
     probe_previously_unverified();
     println!();
 }
-
 
 /// Deterministic check, no timing: does sharing the bindings map with `Arc`
 /// actually avoid the deep copy in `expand_hop`'s shape?
@@ -358,7 +374,6 @@ fn probe_expand_hop() {
     }
 
     // ── The three guards never verified (issue #69 follow-up) ───────────────
-
 }
 
 /// The three guards that had never been checked against their own
@@ -368,7 +383,10 @@ fn probe_previously_unverified() {
     // Pre-computing the sort keys turns O(N log N) expression evaluations inside
     // the comparator into O(N) before the sort. The saving scales with N log N /
     // N, so a bigger row count separates the two more.
-    for (label, n) in [("500 rows (as the guard is)", 500_i64), ("5 000 rows", 5_000)] {
+    for (label, n) in [
+        ("500 rows (as the guard is)", 500_i64),
+        ("5 000 rows", 5_000),
+    ] {
         repeat(label, || {
             let mut g = Graph::new();
             g.begin_batch();
@@ -380,7 +398,12 @@ fn probe_previously_unverified() {
             // Probe: `n` is a literal row count from the table above.
             #[allow(clippy::cast_possible_truncation)]
             let rows = n as usize;
-            time_query(&g, "MATCH (n:Item) RETURN n.score ORDER BY n.score DESC", 100, rows)
+            time_query(
+                &g,
+                "MATCH (n:Item) RETURN n.score ORDER BY n.score DESC",
+                100,
+                rows,
+            )
         });
     }
 
@@ -462,5 +485,4 @@ fn probe_previously_unverified() {
             start.elapsed()
         });
     }
-
 }

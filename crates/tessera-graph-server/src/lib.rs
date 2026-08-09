@@ -26,11 +26,11 @@ pub mod config;
 /// La forma de los ajustes del gestor multi-base. Viaja al árbol público
 /// porque la configuración común los transporta; la factoría que los lee, no.
 pub mod config_paid_settings;
+pub mod ddl_handler;
 /// Lo que el binario necesita saber de su edición: por qué puerta arranca y
 /// quién lee los ajustes del gestor multi-base. **Enterprise**: el árbol
 /// público trae su propia versión, que ocupa este mismo hueco al copiar.
 pub mod edition_community;
-pub mod ddl_handler;
 pub mod error;
 pub mod graph_accessor;
 pub mod handler;
@@ -54,20 +54,19 @@ pub mod wire;
 
 pub use audit::{AuditBackend, AuditSink};
 pub use auth::{
-    AuthError, AuthOutcome, AuthProvider, AuthStoreError, NoAuthProvider,
-    SecretString, SystemGraphAuthProvider, SystemGraphAuthStore, UserSummary,
+    AuthError, AuthOutcome, AuthProvider, AuthStoreError, NoAuthProvider, SecretString,
+    SystemGraphAuthProvider, SystemGraphAuthStore, UserSummary,
 };
 pub use config::ServerConfig;
 pub use error::{Result, ServerError};
 pub use graph_accessor::{DefaultGraphAccessor, GraphAccessor};
-pub use handler::{BoltHandler, sanitize_engine_error_for_wire};
 /// Re-exported only for the test targets that inject a `GraphAccessor` double
 /// through [`BoltHandler::with_accessor_factory`]; gated like that builder so
 /// the released artefact does not widen its public surface.
 #[cfg(any(test, feature = "test-util"))]
 pub use handler::AccessorFactory;
+pub use handler::{BoltHandler, sanitize_engine_error_for_wire};
 pub use listener::TesseraListener;
-pub use startup::{ServerHandle, ServerReady};
 /// Superficie de arranque neutra: `start_server_with_registry` recibe el gestor
 /// por factoría en vez de construirlo, así que el mismo binario sirve a las dos
 /// ediciones. Community le pasa `single_database_factory`; la de pago, la suya.
@@ -75,3 +74,4 @@ pub use startup::{ServerHandle, ServerReady};
 pub use startup::{
     RegistryBundle, RegistryFactory, single_database_factory, start_server_with_registry,
 };
+pub use startup::{ServerHandle, ServerReady};

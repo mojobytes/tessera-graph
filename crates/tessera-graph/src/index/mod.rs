@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 // Index layer: label-based indexes for fast entity lookup.
 
@@ -267,19 +267,9 @@ impl PropertyIndex {
     /// property. Order of returned IDs is not guaranteed. Cost is proportional to
     /// the number of matching values, not the whole scope (issue #41).
     #[must_use]
-    pub fn range_i64(
-        &self,
-        label: &str,
-        key: &str,
-        lo: Option<i64>,
-        hi: Option<i64>,
-    ) -> Vec<u64> {
+    pub fn range_i64(&self, label: &str, key: &str, lo: Option<i64>, hi: Option<i64>) -> Vec<u64> {
         use std::ops::Bound;
-        let Some(tree) = self
-            .ordered
-            .get(label)
-            .and_then(|by_key| by_key.get(key))
-        else {
+        let Some(tree) = self.ordered.get(label).and_then(|by_key| by_key.get(key)) else {
             return Vec::new();
         };
         let lower = lo.map_or(Bound::Unbounded, Bound::Included);
@@ -431,8 +421,8 @@ mod tests {
     fn property_index_insert_and_lookup() {
         let mut idx = PropertyIndex::new();
         idx.insert("Person", "name", &Property::String("Alice".into()), 1);
-        let ids = idx.lookup("Person", "name", &Property::String("Alice".into()));
-        assert_eq!(ids, vec![1]);
+        let matches = idx.lookup("Person", "name", &Property::String("Alice".into()));
+        assert_eq!(matches, vec![1]);
     }
 
     #[test]
@@ -440,9 +430,9 @@ mod tests {
         let mut idx = PropertyIndex::new();
         idx.insert("Person", "age", &Property::I64(30), 1);
         idx.insert("Person", "age", &Property::I64(30), 2);
-        let mut ids = idx.lookup("Person", "age", &Property::I64(30));
-        ids.sort_unstable();
-        assert_eq!(ids, vec![1, 2]);
+        let mut matches = idx.lookup("Person", "age", &Property::I64(30));
+        matches.sort_unstable();
+        assert_eq!(matches, vec![1, 2]);
     }
 
     #[test]
@@ -459,8 +449,14 @@ mod tests {
         let mut idx = PropertyIndex::new();
         idx.insert("Person", "active", &Property::Bool(true), 1);
         idx.insert("Robot", "active", &Property::Bool(true), 2);
-        assert_eq!(idx.lookup("Person", "active", &Property::Bool(true)), vec![1]);
-        assert_eq!(idx.lookup("Robot", "active", &Property::Bool(true)), vec![2]);
+        assert_eq!(
+            idx.lookup("Person", "active", &Property::Bool(true)),
+            vec![1]
+        );
+        assert_eq!(
+            idx.lookup("Robot", "active", &Property::Bool(true)),
+            vec![2]
+        );
     }
 
     #[test]
@@ -468,7 +464,10 @@ mod tests {
         let mut idx = PropertyIndex::new();
         idx.insert("Person", "name", &Property::String("Alice".into()), 1);
         idx.remove("Person", "name", &Property::String("Alice".into()), 1);
-        assert!(idx.lookup("Person", "name", &Property::String("Alice".into())).is_empty());
+        assert!(
+            idx.lookup("Person", "name", &Property::String("Alice".into()))
+                .is_empty()
+        );
         // Verify empty maps were cleaned up — no entries remain
         assert!(idx.index.is_empty());
     }
@@ -479,7 +478,10 @@ mod tests {
         idx.insert("Person", "name", &Property::String("Alice".into()), 1);
         // Remove an id that doesn't exist
         idx.remove("Person", "name", &Property::String("Alice".into()), 999);
-        assert_eq!(idx.lookup("Person", "name", &Property::String("Alice".into())), vec![1]);
+        assert_eq!(
+            idx.lookup("Person", "name", &Property::String("Alice".into())),
+            vec![1]
+        );
         // Remove from unknown label
         idx.remove("Ghost", "name", &Property::String("Alice".into()), 1);
     }
@@ -487,7 +489,10 @@ mod tests {
     #[test]
     fn property_index_lookup_unknown_returns_empty() {
         let idx = PropertyIndex::new();
-        assert!(idx.lookup("Person", "name", &Property::String("Alice".into())).is_empty());
+        assert!(
+            idx.lookup("Person", "name", &Property::String("Alice".into()))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -499,11 +504,17 @@ mod tests {
         idx.insert("N", "b", &Property::Bool(false), 4);
         idx.insert("N", "v", &Property::Bytes(vec![0xDE, 0xAD]), 5);
 
-        assert_eq!(idx.lookup("N", "s", &Property::String("hello".into())), vec![1]);
+        assert_eq!(
+            idx.lookup("N", "s", &Property::String("hello".into())),
+            vec![1]
+        );
         assert_eq!(idx.lookup("N", "i", &Property::I64(42)), vec![2]);
         assert_eq!(idx.lookup("N", "f", &Property::F64(2.71)), vec![3]);
         assert_eq!(idx.lookup("N", "b", &Property::Bool(false)), vec![4]);
-        assert_eq!(idx.lookup("N", "v", &Property::Bytes(vec![0xDE, 0xAD])), vec![5]);
+        assert_eq!(
+            idx.lookup("N", "v", &Property::Bytes(vec![0xDE, 0xAD])),
+            vec![5]
+        );
     }
 
     #[test]
@@ -514,7 +525,10 @@ mod tests {
         props.insert("age".into(), Property::I64(25));
         idx.insert_node("Person", &props, 10);
 
-        assert_eq!(idx.lookup("Person", "name", &Property::String("Bob".into())), vec![10]);
+        assert_eq!(
+            idx.lookup("Person", "name", &Property::String("Bob".into())),
+            vec![10]
+        );
         assert_eq!(idx.lookup("Person", "age", &Property::I64(25)), vec![10]);
     }
 

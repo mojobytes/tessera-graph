@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -752,12 +752,7 @@ impl<G: GraphAccess + ?Sized> Iterator for PatternMatchIter<'_, G> {
                     if !graph.node_visible(id) {
                         continue;
                     }
-                    let node = load_node_projected(
-                        *graph,
-                        id,
-                        constraint,
-                        projection.as_deref(),
-                    );
+                    let node = load_node_projected(*graph, id, constraint, projection.as_deref());
                     match node {
                         Ok(n) if node_matches(&n, constraint) => {
                             let mut nodes = HashMap::new();

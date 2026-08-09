@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Free-page directory: which pages of a data file may be handed out again.
 //!
@@ -38,8 +38,7 @@
 use crate::error::Result;
 use crate::storage::meta::FREE_DIRECTORY_EMPTY;
 use crate::storage::page::{
-    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PageBuf, PageHeader, PageType, finalize_page,
-    new_page_buf,
+    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PageBuf, PageHeader, PageType, finalize_page, new_page_buf,
 };
 
 /// Format version stamped on a directory page.
@@ -71,12 +70,15 @@ impl FreeDirectoryPage {
     /// A directory page with no entries and no successor.
     #[must_use]
     pub const fn empty() -> Self {
-        Self { next: FREE_DIRECTORY_EMPTY, entries: Vec::new() }
+        Self {
+            next: FREE_DIRECTORY_EMPTY,
+            entries: Vec::new(),
+        }
     }
 
     /// Whether another id can be appended without spilling to a new page.
     #[must_use]
-    pub fn has_room(&self) -> bool {
+    pub const fn has_room(&self) -> bool {
         self.entries.len() < ENTRIES_PER_PAGE
     }
 }
@@ -97,7 +99,9 @@ impl FreeDirectoryPage {
 /// exactly the failure this module exists to remove.
 pub fn encode(page: &FreeDirectoryPage, file_magic: [u8; 4]) -> Result<PageBuf> {
     if page.entries.len() > ENTRIES_PER_PAGE {
-        return Err(crate::Error::RecordTooLarge { size: page.entries.len() });
+        return Err(crate::Error::RecordTooLarge {
+            size: page.entries.len(),
+        });
     }
 
     let mut buf = new_page_buf();
@@ -115,7 +119,13 @@ pub fn encode(page: &FreeDirectoryPage, file_magic: [u8; 4]) -> Result<PageBuf> 
         buf[off..off + 4].copy_from_slice(&id.to_le_bytes());
     }
 
-    finalize_page(&mut buf, file_magic, FREE_DIRECTORY_VERSION, PageType::FreeDirectory, 0);
+    finalize_page(
+        &mut buf,
+        file_magic,
+        FREE_DIRECTORY_VERSION,
+        PageType::FreeDirectory,
+        0,
+    );
     Ok(buf)
 }
 
@@ -128,7 +138,11 @@ pub fn encode(page: &FreeDirectoryPage, file_magic: [u8; 4]) -> Result<PageBuf> 
 /// of live data — or a stale directory page from a previous format — from
 /// being read as a list of "free" ids and handed out over data that is still
 /// referenced.
-pub fn decode(buf: &[u8; crate::storage::page::PAGE_SIZE], file_name: &'static str, page_id: u32) -> Result<FreeDirectoryPage> {
+pub fn decode(
+    buf: &[u8; crate::storage::page::PAGE_SIZE],
+    file_name: &'static str,
+    page_id: u32,
+) -> Result<FreeDirectoryPage> {
     // Refuse anything that is not stamped as a directory page. Without this a
     // page of live data reached through a stale head would be read as a list
     // of free ids, and those ids handed out over data still referenced by a
@@ -144,9 +158,16 @@ pub fn decode(buf: &[u8; crate::storage::page::PAGE_SIZE], file_name: &'static s
 
     let p = PAGE_HEADER_SIZE;
 
-    let next = u32::from_le_bytes(buf[p + OFF_NEXT..p + OFF_NEXT + 4].try_into().expect("4 bytes"));
-    let len =
-        u32::from_le_bytes(buf[p + OFF_LEN..p + OFF_LEN + 4].try_into().expect("4 bytes")) as usize;
+    let next = u32::from_le_bytes(
+        buf[p + OFF_NEXT..p + OFF_NEXT + 4]
+            .try_into()
+            .expect("4 bytes"),
+    );
+    let len = u32::from_le_bytes(
+        buf[p + OFF_LEN..p + OFF_LEN + 4]
+            .try_into()
+            .expect("4 bytes"),
+    ) as usize;
 
     if len > ENTRIES_PER_PAGE {
         return Err(crate::Error::CorruptPage {
@@ -159,7 +180,9 @@ pub fn decode(buf: &[u8; crate::storage::page::PAGE_SIZE], file_name: &'static s
     let mut entries = Vec::with_capacity(len);
     for i in 0..len {
         let off = p + OFF_ENTRIES + i * 4;
-        entries.push(u32::from_le_bytes(buf[off..off + 4].try_into().expect("4 bytes")));
+        entries.push(u32::from_le_bytes(
+            buf[off..off + 4].try_into().expect("4 bytes"),
+        ));
     }
 
     Ok(FreeDirectoryPage { next, entries })

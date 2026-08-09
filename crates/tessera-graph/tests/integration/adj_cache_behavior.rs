@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tempfile::TempDir;
 use tessera_graph::{Graph, GraphConfig, Properties, props};

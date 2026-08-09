@@ -413,11 +413,23 @@ pub struct AdminActionDetails {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum AdminAction {
-    CreateUser { target: String },
-    DropUser { target: String },
-    AlterUserPassword { target: String },
-    AlterUserStatus { target: String, enabled: bool },
-    AlterUserAdmin { target: String, is_admin: bool },
+    CreateUser {
+        target: String,
+    },
+    DropUser {
+        target: String,
+    },
+    AlterUserPassword {
+        target: String,
+    },
+    AlterUserStatus {
+        target: String,
+        enabled: bool,
+    },
+    AlterUserAdmin {
+        target: String,
+        is_admin: bool,
+    },
     ShowUsers,
     // Task 14 (spec §6.3): CREATE/DROP DATABASE and GRANT/REVOKE now
     // emit their own top-level [`AuditEvent`] variants
@@ -428,9 +440,15 @@ pub enum AdminAction {
     ShowDatabases,
     /// `SHOW GRANTS [FOR <user>]` — `filter_user` is the argument if
     /// any was supplied, `None` for the unfiltered variant (admin-only).
-    ShowGrants { filter_user: Option<String> },
-    Denied { attempted: String },
-    Failed { reason: String },
+    ShowGrants {
+        filter_user: Option<String>,
+    },
+    Denied {
+        attempted: String,
+    },
+    Failed {
+        reason: String,
+    },
 }
 
 /// Spec §6.3 details for [`AuditEvent::DatabaseCreated`]. `options`
@@ -986,13 +1004,7 @@ impl AuditSink {
     }
 
     /// Emit a `database_dropped` event (spec §6.3).
-    pub fn database_dropped(
-        &self,
-        conn_id: u64,
-        user: &str,
-        name: &str,
-        outcome: AuditOutcome,
-    ) {
+    pub fn database_dropped(&self, conn_id: u64, user: &str, name: &str, outcome: AuditOutcome) {
         self.send(AuditEvent::DatabaseDropped {
             timestamp: now_ts(),
             connection_id: conn_id,
@@ -1243,8 +1255,7 @@ async fn stdout_writer_task(
 }
 
 fn write_event(event: &AuditEvent, w: &mut impl Write) -> std::io::Result<()> {
-    let mut line =
-        serde_json::to_vec(event).map_err(std::io::Error::other)?;
+    let mut line = serde_json::to_vec(event).map_err(std::io::Error::other)?;
     line.push(b'\n');
     w.write_all(&line)?;
     w.flush()
@@ -1362,8 +1373,13 @@ async fn file_writer_task(
     }
     while let Ok(event) = rx.try_recv() {
         handle_one(
-            &mut state, &path, max_bytes, keep_files, fsync_every,
-            &event, &mut since_sync,
+            &mut state,
+            &path,
+            max_bytes,
+            keep_files,
+            fsync_every,
+            &event,
+            &mut since_sync,
         );
     }
     let _ = state.flush_and_sync();
@@ -1414,7 +1430,15 @@ fn drain_file_backpressure(
         user: None,
         details: BackpressureDetails { dropped: n },
     };
-    handle_one(state, path, max_bytes, keep_files, fsync_every, &ev, since_sync);
+    handle_one(
+        state,
+        path,
+        max_bytes,
+        keep_files,
+        fsync_every,
+        &ev,
+        since_sync,
+    );
 }
 
 #[cfg(test)]
@@ -1498,7 +1522,9 @@ mod tests {
             "ecdae70d000000000000000000000000000000000000000000000000000000ff"
         );
         assert_eq!(
-            details.get("duration_ms").and_then(serde_json::Value::as_u64),
+            details
+                .get("duration_ms")
+                .and_then(serde_json::Value::as_u64),
             Some(1543)
         );
         assert_eq!(
@@ -1514,7 +1540,9 @@ mod tests {
             Some("success")
         );
         assert_eq!(
-            details.get("threshold_ms").and_then(serde_json::Value::as_u64),
+            details
+                .get("threshold_ms")
+                .and_then(serde_json::Value::as_u64),
             Some(1000)
         );
     }
@@ -1597,7 +1625,8 @@ mod tests {
             Some("result_capped")
         );
         assert_eq!(
-            json.get("connection_id").and_then(serde_json::Value::as_u64),
+            json.get("connection_id")
+                .and_then(serde_json::Value::as_u64),
             Some(42)
         );
         assert_eq!(

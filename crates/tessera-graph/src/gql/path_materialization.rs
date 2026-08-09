@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Builds [`GqlPath`] values from matched fixed-segment patterns.
 //!
@@ -72,7 +72,11 @@ mod tests {
             .expect("a,b,c,r1,r2 are all bound with a valid 3-node/2-edge shape");
         assert_eq!(path.nodes.len(), 3, "three nodes a,b,c");
         assert_eq!(path.rels.len(), 2, "two edges r1,r2");
-        assert_eq!(path.nodes.len(), path.rels.len() + 1, "Neo4j path invariant");
+        assert_eq!(
+            path.nodes.len(),
+            path.rels.len() + 1,
+            "Neo4j path invariant"
+        );
         assert_eq!(
             path.rels[1].props.get("w"),
             Some(&GqlValue::Int(2)),

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! The `GraphAccess` trait — abstracts read and write access to a property graph.
 //!
@@ -213,12 +213,14 @@ pub trait GraphAccess {
         self.nodes_by_label(label)
             .into_iter()
             .filter(|&id| {
-                self.node(id).ok().is_some_and(|n| match n.properties().get(key) {
-                    Some(Property::I64(v)) => {
-                        lo.is_none_or(|l| *v >= l) && hi.is_none_or(|h| *v < h)
-                    }
-                    _ => false,
-                })
+                self.node(id)
+                    .ok()
+                    .is_some_and(|n| match n.properties().get(key) {
+                        Some(Property::I64(v)) => {
+                            lo.is_none_or(|l| *v >= l) && hi.is_none_or(|h| *v < h)
+                        }
+                        _ => false,
+                    })
             })
             .collect()
     }
@@ -230,12 +232,14 @@ pub trait GraphAccess {
         self.nodes_by_label(label)
             .into_iter()
             .filter_map(|id| {
-                self.node(id).ok().and_then(|n| match n.properties().get(key) {
-                    Some(Property::I64(v)) => Some((*v, id)),
-                    _ => None,
-                })
+                self.node(id)
+                    .ok()
+                    .and_then(|n| match n.properties().get(key) {
+                        Some(Property::I64(v)) => Some((*v, id)),
+                        _ => None,
+                    })
             })
-            .max_by(|a, b| a.0.cmp(&b.0).then(b.1 .0.cmp(&a.1 .0)))
+            .max_by(|a, b| a.0.cmp(&b.0).then(b.1.0.cmp(&a.1.0)))
             .map(|(_, id)| id)
     }
 

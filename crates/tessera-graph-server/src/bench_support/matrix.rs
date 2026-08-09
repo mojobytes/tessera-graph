@@ -203,7 +203,9 @@ pub fn parse_matrix(toml_str: &str) -> Result<Vec<MatrixPoint>, String> {
 /// drop. Each skip message names the point so Scenario-2 declarations are
 /// visibly acknowledged, not swallowed.
 #[must_use]
-pub fn runnable_points_with_skip_report(points: &[MatrixPoint]) -> (Vec<&MatrixPoint>, Vec<String>) {
+pub fn runnable_points_with_skip_report(
+    points: &[MatrixPoint],
+) -> (Vec<&MatrixPoint>, Vec<String>) {
     let mut runnable = Vec::new();
     let mut skipped = Vec::new();
     for p in points {
@@ -228,7 +230,10 @@ mod tests {
 
     #[test]
     fn matrix_point_name_encodes_all_axes() {
-        assert_eq!(sample_point().name(), "match-create-r4-w2-d1000-two-lock-current");
+        assert_eq!(
+            sample_point().name(),
+            "match-create-r4-w2-d1000-two-lock-current"
+        );
     }
 
     #[test]
@@ -240,8 +245,12 @@ mod tests {
 
     #[test]
     fn matrix_point_name_is_unique_across_all_four_scenarios() {
-        let scenarios =
-            [Scenario::MatchCreate, Scenario::MatchSet, Scenario::Merge, Scenario::Unwind];
+        let scenarios = [
+            Scenario::MatchCreate,
+            Scenario::MatchSet,
+            Scenario::Merge,
+            Scenario::Unwind,
+        ];
         let names: HashSet<String> = scenarios
             .iter()
             .map(|&s| {
@@ -255,7 +264,12 @@ mod tests {
 
     #[test]
     fn scenario_from_str_roundtrip() {
-        for s in [Scenario::MatchCreate, Scenario::MatchSet, Scenario::Merge, Scenario::Unwind] {
+        for s in [
+            Scenario::MatchCreate,
+            Scenario::MatchSet,
+            Scenario::Merge,
+            Scenario::Unwind,
+        ] {
             let text = s.to_string();
             assert_eq!(text.parse::<Scenario>().unwrap(), s);
         }

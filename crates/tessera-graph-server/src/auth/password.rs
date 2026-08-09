@@ -26,8 +26,7 @@ pub const MAX_PASSWORD_LEN: usize = 1024;
 /// `m = 19456 KiB` (~19 MiB memory cost), `t = 2`, `p = 1`. Produces
 /// ~50-100 ms per verification on typical server hardware.
 fn argon2() -> Argon2<'static> {
-    let params = Params::new(19_456, 2, 1, None)
-        .expect("compile-time parameters must be valid");
+    let params = Params::new(19_456, 2, 1, None).expect("compile-time parameters must be valid");
     Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
 }
 

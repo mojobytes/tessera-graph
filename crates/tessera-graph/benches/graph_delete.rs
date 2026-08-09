@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 #[allow(unused)]
 mod helpers;
 
-use criterion::{BenchmarkId, Criterion, BatchSize, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use tessera_graph::{Graph, Properties};
 
 fn bench_remove_edge(c: &mut Criterion) {

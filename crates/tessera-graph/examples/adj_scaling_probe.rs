@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Microbenchmark probe (QR perf): does creating N edges from the SAME source
 //! node inside one batch scale linearly or super-linearly on disk?
@@ -73,7 +73,10 @@ fn main() {
     // Per-N wall budget: abort the probe if a single N blows past this, so a
     // quadratic hang cannot run unbounded.
     let budget = Duration::from_secs(40);
-    println!("{:>6}  {:>12}  {:>12}  {:>10}", "N", "end_batch(s)", "whole(s)", "whole/N(ms)");
+    println!(
+        "{:>6}  {:>12}  {:>12}  {:>10}",
+        "N", "end_batch(s)", "whole(s)", "whole/N(ms)"
+    );
     let mut prev: Option<(usize, f64)> = None;
     for &n in &[100usize, 250, 500, 1000, 2000] {
         let start = Instant::now();
@@ -97,7 +100,9 @@ fn main() {
         }
         prev = Some((n, whole_s));
         if start.elapsed() > budget {
-            println!("        ↳ ABORT: N={n} exceeded the {budget:?} per-N budget; super-linear confirmed, stopping.");
+            println!(
+                "        ↳ ABORT: N={n} exceeded the {budget:?} per-N budget; super-linear confirmed, stopping."
+            );
             break;
         }
     }
@@ -109,14 +114,20 @@ fn main() {
         let start = Instant::now();
         let whole = run_n_no_batch(n);
         let whole_s = whole.as_secs_f64();
-        println!("{n:>6}  {:>12.4}  {:>10.4}", whole_s, whole_s / n as f64 * 1000.0);
+        println!(
+            "{n:>6}  {:>12.4}  {:>10.4}",
+            whole_s,
+            whole_s / n as f64 * 1000.0
+        );
         if let Some((pn, ps)) = prev_nb {
             let exponent = (whole_s / ps).log(n as f64 / pn as f64);
             println!("        ↳ vs N={pn}: exponent ≈ {exponent:.2}");
         }
         prev_nb = Some((n, whole_s));
         if start.elapsed() > budget {
-            println!("        ↳ ABORT: N={n} exceeded budget; quadratic confirmed in no-batch path.");
+            println!(
+                "        ↳ ABORT: N={n} exceeded budget; quadratic confirmed in no-batch path."
+            );
             break;
         }
     }

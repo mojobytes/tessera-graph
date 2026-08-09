@@ -164,7 +164,8 @@ async fn vacuum_once_reclaims_committed_version_memory() {
         let graph = h.graph();
         let mut g = graph.write().expect("write lock");
         let txn = g.begin_txn().expect("begin");
-        g.add_node_in_txn(txn, "N", Properties::new()).expect("write");
+        g.add_node_in_txn(txn, "N", Properties::new())
+            .expect("write");
         g.commit_txn(txn).expect("commit");
     }
 

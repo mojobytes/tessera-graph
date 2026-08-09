@@ -15,8 +15,8 @@ use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tessera_graph::gql::{self, GqlValue};
 use tessera_graph::Graph;
+use tessera_graph::gql::{self, GqlValue};
 
 use crate::bench_support::dataset::build_dataset;
 use crate::bench_support::matrix::{Scenario, Variant};
@@ -141,13 +141,11 @@ pub fn run_contention(cfg: RunConfig) -> ContentionResult {
                         // Two-lock path: time it via the shared timing wrapper
                         // (`time_match_mutation`), the same one the single-thread
                         // measurement uses, so both share one timing definition.
-                        Variant::TwoLockCurrent => time_match_mutation(
-                            &shared,
-                            &mutation,
-                            &HashMap::new(),
-                        )
-                        .map(|(d, _, _)| d)
-                        .unwrap_or_default(),
+                        Variant::TwoLockCurrent => {
+                            time_match_mutation(&shared, &mutation, &HashMap::new())
+                                .map(|(d, _, _)| d)
+                                .unwrap_or_default()
+                        }
                         // Single-lock variant has no two-phase timing wrapper; the
                         // whole mutation is one locked section, timed inline.
                         Variant::SingleLockA => {
@@ -173,7 +171,10 @@ pub fn run_contention(cfg: RunConfig) -> ContentionResult {
         .into_inner()
         .expect("writer mutex");
 
-    ContentionResult { reader_latencies, writer_latencies }
+    ContentionResult {
+        reader_latencies,
+        writer_latencies,
+    }
 }
 
 /// Runs `run_contention` `runs` times and pools every raw latency sample into a
@@ -265,8 +266,14 @@ mod tests {
     fn run_contention_repeated_with_one_run_equals_a_single_run_count() {
         let single = run_contention(cfg(2, 2));
         let repeated = run_contention_repeated(cfg(2, 2), 1);
-        assert_eq!(repeated.reader_latencies.len(), single.reader_latencies.len());
-        assert_eq!(repeated.writer_latencies.len(), single.writer_latencies.len());
+        assert_eq!(
+            repeated.reader_latencies.len(),
+            single.reader_latencies.len()
+        );
+        assert_eq!(
+            repeated.writer_latencies.len(),
+            single.writer_latencies.len()
+        );
     }
 
     #[test]

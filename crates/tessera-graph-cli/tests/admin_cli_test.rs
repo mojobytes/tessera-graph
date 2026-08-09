@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Integration tests for the `tessera-graph-cli admin …` offline commands.
 //!
@@ -35,11 +35,7 @@ fn cli_hash_prints_valid_phc() {
         "expected PHC string starting with $argon2id$, got: {line}"
     );
     // PHC has 5 `$`-separated sections: "", "argon2id", params, salt, hash.
-    assert_eq!(
-        line.matches('$').count(),
-        5,
-        "PHC string malformed: {line}"
-    );
+    assert_eq!(line.matches('$').count(), 5, "PHC string malformed: {line}");
 }
 
 #[test]

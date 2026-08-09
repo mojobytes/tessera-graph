@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tempfile::TempDir;
 use tessera_graph::{Graph, GraphConfig, Properties, props};
@@ -33,7 +33,10 @@ fn wal_contains_records_after_mutations() {
 
     // WAL file should be non-empty.
     let wal_data = std::fs::read(tmp.path().join("wal.log")).unwrap();
-    assert!(!wal_data.is_empty(), "WAL should contain records after mutations without flush");
+    assert!(
+        !wal_data.is_empty(),
+        "WAL should contain records after mutations without flush"
+    );
 }
 
 #[test]

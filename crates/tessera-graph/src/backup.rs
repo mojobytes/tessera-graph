@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Physical, atomic copy and restore of a database's on-disk files.
 //!
@@ -90,9 +90,12 @@ pub fn validate_path_under(raw: &Path, data_dir: &Path) -> Result<std::path::Pat
     // symlinks in the server's own layout (e.g. macOS `/var` → `/private/var`,
     // which TempDir-based tests hit). Anchoring on the canonical root means a
     // relative `raw` inherits that resolution.
-    let canonical_root = data_dir
-        .canonicalize()
-        .map_err(|e| Error::Backup(format!("cannot resolve data dir {}: {e}", data_dir.display())))?;
+    let canonical_root = data_dir.canonicalize().map_err(|e| {
+        Error::Backup(format!(
+            "cannot resolve data dir {}: {e}",
+            data_dir.display()
+        ))
+    })?;
     let normalised = if raw.is_absolute() {
         // Canonicalise the deepest existing ancestor of the absolute path so its
         // symlinks resolve the same way `canonical_root` did, then re-attach the
@@ -276,8 +279,7 @@ pub fn restore_db_files_atomic(
     // the copy. Only an EXISTING live_dir is renamed to `.bak`.
     let had_live = live_dir.exists();
     if had_live {
-        std::fs::rename(live_dir, &bak_dir)
-            .map_err(|e| RestoreError::CopyFailed(Error::Io(e)))?;
+        std::fs::rename(live_dir, &bak_dir).map_err(|e| RestoreError::CopyFailed(Error::Io(e)))?;
         // Durably record that the live dir is now `.bak` before writing new
         // content, so a crash mid-copy is recoverable from `.bak`.
         if let Some(parent) = live_dir.parent() {
@@ -290,7 +292,12 @@ pub fn restore_db_files_atomic(
 
     // Step 3: copy the snapshot into place, then make it durable.
     if let Err(e) = copy_db_files_atomic(snapshot_dir, live_dir) {
-        return Err(finish_with_rollback(live_dir, &bak_dir, had_live, RestoreError::CopyFailed(e)));
+        return Err(finish_with_rollback(
+            live_dir,
+            &bak_dir,
+            had_live,
+            RestoreError::CopyFailed(e),
+        ));
     }
     if let Err(e) = fsync_dir_recursive(live_dir) {
         return Err(finish_with_rollback(
@@ -312,8 +319,7 @@ pub fn restore_db_files_atomic(
         create_if_missing: false,
         ..GraphConfig::without_wal()
     };
-    let validation = Graph::open(live_dir, &validation_cfg)
-        .and_then(|g| g.verify_all_pages());
+    let validation = Graph::open(live_dir, &validation_cfg).and_then(|g| g.verify_all_pages());
     if let Err(e) = validation {
         return Err(finish_with_rollback(
             live_dir,
@@ -347,7 +353,10 @@ pub fn restore_db_files_atomic(
 fn validate_snapshot_source(snapshot_dir: &Path) -> std::result::Result<(), RestoreError> {
     let invalid = |reason: String| Err(RestoreError::SourceInvalid(reason));
     if !snapshot_dir.is_dir() {
-        return invalid(format!("snapshot directory does not exist: {}", snapshot_dir.display()));
+        return invalid(format!(
+            "snapshot directory does not exist: {}",
+            snapshot_dir.display()
+        ));
     }
     for &name in REQUIRED_FILES {
         let p = snapshot_dir.join(name);
@@ -676,9 +685,10 @@ pub fn copy_db_files_atomic(src_db_dir: &Path, dest_dir: &Path) -> Result<()> {
 /// `.staging-copy` suffix, so the final directory rename stays on the same
 /// filesystem as `dest_dir`.
 fn staging_dir_for(dest_dir: &Path) -> std::path::PathBuf {
-    let mut name = dest_dir
-        .file_name()
-        .map_or_else(|| std::ffi::OsString::from("snapshot"), std::ffi::OsStr::to_os_string);
+    let mut name = dest_dir.file_name().map_or_else(
+        || std::ffi::OsString::from("snapshot"),
+        std::ffi::OsStr::to_os_string,
+    );
     name.push(".staging-copy");
     match dest_dir.parent() {
         Some(parent) => parent.join(name),
@@ -697,7 +707,8 @@ mod tests {
     fn make_db_with_one_node(dir: &std::path::Path, name: &str) {
         std::fs::create_dir_all(dir).unwrap();
         let mut g = Graph::open(dir, &GraphConfig::without_wal()).unwrap();
-        g.add_node("Person", crate::props! { "name" => name }).unwrap();
+        g.add_node("Person", crate::props! { "name" => name })
+            .unwrap();
         g.flush().unwrap();
         drop(g);
     }
@@ -722,7 +733,10 @@ mod tests {
             matches!(result, Err(RestoreError::SourceInvalid(_))),
             "expected SourceInvalid, got {result:?}"
         );
-        assert!(!live.exists(), "live dir must not be created on invalid source");
+        assert!(
+            !live.exists(),
+            "live dir must not be created on invalid source"
+        );
     }
 
     // B9-2: a source directory without graph.meta is not a valid database →
@@ -738,7 +752,10 @@ mod tests {
             matches!(result, Err(RestoreError::SourceInvalid(_))),
             "expected SourceInvalid, got {result:?}"
         );
-        assert!(!live.exists(), "live dir must not be created on invalid source");
+        assert!(
+            !live.exists(),
+            "live dir must not be created on invalid source"
+        );
     }
 
     // B9-3: happy path — the snapshot is copied in, validated by opening, and
@@ -760,16 +777,28 @@ mod tests {
                 ..GraphConfig::without_wal()
             };
             let mut g = Graph::open(&live, &cfg).unwrap();
-            g.add_node("Person", crate::props! { "name" => "Bob" }).unwrap();
+            g.add_node("Person", crate::props! { "name" => "Bob" })
+                .unwrap();
             g.flush().unwrap();
         }
-        assert_eq!(node_count_at(&live), 2, "precondition: live has Alice + Bob");
+        assert_eq!(
+            node_count_at(&live),
+            2,
+            "precondition: live has Alice + Bob"
+        );
 
         restore_db_files_atomic(&snap, &live).unwrap();
 
         let bak = tmp.path().join("live.bak");
-        assert!(!bak.exists(), ".bak must be removed after a successful commit");
-        assert_eq!(node_count_at(&live), 1, "restored db must hold only the snapshot's Alice");
+        assert!(
+            !bak.exists(),
+            ".bak must be removed after a successful commit"
+        );
+        assert_eq!(
+            node_count_at(&live),
+            1,
+            "restored db must hold only the snapshot's Alice"
+        );
     }
 
     // B9-4 (revised by QR B-13): an incomplete source (missing a required file)
@@ -787,7 +816,13 @@ mod tests {
         // Trap source: graph.meta present but edges.db absent.
         let trap = tmp.path().join("trap");
         std::fs::create_dir_all(&trap).unwrap();
-        for f in &["nodes.db", "adjacency.db", "strings.db", "overflow.db", "graph.meta"] {
+        for f in &[
+            "nodes.db",
+            "adjacency.db",
+            "strings.db",
+            "overflow.db",
+            "graph.meta",
+        ] {
             std::fs::copy(live.join(f), trap.join(f)).unwrap();
         }
 
@@ -798,7 +833,11 @@ mod tests {
         );
         let bak = tmp.path().join("live.bak");
         assert!(!bak.exists(), "no .bak: the live dir was never touched");
-        assert_eq!(node_count_at(&live), 1, "original db must be intact and untouched");
+        assert_eq!(
+            node_count_at(&live),
+            1,
+            "original db must be intact and untouched"
+        );
     }
 
     // B9-5: a corrupt snapshot (passes pre-check, copies, but fails to open)
@@ -831,7 +870,11 @@ mod tests {
         );
         let bak = tmp.path().join("live.bak");
         assert!(!bak.exists(), ".bak must be renamed back after rollback");
-        assert_eq!(node_count_at(&live), 1, "original db must be reinstated intact");
+        assert_eq!(
+            node_count_at(&live),
+            1,
+            "original db must be reinstated intact"
+        );
     }
 
     // B9-6: when the rollback itself cannot reinstate the original, the error
@@ -863,14 +906,27 @@ mod tests {
 
     #[test]
     fn validate_db_name_rejects_traversal_and_reserved() {
-        for bad in ["../system", "../../etc", "/abs", "a/b", "..", ".", "system", "default", ""] {
+        for bad in [
+            "../system",
+            "../../etc",
+            "/abs",
+            "a/b",
+            "..",
+            ".",
+            "system",
+            "default",
+            "",
+        ] {
             assert!(
                 super::validate_db_name(bad).is_err(),
                 "validate_db_name must reject {bad:?}"
             );
         }
         for ok in ["mydb", "tenant_1", "a-b-c", "_x"] {
-            assert!(super::validate_db_name(ok).is_ok(), "validate_db_name must accept {ok:?}");
+            assert!(
+                super::validate_db_name(ok).is_ok(),
+                "validate_db_name must accept {ok:?}"
+            );
         }
     }
 
@@ -892,12 +948,21 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         // All required files present but graph.meta is empty → must fail before
         // touching anything.
-        for f in &["nodes.db", "edges.db", "adjacency.db", "strings.db", "overflow.db"] {
+        for f in &[
+            "nodes.db",
+            "edges.db",
+            "adjacency.db",
+            "strings.db",
+            "overflow.db",
+        ] {
             std::fs::write(src.join(f), b"x").unwrap();
         }
         std::fs::write(src.join("graph.meta"), b"").unwrap(); // empty
         assert!(
-            matches!(super::validate_snapshot_source(&src), Err(RestoreError::SourceInvalid(_))),
+            matches!(
+                super::validate_snapshot_source(&src),
+                Err(RestoreError::SourceInvalid(_))
+            ),
             "empty graph.meta must be SourceInvalid"
         );
     }
@@ -942,7 +1007,10 @@ mod tests {
         std::fs::write(stale_bak.join("junk"), b"stale").unwrap();
 
         restore_db_files_atomic(&snap, &live).expect("restore clears a removable stale .bak");
-        assert!(!stale_bak.exists(), "stale .bak must be gone after a successful restore");
+        assert!(
+            !stale_bak.exists(),
+            "stale .bak must be gone after a successful restore"
+        );
         assert_eq!(node_count_at(&live), 1);
     }
 
@@ -1003,7 +1071,8 @@ mod tests {
             let mut g = Graph::open(&seed, &GraphConfig::without_wal()).unwrap();
             // A large property value forces an overflow page.
             let big = "x".repeat(16_000);
-            g.add_node("Doc", crate::props! { "body" => big.as_str() }).unwrap();
+            g.add_node("Doc", crate::props! { "body" => big.as_str() })
+                .unwrap();
             g.flush().unwrap();
         }
         let snap = tmp.path().join("snap");
@@ -1011,7 +1080,10 @@ mod tests {
 
         // Sanity: overflow.db is non-trivial (data actually spilled there).
         let overflow_len = std::fs::metadata(snap.join("overflow.db")).unwrap().len();
-        assert!(overflow_len > 4096, "precondition: data must spill to overflow.db");
+        assert!(
+            overflow_len > 4096,
+            "precondition: data must spill to overflow.db"
+        );
 
         // Corrupt a byte deep inside an overflow page (past the header) so magic
         // stays intact but the CRC no longer matches.
@@ -1036,7 +1108,11 @@ mod tests {
         );
         // Original reinstated.
         assert!(!tmp.path().join("databases").join("mydb.bak").exists());
-        assert_eq!(node_count_at(&live), 1, "original db must be intact after rollback");
+        assert_eq!(
+            node_count_at(&live),
+            1,
+            "original db must be intact after rollback"
+        );
     }
 
     #[test]
@@ -1052,7 +1128,8 @@ mod tests {
         let db_dir = src_tmp.path().join("db");
         std::fs::create_dir_all(&db_dir).unwrap();
         let mut g = Graph::open(&db_dir, &GraphConfig::without_wal()).unwrap();
-        g.add_node("Person", crate::props! { "name" => "Alice" }).unwrap();
+        g.add_node("Person", crate::props! { "name" => "Alice" })
+            .unwrap();
         g.flush().unwrap();
         drop(g);
 
@@ -1085,14 +1162,21 @@ mod tests {
         let db_dir = tmp.path().join("db");
         std::fs::create_dir_all(&db_dir).unwrap();
         let mut g = Graph::open(&db_dir, &GraphConfig::without_wal()).unwrap();
-        g.add_node("Person", crate::props! { "name" => "Alice" }).unwrap();
+        g.add_node("Person", crate::props! { "name" => "Alice" })
+            .unwrap();
         g.flush().unwrap();
         drop(g);
 
         // Truncated source: copy the DB dir but remove edges.db.
         let bad_src = tmp.path().join("bad-src");
         std::fs::create_dir_all(&bad_src).unwrap();
-        for f in &["nodes.db", "adjacency.db", "strings.db", "overflow.db", "graph.meta"] {
+        for f in &[
+            "nodes.db",
+            "adjacency.db",
+            "strings.db",
+            "overflow.db",
+            "graph.meta",
+        ] {
             std::fs::copy(db_dir.join(f), bad_src.join(f)).unwrap();
         }
         // edges.db intentionally omitted → copy fails on the edges.db iteration.
@@ -1118,6 +1202,9 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .filter(|e| e.file_name().to_string_lossy().contains("staging"))
             .collect();
-        assert!(leftover.is_empty(), "no staging dir should survive a failure");
+        assert!(
+            leftover.is_empty(),
+            "no staging dir should survive a failure"
+        );
     }
 }

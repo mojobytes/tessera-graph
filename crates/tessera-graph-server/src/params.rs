@@ -31,9 +31,7 @@ pub enum BoltParamError {
     /// A parameter value is of a type that the engine does not represent
     /// as a `GqlValue` (`Bytes`, `Dict`, `Struct`). Carries the parameter
     /// key and a canonical name for the unsupported variant.
-    #[error(
-        "parameter ${key} has wire type {got} which cannot be used as a query parameter"
-    )]
+    #[error("parameter ${key} has wire type {got} which cannot be used as a query parameter")]
     UnsupportedValueType {
         /// The parameter key under which the unsupported value appeared.
         /// For nested values inside a list, the key is suffixed with `[i]`
@@ -73,10 +71,7 @@ pub fn bolt_dict_to_value_map(
 ///
 /// `key` is forwarded into the error for diagnostics; when recursing
 /// into a list element, the caller appends `[i]` to disambiguate.
-fn packstream_to_gql_value(
-    v: &PackStreamValue,
-    key: &str,
-) -> Result<GqlValue, BoltParamError> {
+fn packstream_to_gql_value(v: &PackStreamValue, key: &str) -> Result<GqlValue, BoltParamError> {
     match v {
         PackStreamValue::Null => Ok(GqlValue::Null),
         PackStreamValue::Bool(b) => Ok(GqlValue::Bool(*b)),
@@ -115,7 +110,10 @@ mod tests {
     use super::*;
 
     fn dict_with(pairs: &[(&str, PackStreamValue)]) -> BoltDict {
-        pairs.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
     }
 
     #[test]
@@ -181,14 +179,14 @@ mod tests {
     fn bolt_dict_to_value_map_nested_list() {
         let d = dict_with(&[(
             "xs",
-            PackStreamValue::List(vec![PackStreamValue::List(vec![
-                PackStreamValue::Int(7),
-            ])]),
+            PackStreamValue::List(vec![PackStreamValue::List(vec![PackStreamValue::Int(7)])]),
         )]);
         let map = bolt_dict_to_value_map(&d).unwrap();
         assert_eq!(
             map.get("xs"),
-            Some(&GqlValue::List(vec![GqlValue::List(vec![GqlValue::Int(7)])])),
+            Some(&GqlValue::List(vec![GqlValue::List(vec![GqlValue::Int(
+                7
+            )])])),
         );
     }
 
@@ -283,7 +281,10 @@ mod tests {
     fn bolt_dict_to_value_map_struct_value_returns_error() {
         let d = dict_with(&[(
             "node",
-            PackStreamValue::Struct { tag: 0x4E, fields: vec![PackStreamValue::Int(1)] },
+            PackStreamValue::Struct {
+                tag: 0x4E,
+                fields: vec![PackStreamValue::Int(1)],
+            },
         )]);
         let err = bolt_dict_to_value_map(&d).unwrap_err();
         assert_eq!(

@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use crate::error::Result;
 use crate::storage::backend::{DataFile, PageId, StorageBackend};
 use crate::storage::page::{
-    finalize_page, magic, new_page_buf, PageType, PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE,
+    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PageType, finalize_page, magic, new_page_buf,
 };
 /// End-of-chain sentinel for `next_page` pointers.
 const NO_NEXT: u32 = 0xFFFF_FFFF;
@@ -59,7 +59,13 @@ pub fn write_overflow(backend: &mut dyn StorageBackend, data: &[u8]) -> Result<P
         NO_NEXT
     };
 
-    write_first_page(backend, current_page_id, total_len_u32, first_chunk, next_page_id)?;
+    write_first_page(
+        backend,
+        current_page_id,
+        total_len_u32,
+        first_chunk,
+        next_page_id,
+    )?;
 
     if !needs_continuation {
         return Ok(first_page_id);
@@ -143,10 +149,8 @@ pub fn read_overflow(backend: &dyn StorageBackend, first_page: PageId) -> Result
     let page = backend.read_page(DataFile::Overflow, first_page)?;
     let payload = &page[PAGE_HEADER_SIZE..];
 
-    let total_len =
-        u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
-    let next_page =
-        u32::from_le_bytes(payload[4076..4080].try_into().unwrap());
+    let total_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
+    let next_page = u32::from_le_bytes(payload[4076..4080].try_into().unwrap());
 
     let first_data_len = total_len.min(FIRST_PAGE_DATA_CAP);
     let mut result = Vec::with_capacity(total_len);
@@ -298,8 +302,7 @@ mod tests {
 
         for page_id in 0..backend.page_count(DataFile::Overflow) {
             let page = backend.read_page(DataFile::Overflow, page_id).unwrap();
-            let stored_crc =
-                u32::from_le_bytes([page[8], page[9], page[10], page[11]]);
+            let stored_crc = u32::from_le_bytes([page[8], page[9], page[10], page[11]]);
             assert_eq!(
                 stored_crc,
                 compute_crc32(&page),

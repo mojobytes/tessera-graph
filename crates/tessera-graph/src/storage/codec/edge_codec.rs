@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use crate::edge::Edge;
 use crate::error::{EdgeId, NodeId, Result};
-use crate::storage::codec::node_codec::{label_hash, SLOT_EMPTY, SLOT_LIVE, SLOT_TOMBSTONE};
+use crate::storage::codec::node_codec::{SLOT_EMPTY, SLOT_LIVE, SLOT_TOMBSTONE, label_hash};
 use crate::storage::codec::property_codec;
 
 pub const EDGE_SLOT_SIZE: usize = 128;
@@ -68,8 +68,7 @@ pub fn encode_edge_slot(edge: &Edge) -> Result<([u8; EDGE_SLOT_SIZE], EdgeSlotOv
         #[allow(clippy::cast_possible_truncation)]
         let label_len = label_bytes.len() as u8;
         slot[OFF_LABEL_LEN] = label_len;
-        slot[OFF_LABEL_INLINE..OFF_LABEL_INLINE + label_bytes.len()]
-            .copy_from_slice(label_bytes);
+        slot[OFF_LABEL_INLINE..OFF_LABEL_INLINE + label_bytes.len()].copy_from_slice(label_bytes);
     } else {
         slot[OFF_LABEL_LEN] = LABEL_OVERFLOW_MARKER;
         overflow.label_overflowed = true;
@@ -80,8 +79,10 @@ pub fn encode_edge_slot(edge: &Edge) -> Result<([u8; EDGE_SLOT_SIZE], EdgeSlotOv
     let props_encoded = property_codec::encode_properties(edge.properties())?;
     // See `node_codec::encode_node_slot`: a wrapped count reads back as zero
     // properties, silently (issue #62).
-    let prop_count = u16::try_from(edge.properties().len())
-        .map_err(|_| crate::Error::RecordTooLarge { size: edge.properties().len() })?;
+    let prop_count =
+        u16::try_from(edge.properties().len()).map_err(|_| crate::Error::RecordTooLarge {
+            size: edge.properties().len(),
+        })?;
     slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].copy_from_slice(&prop_count.to_le_bytes());
 
     if props_encoded.len() <= EDGE_PROP_INLINE_MAX {
@@ -118,9 +119,7 @@ pub fn decode_edge_slot(
         return Ok(None);
     }
 
-    let id = EdgeId(u64::from_le_bytes(
-        slot[OFF_ID..=8].try_into().unwrap(),
-    ));
+    let id = EdgeId(u64::from_le_bytes(slot[OFF_ID..=8].try_into().unwrap()));
     let source = NodeId(u64::from_le_bytes(
         slot[OFF_SOURCE..OFF_SOURCE + 8].try_into().unwrap(),
     ));
@@ -164,11 +163,8 @@ pub fn decode_edge_slot(
             .try_into()
             .unwrap(),
     );
-    let prop_count = u16::from_le_bytes(
-        slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2]
-            .try_into()
-            .unwrap(),
-    );
+    let prop_count =
+        u16::from_le_bytes(slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap());
 
     let inline_len = u16::from_le_bytes(
         slot[OFF_PROP_INLINE_LEN..OFF_PROP_INLINE_LEN + 2]
@@ -252,11 +248,8 @@ pub fn edge_slot_prop_overflow_ref(slot: &[u8; EDGE_SLOT_SIZE]) -> u32 {
 /// Returns true if the slot has overflowed properties that need resolution.
 #[must_use]
 pub fn edge_slot_needs_prop_resolve(slot: &[u8; EDGE_SLOT_SIZE]) -> bool {
-    let prop_count = u16::from_le_bytes(
-        slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2]
-            .try_into()
-            .unwrap(),
-    );
+    let prop_count =
+        u16::from_le_bytes(slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap());
     let inline_len = u16::from_le_bytes(
         slot[OFF_PROP_INLINE_LEN..OFF_PROP_INLINE_LEN + 2]
             .try_into()
@@ -271,10 +264,8 @@ pub fn patch_edge_overflow(
     label_overflow: u32,
     prop_overflow: u32,
 ) {
-    slot[OFF_LABEL_OVERFLOW..OFF_LABEL_OVERFLOW + 4]
-        .copy_from_slice(&label_overflow.to_le_bytes());
-    slot[OFF_PROP_OVERFLOW..OFF_PROP_OVERFLOW + 4]
-        .copy_from_slice(&prop_overflow.to_le_bytes());
+    slot[OFF_LABEL_OVERFLOW..OFF_LABEL_OVERFLOW + 4].copy_from_slice(&label_overflow.to_le_bytes());
+    slot[OFF_PROP_OVERFLOW..OFF_PROP_OVERFLOW + 4].copy_from_slice(&prop_overflow.to_le_bytes());
 }
 
 #[cfg(test)]
@@ -316,7 +307,13 @@ mod tests {
 
     #[test]
     fn edge_slot_source_target_preserved() {
-        let edge = make_edge(1, "R", 0x0A0B_0C0D_0E0F_1011, 0x1213_1415_1617_1819, Properties::new());
+        let edge = make_edge(
+            1,
+            "R",
+            0x0A0B_0C0D_0E0F_1011,
+            0x1213_1415_1617_1819,
+            Properties::new(),
+        );
         let (slot, _) = encode_edge_slot(&edge).unwrap();
 
         // source at offset 9, little-endian
@@ -415,11 +412,8 @@ mod tests {
         let edge = make_edge(1, "HAS_SYSTEM", 1, 2, Properties::new());
         let (slot, _) = encode_edge_slot(&edge).unwrap();
 
-        let stored = u32::from_le_bytes(
-            slot[OFF_LABEL_HASH..OFF_LABEL_HASH + 4]
-                .try_into()
-                .unwrap(),
-        );
+        let stored =
+            u32::from_le_bytes(slot[OFF_LABEL_HASH..OFF_LABEL_HASH + 4].try_into().unwrap());
         assert_eq!(stored, label_hash("HAS_SYSTEM"));
     }
 
@@ -429,9 +423,8 @@ mod tests {
         let (slot, overflow) = encode_edge_slot(&edge).unwrap();
         assert!(!overflow.props_overflowed);
 
-        let prop_count = u16::from_le_bytes(
-            slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap(),
-        );
+        let prop_count =
+            u16::from_le_bytes(slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap());
         assert_eq!(prop_count, 0);
 
         let decoded = decode_edge_slot(&slot, 0, no_resolve_label, no_resolve_props)
@@ -455,8 +448,7 @@ mod tests {
         slot[OFF_LABEL_INLINE + 1] = 0xFE;
         slot[OFF_LABEL_INLINE + 2] = 0xFD;
 
-        let err = decode_edge_slot(&slot, 99, no_resolve_label, no_resolve_props)
-            .unwrap_err();
+        let err = decode_edge_slot(&slot, 99, no_resolve_label, no_resolve_props).unwrap_err();
         match err {
             crate::Error::CorruptPage { page_id, .. } => assert_eq!(page_id, 99),
             other => panic!("expected CorruptPage, got {other:?}"),
@@ -499,15 +491,10 @@ mod tests {
         let raw = overflow.props_bytes.unwrap();
         patch_edge_overflow(&mut slot, 0, 55);
 
-        let decoded = decode_edge_slot(
-            &slot,
-            0,
-            no_resolve_label,
-            move |page_id| {
-                assert_eq!(page_id, 55);
-                Ok(raw)
-            },
-        )
+        let decoded = decode_edge_slot(&slot, 0, no_resolve_label, move |page_id| {
+            assert_eq!(page_id, 55);
+            Ok(raw)
+        })
         .unwrap()
         .unwrap();
         assert_eq!(decoded.properties(), &props);
@@ -541,10 +528,7 @@ mod tests {
         slot[OFF_LABEL_INLINE + 1] = 0xFE;
         slot[OFF_LABEL_INLINE + 2] = 0xFD;
         let result = edge_slot_inline_label(&slot, 11);
-        assert!(
-            result.is_err(),
-            "expected Err for invalid UTF-8, got Ok"
-        );
+        assert!(result.is_err(), "expected Err for invalid UTF-8, got Ok");
         match result.unwrap_err() {
             crate::Error::CorruptPage { page_id, .. } => assert_eq!(page_id, 11),
             other => panic!("expected CorruptPage, got {other:?}"),

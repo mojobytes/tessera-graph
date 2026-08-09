@@ -1,9 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rustls::ServerConfig;
+use rustls::pki_types::pem::PemObject;
 
 use crate::error::{ProtocolError, Result};
 
@@ -117,11 +118,10 @@ impl Default for TlsConfigBuilder {
 }
 
 fn load_certs(path: &Path) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    let file = std::fs::File::open(path)
+    let pem = std::fs::read(path)
         .map_err(|e| ProtocolError::CertificateLoad(format!("{}: {e}", path.display())))?;
-    let mut reader = std::io::BufReader::new(file);
 
-    let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
+    let certs: Vec<_> = rustls::pki_types::CertificateDer::pem_slice_iter(&pem)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|e| ProtocolError::CertificateLoad(format!("parse certs: {e}")))?;
 
@@ -135,11 +135,9 @@ fn load_certs(path: &Path) -> Result<Vec<rustls::pki_types::CertificateDer<'stat
 }
 
 fn load_private_key(path: &Path) -> Result<rustls::pki_types::PrivateKeyDer<'static>> {
-    let file = std::fs::File::open(path)
+    let pem = std::fs::read(path)
         .map_err(|e| ProtocolError::KeyLoad(format!("{}: {e}", path.display())))?;
-    let mut reader = std::io::BufReader::new(file);
 
-    rustls_pemfile::private_key(&mut reader)
-        .map_err(|e| ProtocolError::KeyLoad(format!("parse key: {e}")))?
-        .ok_or_else(|| ProtocolError::KeyLoad("no private key found in file".to_owned()))
+    rustls::pki_types::PrivateKeyDer::from_pem_slice(&pem)
+        .map_err(|e| ProtocolError::KeyLoad(format!("parse key: {e}")))
 }

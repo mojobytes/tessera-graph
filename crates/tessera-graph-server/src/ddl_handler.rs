@@ -73,7 +73,8 @@ pub fn dispatch_ddl(
         }
         DdlStatement::DropConstraint { label, prop } => {
             let mut g = graph.write().map_err(|_| lock_error())?;
-            g.schema_catalog_mut().remove_unique_constraint(&label, &prop);
+            g.schema_catalog_mut()
+                .remove_unique_constraint(&label, &prop);
             g.persist_schema().map_err(|e| persist_error(&e))?;
             Ok(empty_result())
         }
@@ -195,7 +196,12 @@ mod tests {
         let result = dispatch_ddl(stmt, &g).unwrap();
         assert!(result.fields_psv.is_empty(), "mutation DDL returns no rows");
         assert!(result.rows.is_empty());
-        assert!(g.read().unwrap().schema_catalog().is_label_append_only("Event"));
+        assert!(
+            g.read()
+                .unwrap()
+                .schema_catalog()
+                .is_label_append_only("Event")
+        );
     }
 
     #[test]
@@ -347,13 +353,21 @@ mod tests {
             prop: "email".to_owned(),
         };
         dispatch_ddl(stmt, &g).unwrap();
-        assert!(g.read().unwrap().schema_catalog().has_index("Person", "email"));
+        assert!(
+            g.read()
+                .unwrap()
+                .schema_catalog()
+                .has_index("Person", "email")
+        );
     }
 
     #[test]
     fn drop_index_removes_from_catalog() {
         let g = make_graph();
-        g.write().unwrap().schema_catalog_mut().add_index("Person", "id");
+        g.write()
+            .unwrap()
+            .schema_catalog_mut()
+            .add_index("Person", "id");
         let stmt = tessera_graph::gql::DdlStatement::DropIndex {
             label: "Person".to_owned(),
             prop: "id".to_owned(),
@@ -370,19 +384,32 @@ mod tests {
             prop: "id".to_owned(),
         };
         dispatch_ddl(stmt, &g).unwrap();
-        assert!(g.read().unwrap().schema_catalog().has_unique_constraint("Asset", "id"));
+        assert!(
+            g.read()
+                .unwrap()
+                .schema_catalog()
+                .has_unique_constraint("Asset", "id")
+        );
     }
 
     #[test]
     fn drop_constraint_removes_from_catalog() {
         let g = make_graph();
-        g.write().unwrap().schema_catalog_mut().add_unique_constraint("Asset", "id");
+        g.write()
+            .unwrap()
+            .schema_catalog_mut()
+            .add_unique_constraint("Asset", "id");
         let stmt = tessera_graph::gql::DdlStatement::DropConstraint {
             label: "Asset".to_owned(),
             prop: "id".to_owned(),
         };
         dispatch_ddl(stmt, &g).unwrap();
-        assert!(!g.read().unwrap().schema_catalog().has_unique_constraint("Asset", "id"));
+        assert!(
+            !g.read()
+                .unwrap()
+                .schema_catalog()
+                .has_unique_constraint("Asset", "id")
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tempfile::TempDir;
 use tessera_graph::{Graph, GraphConfig, props};
@@ -73,7 +73,9 @@ fn interleaved_read_write_small_pool() {
 
     let mut ids = Vec::new();
     for i in 0..50_usize {
-        let nid = g.add_node("N", props! { "i" => i64::try_from(i).unwrap() }).unwrap();
+        let nid = g
+            .add_node("N", props! { "i" => i64::try_from(i).unwrap() })
+            .unwrap();
         ids.push(nid);
 
         // Read a previous node after every 10 writes (causes page thrashing)

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::{Direction, Edge, Graph, Properties, Property, props};
 
@@ -107,12 +107,8 @@ fn dijkstra_with_unit_weight_acts_like_bfs() {
     let n1 = graph.add_node("N", Properties::new()).unwrap();
     let n2 = graph.add_node("N", Properties::new()).unwrap();
 
-    graph
-        .add_edge("R", n0, n1, Properties::new())
-        .unwrap();
-    graph
-        .add_edge("R", n1, n2, Properties::new())
-        .unwrap();
+    graph.add_edge("R", n0, n1, Properties::new()).unwrap();
+    graph.add_edge("R", n1, n2, Properties::new()).unwrap();
 
     // Default weight is 1.0 per edge
     let (total, path) = graph

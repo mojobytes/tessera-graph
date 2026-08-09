@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::{Direction, Graph, Properties, props};
 
@@ -19,24 +19,14 @@ fn social_graph() -> (
     tessera_graph::NodeId,
 ) {
     let mut g = Graph::new();
-    let alice = g
-        .add_node("Person", props! { "name" => "Alice" })
-        .unwrap();
-    let bob = g
-        .add_node("Person", props! { "name" => "Bob" })
-        .unwrap();
-    let cats = g
-        .add_node("Thing", props! { "name" => "Cats" })
-        .unwrap();
+    let alice = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
+    let bob = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
+    let cats = g.add_node("Thing", props! { "name" => "Cats" }).unwrap();
     let charlie = g
         .add_node("Person", props! { "name" => "Charlie" })
         .unwrap();
-    let dave = g
-        .add_node("Person", props! { "name" => "Dave" })
-        .unwrap();
-    let dogs = g
-        .add_node("Thing", props! { "name" => "Dogs" })
-        .unwrap();
+    let dave = g.add_node("Person", props! { "name" => "Dave" }).unwrap();
+    let dogs = g.add_node("Thing", props! { "name" => "Dogs" }).unwrap();
 
     g.add_edge("KNOWS", alice, bob, Properties::new()).unwrap();
     g.add_edge("LIKES", bob, cats, Properties::new()).unwrap();
@@ -56,7 +46,13 @@ fn get_node_returns_bound_node() {
     let mut g = Graph::new();
     let n0 = g.add_node("A", Properties::new()).unwrap();
 
-    let results = g.pattern().node("a").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     assert!(!results.is_empty());
 
     let found = results.iter().any(|m| m.get_node("a").unwrap().id() == n0);
@@ -68,7 +64,13 @@ fn get_node_unknown_variable_returns_error() {
     let mut g = Graph::new();
     g.add_node("A", Properties::new()).unwrap();
 
-    let results = g.pattern().node("a").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     let err = results[0].get_node("nonexistent").unwrap_err();
     assert!(
         err.to_string().contains("pattern variable not found"),
@@ -81,7 +83,13 @@ fn get_edge_unknown_variable_returns_error() {
     let mut g = Graph::new();
     g.add_node("A", Properties::new()).unwrap();
 
-    let results = g.pattern().node("a").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     let err = results[0].get_edge("nonexistent").unwrap_err();
     assert!(
         err.to_string().contains("pattern variable not found"),
@@ -100,7 +108,13 @@ fn single_node_no_constraint_matches_all() {
     g.add_node("Person", Properties::new()).unwrap();
     g.add_node("Thing", Properties::new()).unwrap();
 
-    let results = g.pattern().node("a").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     assert_eq!(results.len(), 3);
 }
 
@@ -111,7 +125,14 @@ fn single_node_label_filter() {
     g.add_node("Person", Properties::new()).unwrap();
     g.add_node("Thing", Properties::new()).unwrap();
 
-    let results = g.pattern().node("a").label("Person").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .label("Person")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     assert_eq!(results.len(), 2);
 
     for m in &results {
@@ -140,7 +161,13 @@ fn single_node_property_filter() {
 #[test]
 fn empty_graph_returns_no_matches() {
     let g = Graph::new();
-    let results = g.pattern().node("a").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     assert!(results.is_empty());
 }
 
@@ -149,7 +176,12 @@ fn empty_pattern_returns_no_matches() {
     let mut g = Graph::new();
     g.add_node("A", Properties::new()).unwrap();
 
-    let results = g.pattern().execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     assert!(results.is_empty());
 }
 
@@ -164,8 +196,7 @@ fn two_node_pattern_outgoing() {
     let bob = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
     let cats = g.add_node("Thing", props! { "name" => "Cats" }).unwrap();
     g.add_edge("KNOWS", alice, bob, Properties::new()).unwrap();
-    g.add_edge("LIKES", alice, cats, Properties::new())
-        .unwrap();
+    g.add_edge("LIKES", alice, cats, Properties::new()).unwrap();
 
     let results = g
         .pattern()
@@ -188,9 +219,7 @@ fn two_node_pattern_multiple_matches() {
     let mut g = Graph::new();
     let alice = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     let bob = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
-    let carol = g
-        .add_node("Person", props! { "name" => "Carol" })
-        .unwrap();
+    let carol = g.add_node("Person", props! { "name" => "Carol" }).unwrap();
     g.add_edge("KNOWS", alice, bob, Properties::new()).unwrap();
     g.add_edge("KNOWS", alice, carol, Properties::new())
         .unwrap();
@@ -384,7 +413,14 @@ fn isolated_node_single_match() {
     let mut g = Graph::new();
     let n0 = g.add_node("X", Properties::new()).unwrap();
 
-    let results = g.pattern().node("a").label("X").execute().unwrap().collect::<tessera_graph::Result<Vec<_>>>().unwrap();
+    let results = g
+        .pattern()
+        .node("a")
+        .label("X")
+        .execute()
+        .unwrap()
+        .collect::<tessera_graph::Result<Vec<_>>>()
+        .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].get_node("a").unwrap().id(), n0);
 }
@@ -569,15 +605,9 @@ fn pattern_empty_variable_name_rejected_with_clear_error() {
 #[test]
 fn edge_property_filter() {
     let mut g = Graph::new();
-    let alice = g
-        .add_node("Person", props! { "name" => "Alice" })
-        .unwrap();
-    let bob = g
-        .add_node("Person", props! { "name" => "Bob" })
-        .unwrap();
-    let carol = g
-        .add_node("Person", props! { "name" => "Carol" })
-        .unwrap();
+    let alice = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
+    let bob = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
+    let carol = g.add_node("Person", props! { "name" => "Carol" }).unwrap();
     g.add_edge("KNOWS", alice, bob, props! { "since" => 2020i64 })
         .unwrap();
     g.add_edge("KNOWS", alice, carol, props! { "since" => 2023i64 })
@@ -700,7 +730,10 @@ fn node_label_check_does_not_require_property_decode() {
     g.begin_batch();
     for i in 0..1000_u64 {
         let t = g
-            .add_node("Person", props! { "name" => format!("p{i}"), "score" => i as i64 })
+            .add_node(
+                "Person",
+                props! { "name" => format!("p{i}"), "score" => i as i64 },
+            )
             .unwrap();
         g.add_edge("CONNECTS", source, t, Properties::new())
             .unwrap();
@@ -764,7 +797,12 @@ fn expand_hop_does_not_clone_bindings_per_matching_edge() {
         .collect::<tessera_graph::Result<Vec<_>>>()
         .unwrap();
 
-    assert_eq!(results.len(), 3, "expected 3 matches, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        3,
+        "expected 3 matches, got {}",
+        results.len()
+    );
 
     // All three results must bind `a` to the same source node.
     for result in &results {
@@ -859,18 +897,10 @@ fn multi_property_constraint_no_match_when_second_property_differs() {
 fn multi_hop_double_buffer_correctness() {
     // Chain: A -R1-> B -R2-> C -R3-> D
     let mut g = Graph::new();
-    let a = g
-        .add_node("Step", props! { "name" => "A" })
-        .unwrap();
-    let b = g
-        .add_node("Step", props! { "name" => "B" })
-        .unwrap();
-    let c = g
-        .add_node("Step", props! { "name" => "C" })
-        .unwrap();
-    let d = g
-        .add_node("Step", props! { "name" => "D" })
-        .unwrap();
+    let a = g.add_node("Step", props! { "name" => "A" }).unwrap();
+    let b = g.add_node("Step", props! { "name" => "B" }).unwrap();
+    let c = g.add_node("Step", props! { "name" => "C" }).unwrap();
+    let d = g.add_node("Step", props! { "name" => "D" }).unwrap();
 
     g.add_edge("NEXT", a, b, Properties::new()).unwrap();
     g.add_edge("NEXT", b, c, Properties::new()).unwrap();

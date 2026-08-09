@@ -55,6 +55,6 @@ crate.
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).
 
 Part of [TesseraGraph](https://tesseradb.io) by BelowZero Security OU.

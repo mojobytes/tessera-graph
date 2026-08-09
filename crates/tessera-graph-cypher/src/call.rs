@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! CALL statement parser.
 //!
@@ -300,13 +300,20 @@ mod tests {
 
     #[test]
     fn create_node_returns_none() {
-        assert!(try_parse_call("CREATE (n:Person {id: 1})").unwrap().is_none());
+        assert!(
+            try_parse_call("CREATE (n:Person {id: 1})")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn malformed_call_missing_yield_errors() {
         let result = try_parse_call("CALL mg.vertex_labels()");
-        assert!(result.is_err(), "expected Err for CALL without YIELD, got {result:?}");
+        assert!(
+            result.is_err(),
+            "expected Err for CALL without YIELD, got {result:?}"
+        );
     }
 
     #[test]

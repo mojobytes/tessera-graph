@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Lock-contention benchmark entry point (Scenario 1, in-process).
 //!
@@ -11,10 +11,10 @@
 //! Non-runnable points (Scenario 2, Bolt-in-Docker) are skipped with an
 //! explicit message — never silently dropped.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use tessera_graph_server::bench_support::contention_runner::{
-    run_contention, run_contention_repeated, RunConfig,
+    RunConfig, run_contention, run_contention_repeated,
 };
 use tessera_graph_server::bench_support::latency::LatencyTracker;
 use tessera_graph_server::bench_support::matrix::{parse_matrix, runnable_points_with_skip_report};
@@ -41,7 +41,9 @@ fn runs_per_point() -> u32 {
         .unwrap_or(DEFAULT_RUNS_PER_POINT)
 }
 
-fn aggregate(latencies: &[std::time::Duration]) -> tessera_graph_server::bench_support::latency::LatencyStats {
+fn aggregate(
+    latencies: &[std::time::Duration],
+) -> tessera_graph_server::bench_support::latency::LatencyStats {
     let mut tracker = LatencyTracker::new();
     for &d in latencies {
         tracker.record(d);

@@ -1,9 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Integration tests for the Bolt chunked transport framing layer.
 
 use tessera_graph_protocol::packstream::{decode, encode};
-use tessera_graph_protocol::{BoltChunkedReader, BoltChunkedWriter, MAX_CHUNK_SIZE, PackStreamValue};
+use tessera_graph_protocol::{
+    BoltChunkedReader, BoltChunkedWriter, MAX_CHUNK_SIZE, PackStreamValue,
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

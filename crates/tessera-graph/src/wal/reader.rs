@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -179,8 +179,18 @@ mod tests {
         let tf = wal_path();
         {
             let mut w = WalWriter::open(tf.path()).unwrap();
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 10, txn_id: None }).unwrap();
-            w.append(WalRecord::TombstoneEdge { lsn: 0, edge_id: 20, txn_id: None }).unwrap();
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 10,
+                txn_id: None,
+            })
+            .unwrap();
+            w.append(WalRecord::TombstoneEdge {
+                lsn: 0,
+                edge_id: 20,
+                txn_id: None,
+            })
+            .unwrap();
             w.sync().unwrap();
         }
 
@@ -205,9 +215,19 @@ mod tests {
         let tf = wal_path();
         {
             let mut w = WalWriter::open(tf.path()).unwrap();
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 1, txn_id: None }).unwrap();
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 1,
+                txn_id: None,
+            })
+            .unwrap();
             w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 2, txn_id: None }).unwrap();
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 2,
+                txn_id: None,
+            })
+            .unwrap();
             w.sync().unwrap();
         }
 
@@ -251,9 +271,14 @@ mod tests {
         let tf = wal_path();
         {
             let mut w = WalWriter::open(tf.path()).unwrap();
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=1
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 10, txn_id: None }).unwrap(); // lsn=2
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=3
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=1
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 10,
+                txn_id: None,
+            })
+            .unwrap(); // lsn=2
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=3
             w.sync().unwrap();
         }
 
@@ -279,11 +304,11 @@ mod tests {
         let tf = wal_path();
         {
             let mut w = WalWriter::open(tf.path()).unwrap();
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=1
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=2
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=3
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=4
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=5
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=1
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=2
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=3
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=4
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=5
             w.sync().unwrap();
         }
 
@@ -304,7 +329,10 @@ mod tests {
         // skipped_count tracks corrupt *regions* (contiguous corrupt bytes),
         // not individual records — the iterator cannot determine record
         // boundaries within a corrupt region.
-        assert!(iter.skipped_count() >= 1, "at least one corrupt region detected");
+        assert!(
+            iter.skipped_count() >= 1,
+            "at least one corrupt region detected"
+        );
     }
 
     #[test]
@@ -343,9 +371,14 @@ mod tests {
         let tf = wal_path();
         {
             let mut w = WalWriter::open(tf.path()).unwrap();
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=1
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 10, txn_id: None }).unwrap(); // lsn=2
-            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();       // lsn=3
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=1
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 10,
+                txn_id: None,
+            })
+            .unwrap(); // lsn=2
+            w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap(); // lsn=3
             w.sync().unwrap();
         }
 
@@ -368,7 +401,12 @@ mod tests {
             let mut w = WalWriter::open(tf.path()).unwrap();
             // txn 1: committed
             w.append(WalRecord::Begin { lsn: 0, txn_id: 1 }).unwrap();
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 10, txn_id: None }).unwrap();
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 10,
+                txn_id: None,
+            })
+            .unwrap();
             w.append(WalRecord::Commit { lsn: 0, txn_id: 1 }).unwrap();
             // txn 2: rolled back
             w.append(WalRecord::Begin { lsn: 0, txn_id: 2 }).unwrap();
@@ -380,8 +418,14 @@ mod tests {
 
         let result = WalReader::read_all(tf.path()).unwrap();
         assert!(result.committed_txn_ids.contains(&1), "txn 1 was committed");
-        assert!(!result.committed_txn_ids.contains(&2), "txn 2 was rolled back");
-        assert!(!result.committed_txn_ids.contains(&3), "txn 3 was in-flight");
+        assert!(
+            !result.committed_txn_ids.contains(&2),
+            "txn 2 was rolled back"
+        );
+        assert!(
+            !result.committed_txn_ids.contains(&3),
+            "txn 3 was in-flight"
+        );
         assert_eq!(result.committed_txn_ids.len(), 1);
         assert_eq!(result.skipped_corrupt_regions, 0);
     }
@@ -410,9 +454,18 @@ mod tests {
         std::fs::write(tf.path(), &data).unwrap();
 
         let result = WalReader::read_all(tf.path()).unwrap();
-        assert!(result.committed_txn_ids.contains(&1), "txn 1 commit survived");
-        assert!(!result.committed_txn_ids.contains(&2), "txn 2 commit was corrupt");
-        assert!(result.committed_txn_ids.contains(&3), "txn 3 commit survived");
+        assert!(
+            result.committed_txn_ids.contains(&1),
+            "txn 1 commit survived"
+        );
+        assert!(
+            !result.committed_txn_ids.contains(&2),
+            "txn 2 commit was corrupt"
+        );
+        assert!(
+            result.committed_txn_ids.contains(&3),
+            "txn 3 commit survived"
+        );
         assert!(result.skipped_corrupt_regions >= 1);
     }
 
@@ -451,7 +504,12 @@ mod tests {
         let tf = wal_path();
         {
             let mut w = WalWriter::open(tf.path()).unwrap();
-            w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 42, txn_id: None }).unwrap();
+            w.append(WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 42,
+                txn_id: None,
+            })
+            .unwrap();
             w.append(WalRecord::Checkpoint { lsn: 0 }).unwrap();
             w.sync().unwrap();
         }

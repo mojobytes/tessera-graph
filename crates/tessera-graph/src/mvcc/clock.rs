@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! The transaction clock: a monotonic source of visibility timestamps.
 
@@ -51,7 +51,10 @@ mod tests {
     #[test]
     fn txn_clock_starts_above_zero() {
         let clock = TxnClock::new();
-        assert!(clock.next() > 0, "timestamp 0 is reserved for 'no transaction'");
+        assert!(
+            clock.next() > 0,
+            "timestamp 0 is reserved for 'no transaction'"
+        );
     }
 
     #[test]
@@ -62,6 +65,9 @@ mod tests {
         assert_eq!(before, after, "current() must not advance the clock");
 
         let t1 = clock.next();
-        assert!(clock.current() >= t1, "current() must reflect issued timestamps");
+        assert!(
+            clock.current() >= t1,
+            "current() must reflect issued timestamps"
+        );
     }
 }

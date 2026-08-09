@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Shared test helpers for `tessera-graph-server` integration tests.
 
@@ -10,10 +10,10 @@ use tessera_graph_protocol::PackStreamValue;
 use tessera_graph_protocol::bolt_frame::{BoltChunkedReader, BoltChunkedWriter};
 use tessera_graph_protocol::bolt_message::{BoltRequest, BoltResponse};
 use tessera_graph_protocol::{BOLT_MAGIC, decode_response, encode_request};
+use tessera_graph_server::BoltHandler;
 use tessera_graph_server::audit::AuditSink;
 use tessera_graph_server::auth::{AuthProvider, SystemGraphAuthStore, UserStore};
 use tessera_graph_server::graph_accessor::GraphAccessor;
-use tessera_graph_server::BoltHandler;
 use tessera_graph_server::registry::GraphRegistry;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -106,9 +106,7 @@ where
 /// test can assert the `query_throttled` event shape. Returns the same
 /// six-tuple as [`HandlerWithAudit`].
 #[allow(dead_code)]
-pub async fn spawn_bolt_handler_with_query_cap(
-    queries_max_per_second: u32,
-) -> HandlerWithAudit {
+pub async fn spawn_bolt_handler_with_query_cap(queries_max_per_second: u32) -> HandlerWithAudit {
     spawn_bolt_handler_no_auth_with_caps(queries_max_per_second, 0).await
 }
 
@@ -118,9 +116,7 @@ pub async fn spawn_bolt_handler_with_query_cap(
 /// timing test can also assert the aggregate `bandwidth_throttled`
 /// event emitted on connection close. Returns a [`HandlerWithAudit`].
 #[allow(dead_code)]
-pub async fn spawn_bolt_handler_with_bytes_cap(
-    max_bytes_per_second: u64,
-) -> HandlerWithAudit {
+pub async fn spawn_bolt_handler_with_bytes_cap(max_bytes_per_second: u64) -> HandlerWithAudit {
     spawn_bolt_handler_no_auth_with_caps(0, max_bytes_per_second).await
 }
 
@@ -153,9 +149,7 @@ async fn spawn_bolt_handler_no_auth_full(
     query_timeout_ms: u64,
 ) -> HandlerWithAudit {
     use tessera_graph_server::auth::NoAuthProvider;
-    use tessera_graph_server::registry::{
-        COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager,
-    };
+    use tessera_graph_server::registry::{COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager};
 
     let tmp = tempfile::TempDir::new().expect("tempdir for capped handler");
     let store = Arc::new(
@@ -333,14 +327,10 @@ pub async fn prepopulate_system(data_dir: &std::path::Path, admin_password: &str
     {
         let graph = Graph::open(&system_dir, &GraphConfig::default())
             .expect("open system graph for pre-populate");
-        let store = SystemGraphAuthStore::new(Arc::new(StdRwLock::new(graph)))
-            .expect("system auth store");
+        let store =
+            SystemGraphAuthStore::new(Arc::new(StdRwLock::new(graph))).expect("system auth store");
         store
-            .create_user(
-                "admin",
-                &SecretString::new(admin_password.to_owned()),
-                true,
-            )
+            .create_user("admin", &SecretString::new(admin_password.to_owned()), true)
             .await
             .expect("create admin");
         // Se sueltan el almacén y el grafo para que el arranque pueda volver a
@@ -436,9 +426,7 @@ pub async fn fresh_community_handler_with_audit_file_as(
     is_admin: bool,
 ) -> HandlerWithAudit {
     use tessera_graph_server::auth::{SecretString, SystemGraphAuthProvider};
-    use tessera_graph_server::registry::{
-        COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager,
-    };
+    use tessera_graph_server::registry::{COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager};
 
     let tmp = tempfile::TempDir::new().expect("tempdir for community handler");
     let audit_path = tmp.path().join("audit.log");
@@ -478,8 +466,7 @@ pub async fn fresh_community_handler_with_audit_file_as(
     let auth = Arc::new(SystemGraphAuthProvider::from_store(Arc::clone(&store)));
     let auth_store: Arc<dyn UserStore> = store;
     let (writer, reader, shutdown) =
-        spawn_bolt_handler_with_community_manager(auth, auth_store, audit, Arc::new(manager))
-            .await;
+        spawn_bolt_handler_with_community_manager(auth, auth_store, audit, Arc::new(manager)).await;
     (writer, reader, shutdown, audit_shutdown_tx, tmp, audit_path)
 }
 
@@ -656,9 +643,7 @@ pub async fn fresh_listener_components(_db_name: &str) -> ListenerComponents {
     use tempfile::TempDir;
     use tessera_graph::GraphConfig;
     use tessera_graph_server::auth::{NoAuthProvider, SecretString};
-    use tessera_graph_server::registry::{
-        COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager,
-    };
+    use tessera_graph_server::registry::{COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager};
 
     let tmp = TempDir::new().expect("tempdir for listener");
     let data_dir = tmp.path().to_path_buf();
@@ -666,9 +651,8 @@ pub async fn fresh_listener_components(_db_name: &str) -> ListenerComponents {
     let system_dir = data_dir.join("system");
     std::fs::create_dir_all(&system_dir).unwrap();
 
-    let system_graph =
-        tessera_graph::Graph::open(&system_dir, &GraphConfig::default())
-            .expect("open system graph");
+    let system_graph = tessera_graph::Graph::open(&system_dir, &GraphConfig::default())
+        .expect("open system graph");
     let store = Arc::new(
         SystemGraphAuthStore::new(Arc::new(StdRwLock::new(system_graph)))
             .expect("system auth store"),
@@ -876,9 +860,7 @@ pub async fn spawn_bolt_handler_no_auth_with_timeout_double(
     use tessera_graph_server::auth::NoAuthProvider;
     use tessera_graph_server::registry::DbHandle;
 
-    use tessera_graph_server::registry::{
-        COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager,
-    };
+    use tessera_graph_server::registry::{COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager};
 
     let tmp = tempfile::TempDir::new().expect("tempdir for timeout-double handler");
     let store = Arc::new(
@@ -1022,8 +1004,13 @@ pub async fn spawn_single_db_handler<A>(
 where
     A: AuthProvider + 'static,
 {
-    spawn_bolt_handler_with_community_manager(auth, default_auth_store(), AuditSink::off(), registry)
-        .await
+    spawn_bolt_handler_with_community_manager(
+        auth,
+        default_auth_store(),
+        AuditSink::off(),
+        registry,
+    )
+    .await
 }
 
 // ── Arranque del servidor público ───────────────────────────────────────────
@@ -1162,7 +1149,8 @@ impl AuthRateLimitFixture {
             .expect("build community manager"),
         ) as Arc<dyn GraphRegistry>;
 
-        let rate_limiter = RateLimiter::new(/* ip_cap */ 64, auth_cap, /* conn_per_ip */ 0);
+        let rate_limiter =
+            RateLimiter::new(/* ip_cap */ 64, auth_cap, /* conn_per_ip */ 0);
         let peer_ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 99));
 
         Self {

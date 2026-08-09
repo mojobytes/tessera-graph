@@ -1,12 +1,12 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 #[allow(unused)]
 mod helpers;
 
-use criterion::{BenchmarkId, Criterion, BatchSize, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use tessera_graph::{Graph, Properties};
 
-use helpers::{small_props, large_props};
+use helpers::{large_props, small_props};
 
 fn bench_add_node(c: &mut Criterion) {
     let mut group = c.benchmark_group("graph_write/add_node");
@@ -121,7 +121,8 @@ fn bench_bulk_add_edges(c: &mut Criterion) {
                 },
                 |(mut g, nodes)| {
                     for pair in nodes.windows(2) {
-                        g.add_edge("NEXT", pair[0], pair[1], Properties::new()).unwrap();
+                        g.add_edge("NEXT", pair[0], pair[1], Properties::new())
+                            .unwrap();
                     }
                 },
                 BatchSize::LargeInput,
@@ -220,12 +221,18 @@ fn bench_match_create_pattern(c: &mut Criterion) {
                     let mut g = Graph::new();
                     // Create source node
                     let mut sp = Properties::new();
-                    sp.insert("name".into(), tessera_graph::Property::String("Alice".into()));
+                    sp.insert(
+                        "name".into(),
+                        tessera_graph::Property::String("Alice".into()),
+                    );
                     g.add_node("Person", sp).unwrap();
                     // Create target nodes with unique names
                     for i in 0..n {
                         let mut p = Properties::new();
-                        p.insert("name".into(), tessera_graph::Property::String(format!("T{i}")));
+                        p.insert(
+                            "name".into(),
+                            tessera_graph::Property::String(format!("T{i}")),
+                        );
                         g.add_node("Person", p).unwrap();
                     }
                     g
@@ -234,14 +241,16 @@ fn bench_match_create_pattern(c: &mut Criterion) {
                     g.begin_batch();
                     // Simulate MATCH (a:Person {name:'Alice'})
                     let sources = g.nodes_by_label_and_property(
-                        "Person", "name",
+                        "Person",
+                        "name",
                         &tessera_graph::Property::String("Alice".into()),
                     );
                     let src = sources[0];
                     // For each target, do property index lookup + add_edge
                     for i in 0..n {
                         let targets = g.nodes_by_label_and_property(
-                            "Person", "name",
+                            "Person",
+                            "name",
                             &tessera_graph::Property::String(format!("T{i}")),
                         );
                         let tgt = targets[0];

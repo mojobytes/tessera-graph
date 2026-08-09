@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Shared prefix-parsing helpers for the hand-written statement parsers
 //! (`admin`, `ddl`). These provide case-insensitive prefix stripping,

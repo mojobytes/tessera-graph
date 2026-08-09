@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! # `TesseraGraph`
 //!
@@ -48,39 +48,37 @@ pub mod storage;
 
 // Public API re-exports.
 pub use access::GraphAccess;
-pub use call::{resolve_procedure, ProcedureKind};
+pub use call::{ProcedureKind, resolve_procedure};
+pub use edge::Edge;
 pub use error::{BatchLimitKind, EdgeId, Error, NodeId, Result};
 pub use graph::{FsyncCause, Graph, GraphConfig, QuotaHook, SharedGraph, WalObserver};
-pub use node::Node;
-pub use edge::Edge;
-pub use property::{Properties, Property};
 pub use index::PropertyIndex;
+pub use node::Node;
+pub use property::{Properties, Property};
 pub use schema::{AppendOnlyDecl, ConstraintDecl, IndexDecl, SchemaCatalog};
 
-pub use query::{Direction, Path};
 pub use query::neighbor::NeighborQuery;
 pub use query::pattern::{PatternBuilder, PatternMatch, PatternMatchIter};
 pub use query::shortest_path::ShortestPathQuery;
 pub use query::subgraph::{Subgraph, SubgraphQuery};
 pub use query::traversal::{Strategy, TraversalBuilder};
 pub use query::weighted_path::WeightedPathQuery;
+pub use query::{Direction, Path};
 
 // Storage types — needed by enterprise crate for adjacency index integration.
 pub use storage::codec::adjacency_codec::AdjacencyPointer;
 
 // WAL types — needed by external crates for transaction boundaries and recovery.
+pub use wal::reader::{WalReadResult, WalReader, WalRecordIter};
 pub use wal::record::WalRecord;
 pub use wal::writer::WalWriter;
-pub use wal::reader::{WalReadResult, WalReader, WalRecordIter};
 
 pub use gql::{
     AdminStatement, GqlMutationResult, GqlNode, GqlPath, GqlQuery, GqlRelationship, GqlResult,
     GqlRow, GqlStatement, GqlValue, SecretPlainPassword,
 };
 
-pub use gql::{
-    compile_match_bindings, compile_match_for_mutation, resolve_create_props,
-};
+pub use gql::{compile_match_bindings, compile_match_for_mutation, resolve_create_props};
 
 // Deprecated literal-only SET helper. Kept for API compatibility with
 // 0.2.x consumers; new code should rely on `apply_pipeline_set`.

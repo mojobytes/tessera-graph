@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Integration tests for [`start_server`].
 
@@ -90,10 +90,7 @@ mod tests {
         let run = BoltRequest::Run {
             query: "RETURN 1".to_owned(),
             params: vec![],
-            extra: vec![(
-                "db".to_owned(),
-                PackStreamValue::String(db_name.to_owned()),
-            )],
+            extra: vec![("db".to_owned(), PackStreamValue::String(db_name.to_owned()))],
         };
         cw.write_message(&encode_request(&run).unwrap())
             .await
@@ -190,7 +187,6 @@ mod tests {
 
     // ── Cycle 11.6: start_server returns ServerHandle with registry ─────────
 
-
     // ── Cycle 11.4: schema-version guard rejects too-old layout ─────────────
 
     #[tokio::test]
@@ -225,9 +221,7 @@ mod tests {
         )
         .await
         .expect("start_server must return without waiting for shutdown")
-        .expect_err(
-            "start_server must refuse a data_dir pinned to an older layout",
-        );
+        .expect_err("start_server must refuse a data_dir pinned to an older layout");
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("out of date"),
@@ -276,9 +270,7 @@ mod tests {
         )
         .await
         .expect("start_server must return without waiting for shutdown")
-        .expect_err(
-            "start_server must refuse a data_dir pinned to a newer layout",
-        );
+        .expect_err("start_server must refuse a data_dir pinned to a newer layout");
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("newer than server"),
@@ -371,9 +363,7 @@ mod tests {
         )
         .await
         .expect("start_server must return without waiting for shutdown")
-        .expect_err(
-            "start_server must refuse a populated v0.4 data_dir without marker",
-        );
+        .expect_err("start_server must refuse a populated v0.4 data_dir without marker");
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("disk layout") && msg.contains("migrate"),
@@ -452,11 +442,7 @@ mod tests {
         write(dir.path(), CURRENT_DISK_LAYOUT).unwrap();
         let system = dir.path().join("system");
         std::fs::create_dir_all(&system).unwrap();
-        std::fs::set_permissions(
-            &system,
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        std::fs::set_permissions(&system, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let cfg = ServerConfig {
             bind_addr: "127.0.0.1:0".to_owned(),
@@ -472,8 +458,8 @@ mod tests {
             tessera_graph_server::single_database_factory(),
             tessera_graph_server::startup::PaidStartupHooks::default(),
         )
-            .await
-            .expect_err("start_server should refuse world-readable system dir");
+        .await
+        .expect_err("start_server should refuse world-readable system dir");
         let msg = err.to_string().to_lowercase();
         assert!(
             msg.contains("permission"),
@@ -619,11 +605,11 @@ mod tests {
 
         // The bound address must arrive promptly — start_server resolves it
         // right after `TesseraListener::bind` and before entering the accept
-        // loop. 1 s covers cold-start of the system graph + audit sink + auth
-        // bootstrap on a slow CI host.
-        let addr = tokio::time::timeout(Duration::from_secs(1), ready_rx)
+        // loop. Password hashing during the initial auth bootstrap is
+        // deliberately expensive, so allow loaded CI runners ample headroom.
+        let addr = tokio::time::timeout(Duration::from_secs(10), ready_rx)
             .await
-            .expect("ready channel did not deliver addr within 1 s")
+            .expect("ready channel did not deliver addr within 10 s")
             .expect("ready sender dropped before sending addr")
             .bolt_addr;
 
@@ -665,22 +651,19 @@ mod tests {
 
         tokio::spawn(async move {
             // Bind manually so we can extract the address before serving.
-            let listener =
-                tessera_graph_server::TesseraListener::bind(&config.bind_addr)
-                    .await
-                    .unwrap();
+            let listener = tessera_graph_server::TesseraListener::bind(&config.bind_addr)
+                .await
+                .unwrap();
             let addr = listener.local_addr().unwrap();
             let _ = addr_tx.send(addr);
 
             let auth: std::sync::Arc<dyn tessera_graph_server::auth::AuthProvider> =
-                std::sync::Arc::new(
-                    tessera_graph_server::auth::PasswordAuthProvider::new("correct-pw"),
-                );
-            let graph = std::sync::Arc::new(
-                tessera_graph_server::DefaultGraphAccessor::new(std::sync::Arc::new(
-                    std::sync::RwLock::new(tessera_graph::Graph::new()),
-                )),
-            );
+                std::sync::Arc::new(tessera_graph_server::auth::PasswordAuthProvider::new(
+                    "correct-pw",
+                ));
+            let graph = std::sync::Arc::new(tessera_graph_server::DefaultGraphAccessor::new(
+                std::sync::Arc::new(std::sync::RwLock::new(tessera_graph::Graph::new())),
+            ));
 
             let _ = listener
                 .serve_plain(
@@ -747,25 +730,30 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
         tokio::spawn(async move {
-            let listener =
-                tessera_graph_server::TesseraListener::bind("127.0.0.1:0")
-                    .await
-                    .unwrap();
+            let listener = tessera_graph_server::TesseraListener::bind("127.0.0.1:0")
+                .await
+                .unwrap();
             let addr = listener.local_addr().unwrap();
             let _ = addr_tx.send(addr);
 
             let auth: std::sync::Arc<dyn tessera_graph_server::auth::AuthProvider> =
-                std::sync::Arc::new(
-                    tessera_graph_server::auth::PasswordAuthProvider::new("correct-pw"),
-                );
-            let graph = std::sync::Arc::new(
-                tessera_graph_server::DefaultGraphAccessor::new(std::sync::Arc::new(
-                    std::sync::RwLock::new(tessera_graph::Graph::new()),
-                )),
-            );
+                std::sync::Arc::new(tessera_graph_server::auth::PasswordAuthProvider::new(
+                    "correct-pw",
+                ));
+            let graph = std::sync::Arc::new(tessera_graph_server::DefaultGraphAccessor::new(
+                std::sync::Arc::new(std::sync::RwLock::new(tessera_graph::Graph::new())),
+            ));
 
             let _ = listener
-                .serve_plain(auth, common::default_auth_store(), tessera_graph_server::audit::AuditSink::off(), graph, shutdown_rx, 10, Duration::from_secs(30))
+                .serve_plain(
+                    auth,
+                    common::default_auth_store(),
+                    tessera_graph_server::audit::AuditSink::off(),
+                    graph,
+                    shutdown_rx,
+                    10,
+                    Duration::from_secs(30),
+                )
                 .await;
         });
 
@@ -846,8 +834,7 @@ mod tests {
         .await;
 
         // Restore permissions so the tempdir can be cleaned up.
-        let _ =
-            std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o755));
+        let _ = std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o755));
 
         let err = result.expect_err("startup must fail when data_dir is unwritable");
         let msg = err.to_string().to_lowercase();
@@ -1004,7 +991,8 @@ mod tests {
             let graph = db.graph();
             let mut g = graph.write().expect("write lock");
             let txn = g.begin_txn().expect("begin");
-            g.add_node_in_txn(txn, "N", Properties::new()).expect("write");
+            g.add_node_in_txn(txn, "N", Properties::new())
+                .expect("write");
             g.commit_txn(txn).expect("commit");
         }
         drop(db);
@@ -1035,5 +1023,4 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }
-
 }

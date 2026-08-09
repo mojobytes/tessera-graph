@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! String-level pre-processor for Cypher compatibility.
 //!
@@ -221,12 +221,7 @@ pub fn reject_cypher_constructs(input: &str) -> tessera_graph::Result<()> {
 /// input: each character (including multibyte UTF-8) is replaced by the same
 /// number of space bytes (`c.len_utf8()` spaces). This guarantees that byte
 /// offsets computed on the blanked string are valid indices into the original.
-fn scan_string_literal(
-    chars: &[char],
-    start: usize,
-    result: &mut String,
-    blank: bool,
-) -> usize {
+fn scan_string_literal(chars: &[char], start: usize, result: &mut String, blank: bool) -> usize {
     let quote = chars[start];
     result.push(quote);
     let mut i = start + 1;
@@ -918,7 +913,10 @@ mod tests {
         let input = "OPTIONAL MATCH (n:Person) RETURN n.name";
         let output = cypher_to_gql(input).expect("parse"); // OK: test
         let upper = output.to_ascii_uppercase();
-        assert!(!upper.contains("OPTIONAL"), "OPTIONAL should be removed, got: {output}");
+        assert!(
+            !upper.contains("OPTIONAL"),
+            "OPTIONAL should be removed, got: {output}"
+        );
         assert!(upper.contains("MATCH"), "MATCH must remain, got: {output}");
     }
 
@@ -956,7 +954,10 @@ mod tests {
     fn with_star_passthrough_is_stripped() {
         let input = "MATCH (n:Person) WITH * RETURN n.name";
         let output = cypher_to_gql(input).expect("parse"); // OK: test
-        assert!(!output.to_ascii_uppercase().contains("WITH"), "got: {output}");
+        assert!(
+            !output.to_ascii_uppercase().contains("WITH"),
+            "got: {output}"
+        );
         assert!(output.contains("MATCH"), "got: {output}");
         assert!(output.contains("RETURN"), "got: {output}");
     }
@@ -966,7 +967,10 @@ mod tests {
         let input = "MATCH (n) WITH n.name AS name RETURN name";
         let err = cypher_to_gql(input).expect_err("should reject"); // OK: test
         let msg = format!("{err:?}");
-        assert!(msg.contains("WITH") && msg.contains("not yet supported"), "got: {msg}");
+        assert!(
+            msg.contains("WITH") && msg.contains("not yet supported"),
+            "got: {msg}"
+        );
     }
 
     #[test]
@@ -1019,7 +1023,10 @@ mod tests {
         let input = "MATCH (n:Person) WHERE n.name = 'Alice' REMOVE n.age;";
         let output = cypher_to_gql(input).expect("parse"); // OK: test
         assert!(output.contains("SET n.age = null"), "got: {output}");
-        assert!(output.contains(';'), "semicolon should be preserved, got: {output}");
+        assert!(
+            output.contains(';'),
+            "semicolon should be preserved, got: {output}"
+        );
     }
 
     #[test]
@@ -1082,7 +1089,9 @@ mod tests {
         // é is 2 bytes in UTF-8 → 2 spaces replace it.
         // 'café' body is c(1) + a(1) + f(1) + é(2) = 5 bytes → 5 spaces.
         let quote_start = blanked.find('\'').expect("opening quote"); // OK: test
-        let quote_end = blanked[quote_start + 1..].find('\'').expect("closing quote"); // OK: test
+        let quote_end = blanked[quote_start + 1..]
+            .find('\'')
+            .expect("closing quote"); // OK: test
         let inner = &blanked[quote_start + 1..quote_start + 1 + quote_end];
         assert!(
             inner.chars().all(|c| c == ' '),
@@ -1122,7 +1131,10 @@ mod tests {
         let input = "MATCH (n:`My Label`) RETURN n";
         let output = cypher_to_gql(input).unwrap(); // OK: test
         assert!(output.contains("\"My Label\""), "got: {output}");
-        assert!(!output.contains('`'), "backticks should be removed, got: {output}");
+        assert!(
+            !output.contains('`'),
+            "backticks should be removed, got: {output}"
+        );
     }
 
     #[test]
@@ -1171,7 +1183,9 @@ mod tests {
 
     #[test]
     fn detects_remove_clause() {
-        assert!(contains_cypher_constructs("MATCH (n) REMOVE n.prop RETURN n"));
+        assert!(contains_cypher_constructs(
+            "MATCH (n) REMOVE n.prop RETURN n"
+        ));
     }
 
     #[test]
@@ -1186,7 +1200,9 @@ mod tests {
 
     #[test]
     fn pure_gql_create_is_not_cypher() {
-        assert!(!contains_cypher_constructs("CREATE (n {name: 'Alice'}) RETURN n"));
+        assert!(!contains_cypher_constructs(
+            "CREATE (n {name: 'Alice'}) RETURN n"
+        ));
     }
 
     #[test]

@@ -5,8 +5,8 @@
 
 use std::sync::{Arc, RwLock};
 
-use tessera_graph::gql::{self, GqlStatement};
 use tessera_graph::Graph;
+use tessera_graph::gql::{self, GqlStatement};
 use tessera_graph_config::QueryLanguage;
 
 use crate::bench_support::dataset::build_dataset;
@@ -23,8 +23,8 @@ pub(crate) fn seeded_shared(n: u32) -> Arc<RwLock<Graph>> {
 /// Parses `cypher` and returns its `MutationStatement`, panicking if it is not a
 /// mutation — a programming error in the test, not an input error.
 pub(crate) fn parse_mutation(cypher: &str) -> gql::MutationStatement {
-    let stmt = tessera_graph_cypher::parse_with_mode(cypher, QueryLanguage::CypherCompat)
-        .expect("parse");
+    let stmt =
+        tessera_graph_cypher::parse_with_mode(cypher, QueryLanguage::CypherCompat).expect("parse");
     match stmt {
         GqlStatement::Mutation(m) => m,
         other => panic!("expected mutation, got {other:?}"),

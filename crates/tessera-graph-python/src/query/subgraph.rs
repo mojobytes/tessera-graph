@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! `PySubgraphQuery` — Python wrapper for `SubgraphQuery`.
 

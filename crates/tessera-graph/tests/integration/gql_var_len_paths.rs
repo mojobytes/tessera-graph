@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Integration tests for variable-length path GQL queries.
 
@@ -33,12 +33,13 @@ fn var_len_two_hops_matches_chain() {
     g.add_edge("KNOWS", a, b, props! {}).unwrap();
     g.add_edge("KNOWS", b, c, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a)-[*1..2]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a)-[*1..2]->(b) RETURN DISTINCT id(b)");
     // a→b (1 hop), a→c (2 hops), b→c (1 hop) — distinct end IDs are b and c
-    assert_eq!(rows.len(), 2, "expected exactly 2 distinct destinations, got {rows:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "expected exactly 2 distinct destinations, got {rows:?}"
+    );
 }
 
 #[test]
@@ -53,10 +54,7 @@ fn var_len_upper_bound_respected() {
     g.add_edge("R", b, c, props! {}).unwrap();
     g.add_edge("R", c, d, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:Start)-[*1..2]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:Start)-[*1..2]->(b) RETURN DISTINCT id(b)");
     // a→b (1 hop), a→c (2 hops). D is 3 hops — excluded.
     assert_eq!(rows.len(), 2, "should reach B and C only, got {rows:?}");
 }
@@ -70,10 +68,7 @@ fn var_len_min_bound_respected() {
     g.add_edge("R", a, b, props! {}).unwrap();
     g.add_edge("R", b, c, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:Start)-[*2..2]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:Start)-[*2..2]->(b) RETURN DISTINCT id(b)");
     // Only C (2 hops from a). B is excluded (1 hop).
     assert_eq!(rows.len(), 1);
 }
@@ -83,13 +78,14 @@ fn var_len_unbounded_finds_all() {
     let mut g = Graph::new();
     build_chain(&mut g, "N", "R", 5);
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:N)-[*]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:N)-[*]->(b) RETURN DISTINCT id(b)");
     // 5-node chain with [*] (min=0): each node reaches itself (depth 0) plus
     // all subsequent nodes. Distinct reachable IDs: all 5 nodes.
-    assert_eq!(rows.len(), 5, "expected all 5 nodes (min=0 includes self), got {rows:?}");
+    assert_eq!(
+        rows.len(),
+        5,
+        "expected all 5 nodes (min=0 includes self), got {rows:?}"
+    );
 }
 
 #[test]
@@ -104,10 +100,7 @@ fn var_len_with_label_filter() {
     g.add_edge("KNOWS", b, c, props! {}).unwrap();
     g.add_edge("LIKES", a, d, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:P)-[:KNOWS*1..2]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:P)-[:KNOWS*1..2]->(b) RETURN DISTINCT id(b)");
     let ids: std::collections::HashSet<_> = rows
         .iter()
         .filter_map(|r| {
@@ -145,12 +138,13 @@ fn var_len_cycle_does_not_loop_forever() {
     g.add_edge("R", a, b, props! {}).unwrap();
     g.add_edge("R", b, a, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:P)-[*1..10]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:P)-[*1..10]->(b) RETURN DISTINCT id(b)");
     // A→B (from A), A (from B) = 2 distinct IDs.
-    assert_eq!(rows.len(), 2, "cycle should reach exactly 2 distinct nodes, got {rows:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "cycle should reach exactly 2 distinct nodes, got {rows:?}"
+    );
 }
 
 #[test]
@@ -164,10 +158,7 @@ fn var_len_start_node_filtered() {
     g.add_edge("KNOWS", alice, bob, props! {}).unwrap();
     g.add_edge("KNOWS", carol, dave, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:P {name: 'Alice'})-[*1..2]->(b) RETURN id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:P {name: 'Alice'})-[*1..2]->(b) RETURN id(b)");
     assert_eq!(rows.len(), 1);
     #[allow(clippy::cast_possible_wrap)]
     if let Some(tessera_graph::gql::GqlValue::Int(id)) = rows[0].get("id(b)") {
@@ -192,10 +183,7 @@ fn var_len_bfs_no_duplicate_results_diamond_graph() {
     g.add_edge("R", b, d, props! {}).unwrap();
     g.add_edge("R", c, d, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:S)-[*1..2]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:S)-[*1..2]->(b) RETURN DISTINCT id(b)");
     // From A: B(1), C(1), D(2) = 3 distinct destinations.
     assert_eq!(rows.len(), 3, "diamond: expected B, C, D — got {rows:?}");
 }
@@ -208,12 +196,13 @@ fn var_len_min_zero_emits_start_node() {
     let b = g.add_node("N", props! {}).unwrap();
     g.add_edge("R", a, b, props! {}).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:S)-[*0..2]->(b) RETURN id(a), id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:S)-[*0..2]->(b) RETURN id(a), id(b)");
     // Row 1: a→a (0 hops), Row 2: a→b (1 hop) = 2 rows from A as start.
-    assert_eq!(rows.len(), 2, "min=0 should include start node self-binding, got {rows:?}");
+    assert_eq!(
+        rows.len(),
+        2,
+        "min=0 should include start node self-binding, got {rows:?}"
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use crate::error::{EdgeId, NodeId};
 
@@ -71,13 +71,13 @@ impl Path {
 
     /// Returns the number of edges in the path (hops).
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.edges.len()
     }
 
     /// Returns `true` if the path has no edges.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.edges.is_empty()
     }
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Integration tests for the `shortestPath()` GQL function.
 
@@ -74,10 +74,7 @@ fn shortest_path_same_node_returns_single_element_list() {
     let mut g = Graph::new();
     let _a = g.add_node("P", props! { "name" => "A" }).unwrap();
 
-    let rows = execute_query(
-        &g,
-        "MATCH (a:P {name: 'A'}) RETURN shortestPath(a, a)",
-    );
+    let rows = execute_query(&g, "MATCH (a:P {name: 'A'}) RETURN shortestPath(a, a)");
     assert_eq!(rows.len(), 1);
     let val = rows[0].get("shortestpath(a, a)").expect("column exists");
     match val {
@@ -109,7 +106,11 @@ fn shortest_path_with_cycle_finds_direct_route() {
     let val = rows[0].get("shortestpath(a, c)").expect("column present");
     match val {
         tessera_graph::gql::GqlValue::List(ids) => {
-            assert_eq!(ids.len(), 2, "direct A→C is shortest (2 nodes), got {ids:?}");
+            assert_eq!(
+                ids.len(),
+                2,
+                "direct A→C is shortest (2 nodes), got {ids:?}"
+            );
         }
         other => panic!("expected List, got {other:?}"),
     }
@@ -118,9 +119,7 @@ fn shortest_path_with_cycle_finds_direct_route() {
 #[test]
 fn shortest_path_unbound_variable_returns_compile_error() {
     let g = Graph::new();
-    let query = tessera_graph::gql::parse(
-        "MATCH (a:P) RETURN shortestPath(a, z)",
-    ).unwrap();
+    let query = tessera_graph::gql::parse("MATCH (a:P) RETURN shortestPath(a, z)").unwrap();
     let result = tessera_graph::gql::execute(&g, &query, 0);
     assert!(result.is_err(), "unbound 'z' should produce compile error");
     let err_msg = result.unwrap_err().to_string();
@@ -152,7 +151,11 @@ fn shortest_path_cypher_style_with_hop_limit() {
     );
     assert_eq!(rows.len(), 1);
     let val = rows[0].get("shortestPath(...)").expect("column exists");
-    assert_eq!(*val, tessera_graph::gql::GqlValue::Null, "3-hop path exceeds *..2 limit");
+    assert_eq!(
+        *val,
+        tessera_graph::gql::GqlValue::Null,
+        "3-hop path exceeds *..2 limit"
+    );
 
     // Max 3 hops: D is exactly 3 hops away, should return [A,B,C,D]
     let rows = execute_query(
@@ -163,7 +166,11 @@ fn shortest_path_cypher_style_with_hop_limit() {
     let val = rows[0].get("shortestPath(...)").expect("column exists");
     match val {
         tessera_graph::gql::GqlValue::List(ids) => {
-            assert_eq!(ids.len(), 4, "path A->B->C->D should have 4 nodes, got {ids:?}");
+            assert_eq!(
+                ids.len(),
+                4,
+                "path A->B->C->D should have 4 nodes, got {ids:?}"
+            );
         }
         other => panic!("expected List, got {other:?}"),
     }
@@ -189,7 +196,11 @@ fn shortest_path_cypher_style_with_label_filter() {
     let val = rows[0].get("shortestPath(...)").expect("column exists");
     match val {
         tessera_graph::gql::GqlValue::List(ids) => {
-            assert_eq!(ids.len(), 3, "KNOWS-only path A->B->C should have 3 nodes, got {ids:?}");
+            assert_eq!(
+                ids.len(),
+                3,
+                "KNOWS-only path A->B->C should have 3 nodes, got {ids:?}"
+            );
         }
         other => panic!("expected List, got {other:?}"),
     }
@@ -252,7 +263,11 @@ fn shortest_path_cypher_style_undirected() {
     let val = rows[0].get("shortestPath(...)").expect("column exists");
     match val {
         tessera_graph::gql::GqlValue::List(ids) => {
-            assert_eq!(ids.len(), 3, "undirected path C-B-A should have 3 nodes, got {ids:?}");
+            assert_eq!(
+                ids.len(),
+                3,
+                "undirected path C-B-A should have 3 nodes, got {ids:?}"
+            );
         }
         other => panic!("expected List, got {other:?}"),
     }

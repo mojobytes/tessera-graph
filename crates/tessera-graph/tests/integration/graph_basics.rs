@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::{Graph, props};
 
@@ -6,12 +6,26 @@ use tessera_graph::{Graph, props};
 fn add_nodes_and_edges() {
     let mut g = Graph::new();
 
-    let plant = g.add_node("Plant", props! { "name" => "Solar Plant A", "country" => "ES" }).unwrap();
-    let system = g.add_node("System", props! { "name" => "Inverter Bank 1" }).unwrap();
-    let doc = g.add_node("Document", props! { "type" => "warranty", "expires" => 2027_i64 }).unwrap();
+    let plant = g
+        .add_node(
+            "Plant",
+            props! { "name" => "Solar Plant A", "country" => "ES" },
+        )
+        .unwrap();
+    let system = g
+        .add_node("System", props! { "name" => "Inverter Bank 1" })
+        .unwrap();
+    let doc = g
+        .add_node(
+            "Document",
+            props! { "type" => "warranty", "expires" => 2027_i64 },
+        )
+        .unwrap();
 
     let e1 = g.add_edge("HAS_SYSTEM", plant, system, props! {}).unwrap();
-    let e2 = g.add_edge("HAS_DOCUMENT", system, doc, props! { "critical" => true }).unwrap();
+    let e2 = g
+        .add_edge("HAS_DOCUMENT", system, doc, props! { "critical" => true })
+        .unwrap();
 
     assert_eq!(g.node_count(), 3);
     assert_eq!(g.edge_count(), 2);
@@ -94,7 +108,10 @@ fn outgoing_and_incoming_edges() {
 fn node_projected_returns_only_requested_properties() {
     let mut g = Graph::new();
     let id = g
-        .add_node("Person", props! { "name" => "Alice", "age" => 30_i64, "city" => "Madrid" })
+        .add_node(
+            "Person",
+            props! { "name" => "Alice", "age" => 30_i64, "city" => "Madrid" },
+        )
         .unwrap();
 
     let projected = g.node_projected(id, &["name", "age"]).unwrap();

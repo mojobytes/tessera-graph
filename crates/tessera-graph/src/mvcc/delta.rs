@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! A `Delta`: one record's pending mutation held in memory until commit.
 //!
@@ -232,7 +232,10 @@ mod tests {
             EntitySnapshot::Deleted.approx_size(),
             EntitySnapshot::Deleted.approx_size()
         );
-        assert!(EntitySnapshot::Deleted.approx_size() < EntitySnapshot::Node(make_node(1, "X")).approx_size());
+        assert!(
+            EntitySnapshot::Deleted.approx_size()
+                < EntitySnapshot::Node(make_node(1, "X")).approx_size()
+        );
     }
 
     #[test]

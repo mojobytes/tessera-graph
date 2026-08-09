@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
-pub mod mock_graph;
 pub mod graph_builders;
+pub mod mock_graph;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! GQL abstract syntax tree types.
 
@@ -436,7 +436,10 @@ pub enum AdminStatement {
         options: DatabaseOptions,
     },
     /// `DROP DATABASE <name> [IF EXISTS]`
-    DropDatabase { name: String, if_exists: bool },
+    DropDatabase {
+        name: String,
+        if_exists: bool,
+    },
     /// `SHOW DATABASES` — lists the catalog entries visible to the
     /// caller. The admin handler filters by effective access.
     ShowDatabases,
@@ -465,7 +468,9 @@ pub enum AdminStatement {
     /// `filter_user=None` requires admin; `filter_user=Some(self)`
     /// is allowed without admin (the handler enforces this, not the
     /// parser).
-    ShowGrants { filter_user: Option<String> },
+    ShowGrants {
+        filter_user: Option<String>,
+    },
 }
 
 /// DDL statements: index and constraint management.
@@ -647,14 +652,20 @@ impl GqlStatement {
     /// Deprecated alias for [`Self::into_mutation`]. The previous name broke
     /// the Rust convention that `as_*` borrows rather than consumes.
     #[must_use]
-    #[deprecated(since = "0.2.3", note = "renamed to `into_mutation` — this method consumes `self`")]
+    #[deprecated(
+        since = "0.2.3",
+        note = "renamed to `into_mutation` — this method consumes `self`"
+    )]
     pub fn as_mutation(self) -> Option<MutationStatement> {
         self.into_mutation()
     }
 
     /// Deprecated alias for [`Self::into_query`].
     #[must_use]
-    #[deprecated(since = "0.2.3", note = "renamed to `into_query` — this method consumes `self`")]
+    #[deprecated(
+        since = "0.2.3",
+        note = "renamed to `into_query` — this method consumes `self`"
+    )]
     pub fn as_query(self) -> Option<GqlQuery> {
         self.into_query()
     }
@@ -973,7 +984,10 @@ mod tests {
     fn gql_query_has_optional_clauses() {
         let q = GqlQuery {
             unwind_clause: None,
-            match_clause: MatchClause { patterns: vec![], path_var: None },
+            match_clause: MatchClause {
+                patterns: vec![],
+                path_var: None,
+            },
             where_clause: None,
             return_clause: ReturnClause {
                 items: vec![],
@@ -1115,9 +1129,15 @@ mod tests {
     fn gql_statement_wraps_query() {
         let q = GqlQuery {
             unwind_clause: None,
-            match_clause: MatchClause { patterns: vec![], path_var: None },
+            match_clause: MatchClause {
+                patterns: vec![],
+                path_var: None,
+            },
             where_clause: None,
-            return_clause: ReturnClause { items: vec![], distinct: false },
+            return_clause: ReturnClause {
+                items: vec![],
+                distinct: false,
+            },
             group_by: None,
             order_by: None,
             limit: None,
@@ -1181,7 +1201,9 @@ mod tests {
             prop: "age".into(),
             value: Expr::Literal(Literal::Int(30)),
         };
-        let sc = SetClause { assignments: vec![asgn] };
+        let sc = SetClause {
+            assignments: vec![asgn],
+        };
         assert_eq!(sc.assignments.len(), 1);
         assert!(matches!(
             &sc.assignments[0],
@@ -1191,7 +1213,10 @@ mod tests {
 
     #[test]
     fn delete_clause_detach_flag() {
-        let dc = DeleteClause { detach: true, vars: vec!["n".into()] };
+        let dc = DeleteClause {
+            detach: true,
+            vars: vec!["n".into()],
+        };
         assert!(dc.detach);
         assert_eq!(dc.vars, vec!["n"]);
     }
@@ -1223,7 +1248,10 @@ mod tests {
         let mc = MutationClause::Set(set);
         assert!(matches!(mc, MutationClause::Set(_)));
 
-        let dc = MutationClause::Delete(DeleteClause { detach: false, vars: vec![] });
+        let dc = MutationClause::Delete(DeleteClause {
+            detach: false,
+            vars: vec![],
+        });
         assert!(matches!(dc, MutationClause::Delete(_)));
 
         let merge = MutationClause::Merge(MergeClause {
@@ -1336,7 +1364,10 @@ mod tests {
         assert!(!q.distinct);
         assert!(q.limit.is_none());
         assert!(q.skip.is_none());
-        assert!(matches!(GqlStatement::ConstReturn(q), GqlStatement::ConstReturn(_)));
+        assert!(matches!(
+            GqlStatement::ConstReturn(q),
+            GqlStatement::ConstReturn(_)
+        ));
     }
 
     // ── DDL AST (3c Task 1) ─────────────────────────────────────────────────

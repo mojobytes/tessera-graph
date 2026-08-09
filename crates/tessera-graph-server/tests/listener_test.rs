@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Integration tests for [`TesseraListener`].
 
@@ -9,6 +9,7 @@ use std::time::Duration;
 
 #[cfg(feature = "plain-tcp")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 
 #[cfg(feature = "plain-tcp")]
 use tessera_graph_protocol::bolt_message::{BoltRequest, BoltResponse};
@@ -339,7 +340,11 @@ async fn serve_plain_create_and_query_through_tcp() {
     }
 
     // MATCH — `db_handle` already bound, no rebind needed.
-    tcp_send(&mut cw, &common::run_message("MATCH (n:City) RETURN n.name")).await;
+    tcp_send(
+        &mut cw,
+        &common::run_message("MATCH (n:City) RETURN n.name"),
+    )
+    .await;
     let match_resp = tcp_recv(&mut cr).await;
     assert!(
         matches!(match_resp, BoltResponse::Success { .. }),
@@ -406,12 +411,12 @@ async fn serve_tls_rejects_plain_client() {
     let key_pem = key_pair.serialize_pem();
 
     // Build rustls ServerConfig.
-    let certs = rustls_pemfile::certs(&mut cert_pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .unwrap();
-    let key = rustls_pemfile::private_key(&mut key_pem.as_bytes())
-        .unwrap()
-        .unwrap();
+    let certs =
+        tokio_rustls::rustls::pki_types::CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+    let key =
+        tokio_rustls::rustls::pki_types::PrivateKeyDer::from_pem_slice(key_pem.as_bytes()).unwrap();
 
     let tls_config = Arc::new(
         tokio_rustls::rustls::ServerConfig::builder()
@@ -432,7 +437,7 @@ async fn serve_tls_rejects_plain_client() {
     let auth = components.auth;
     let auth_store = components.auth_store;
     let registry = components.registry;
-    let _tmp = components.tmp;
+    let tmp_guard = components.tmp;
     let rate_limiter = tessera_graph_server::rate_limiter::RateLimiter::new(64, 0, 0);
     // Montaje público: ni gestor de pago ni despachador de pago. El oyente
     // recibe el gestor por su interfaz y no distingue cuál le dan.
@@ -482,15 +487,19 @@ async fn serve_tls_rejects_plain_client() {
         .await;
         match result {
             Ok(Ok(n)) if n > 0 => total += n, // got some bytes (TLS alert)
-            _ => break,                        // EOF, I/O error, or timeout
+            _ => break,                       // EOF, I/O error, or timeout
         }
     }
     // Whatever we received should NOT be a valid Bolt version response.
     // A valid response is [0x00, 0x00, 0x04, 0x04].
     let is_bolt = total >= 4 && buf[..4] == [0x00, 0x00, 0x04, 0x04];
-    assert!(!is_bolt, "plain TCP client should not get a valid Bolt handshake");
+    assert!(
+        !is_bolt,
+        "plain TCP client should not get a valid Bolt handshake"
+    );
 
     let _ = shutdown_tx.send(true);
+    drop(tmp_guard);
 }
 
 // ── Task 5 Cycle 4: connection-IP cap E2E ────────────────────────────────────
@@ -545,7 +554,11 @@ async fn open_bolt_session(
     };
     let data = tessera_graph_protocol::encode_request(&hello).unwrap();
     cw.write_message(&data).await.unwrap();
-    let resp_data = cr.read_message().await.unwrap().expect("expected HELLO reply");
+    let resp_data = cr
+        .read_message()
+        .await
+        .unwrap()
+        .expect("expected HELLO reply");
     let resp = tessera_graph_protocol::decode_response(&resp_data).unwrap();
     assert!(
         matches!(resp, BoltResponse::Success { .. }),
@@ -650,12 +663,9 @@ async fn serve_plain_caps_connections_per_ip() {
     let throttle = events
         .iter()
         .find(|e| {
-            e.get("event_type").and_then(serde_json::Value::as_str)
-                == Some("connection_throttled")
+            e.get("event_type").and_then(serde_json::Value::as_str) == Some("connection_throttled")
         })
-        .unwrap_or_else(|| {
-            panic!("expected a connection_throttled audit event, got: {events:#?}")
-        });
+        .unwrap_or_else(|| panic!("expected a connection_throttled audit event, got: {events:#?}"));
     assert_eq!(
         throttle.get("cap").and_then(serde_json::Value::as_u64),
         Some(2),

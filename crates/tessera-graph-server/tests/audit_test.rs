@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! `AuditSink` + event + rotation tests.
 
@@ -8,8 +8,8 @@ use std::time::Duration;
 use tokio::sync::watch;
 
 use tessera_graph_server::audit::{
-    AdminAction, AuditOutcome, AuditSink, AuthFailureReason, CloseReason,
-    DatabaseOptionsAudit, GrantChangeAction, QueryOutcome,
+    AdminAction, AuditOutcome, AuditSink, AuthFailureReason, CloseReason, DatabaseOptionsAudit,
+    GrantChangeAction, QueryOutcome,
 };
 
 fn parse_line(line: &str) -> serde_json::Value {
@@ -58,15 +58,21 @@ async fn file_sink_emits_one_json_per_line() {
     for line in &lines {
         let v = parse_line(line);
         assert!(
-            v.get("timestamp").and_then(serde_json::Value::as_str).is_some(),
+            v.get("timestamp")
+                .and_then(serde_json::Value::as_str)
+                .is_some(),
             "timestamp present in {line}"
         );
         assert!(
-            v.get("event_type").and_then(serde_json::Value::as_str).is_some(),
+            v.get("event_type")
+                .and_then(serde_json::Value::as_str)
+                .is_some(),
             "event_type present in {line}"
         );
         assert!(
-            v.get("connection_id").and_then(serde_json::Value::as_u64).is_some(),
+            v.get("connection_id")
+                .and_then(serde_json::Value::as_u64)
+                .is_some(),
             "connection_id present in {line}"
         );
         assert!(v.get("details").is_some(), "details present in {line}");
@@ -204,7 +210,10 @@ async fn database_created_event_serialises_success_with_options() {
     assert_eq!(v["user"].as_str(), Some("admin"));
     assert_eq!(v["connection_id"].as_u64(), Some(42));
     assert_eq!(v["details"]["name"].as_str(), Some("plantA"));
-    assert_eq!(v["details"]["options"]["max_size_bytes"].as_u64(), Some(1_048_576));
+    assert_eq!(
+        v["details"]["options"]["max_size_bytes"].as_u64(),
+        Some(1_048_576)
+    );
     assert_eq!(v["details"]["options"]["max_connections"].as_u64(), Some(8));
     assert_eq!(v["details"]["outcome"].as_str(), Some("success"));
 }

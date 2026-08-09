@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
-pub mod record;
 pub mod reader;
+pub mod record;
 pub mod writer;

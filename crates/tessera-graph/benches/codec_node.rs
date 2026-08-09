@@ -1,9 +1,7 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use tessera_graph::storage::codec::node_codec::{
-    decode_node_slot, encode_node_slot, label_hash,
-};
+use tessera_graph::storage::codec::node_codec::{decode_node_slot, encode_node_slot, label_hash};
 use tessera_graph::{Node, NodeId, Properties, Property};
 
 fn make_node(id: u64, label: &str, props: Properties) -> Node {

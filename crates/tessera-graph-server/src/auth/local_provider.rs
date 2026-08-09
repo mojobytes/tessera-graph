@@ -20,8 +20,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use super::{AuthError, AuthOutcome, AuthProvider, SecretString, UserStore, verify_password};
 use super::system_graph::DUMMY_HASH;
+use super::{AuthError, AuthOutcome, AuthProvider, SecretString, UserStore, verify_password};
 
 /// Authenticates username/password logins against a [`UserStore`].
 ///

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::{Graph, NodeId, Properties, Property};
 
@@ -33,7 +33,8 @@ pub fn star_graph(degree: usize) -> (Graph, NodeId) {
     let center = g.add_node("Center", Properties::new()).unwrap();
     for _ in 0..degree {
         let leaf = g.add_node("Leaf", Properties::new()).unwrap();
-        g.add_edge("CONNECTS", center, leaf, Properties::new()).unwrap();
+        g.add_edge("CONNECTS", center, leaf, Properties::new())
+            .unwrap();
     }
     (g, center)
 }
@@ -44,7 +45,8 @@ pub fn reverse_star_graph(degree: usize) -> (Graph, NodeId) {
     let center = g.add_node("Center", Properties::new()).unwrap();
     for _ in 0..degree {
         let leaf = g.add_node("Leaf", Properties::new()).unwrap();
-        g.add_edge("CONNECTS", leaf, center, Properties::new()).unwrap();
+        g.add_edge("CONNECTS", leaf, center, Properties::new())
+            .unwrap();
     }
     (g, center)
 }
@@ -64,7 +66,8 @@ pub fn chain_graph_with_ids(n: usize) -> (Graph, Vec<NodeId>) {
         ids.push(g.add_node("N", Properties::new()).unwrap());
     }
     for pair in ids.windows(2) {
-        g.add_edge("NEXT", pair[0], pair[1], Properties::new()).unwrap();
+        g.add_edge("NEXT", pair[0], pair[1], Properties::new())
+            .unwrap();
     }
     (g, ids)
 }
@@ -80,8 +83,10 @@ pub fn binary_tree_graph(depth: usize) -> (Graph, NodeId) {
         for &parent in &level {
             let left = g.add_node("N", Properties::new()).unwrap();
             let right = g.add_node("N", Properties::new()).unwrap();
-            g.add_edge("CHILD", parent, left, Properties::new()).unwrap();
-            g.add_edge("CHILD", parent, right, Properties::new()).unwrap();
+            g.add_edge("CHILD", parent, left, Properties::new())
+                .unwrap();
+            g.add_edge("CHILD", parent, right, Properties::new())
+                .unwrap();
             next_level.push(left);
             next_level.push(right);
         }
@@ -107,10 +112,12 @@ pub fn grid_graph(rows: usize, cols: usize) -> (Graph, Vec<Vec<NodeId>>) {
     for r in 0..rows {
         for c in 0..cols {
             if c + 1 < cols {
-                g.add_edge("RIGHT", matrix[r][c], matrix[r][c + 1], Properties::new()).unwrap();
+                g.add_edge("RIGHT", matrix[r][c], matrix[r][c + 1], Properties::new())
+                    .unwrap();
             }
             if r + 1 < rows {
-                g.add_edge("DOWN", matrix[r][c], matrix[r + 1][c], Properties::new()).unwrap();
+                g.add_edge("DOWN", matrix[r][c], matrix[r + 1][c], Properties::new())
+                    .unwrap();
             }
         }
     }

@@ -1,13 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! A `GraphAccess` delegating wrapper for testing that builders work with non-`Graph` types.
 //!
 //! `DelegatingGraph` wraps a real `Graph` but goes through the trait interface,
 //! proving that any `G: GraphAccess` can substitute `Graph` in query builders.
 
-use tessera_graph::{
-    Edge, EdgeId, Graph, GraphAccess, Node, NodeId, Properties, Result,
-};
+use tessera_graph::{Edge, EdgeId, Graph, GraphAccess, Node, NodeId, Properties, Result};
 
 /// A thin wrapper around [`Graph`] that implements [`GraphAccess`].
 ///

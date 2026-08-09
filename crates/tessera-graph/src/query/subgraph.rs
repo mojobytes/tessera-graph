@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashSet;
 
@@ -31,19 +31,19 @@ impl Subgraph {
 
     /// Returns the number of nodes.
     #[must_use]
-    pub fn node_count(&self) -> usize {
+    pub const fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
     /// Returns the number of edges.
     #[must_use]
-    pub fn edge_count(&self) -> usize {
+    pub const fn edge_count(&self) -> usize {
         self.edges.len()
     }
 
     /// Returns `true` if the subgraph contains no nodes.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 }
@@ -125,8 +125,7 @@ impl<'g, G: GraphAccess + ?Sized> SubgraphQuery<'g, G> {
         }
 
         // Build a traversal with the same filters.
-        let mut traversal = TraversalBuilder::new(self.graph, self.start)
-            .direction(self.direction);
+        let mut traversal = TraversalBuilder::new(self.graph, self.start).direction(self.direction);
 
         if let Some(ref label) = self.label_filter {
             traversal = traversal.label(label.clone());

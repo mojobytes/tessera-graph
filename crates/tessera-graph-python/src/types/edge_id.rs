@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 
 /// An edge identifier wrapping a `u64`.
-#[pyclass(name = "EdgeId", frozen, eq, hash)]
+#[pyclass(name = "EdgeId", frozen, eq, hash, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PyEdgeId {
     pub(crate) value: u64,

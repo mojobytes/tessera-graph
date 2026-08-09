@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! GQL query execution and validation for the Python bridge.
 
 use std::collections::HashMap;
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyKeyError;
+use pyo3::prelude::*;
 
 use crate::errors::to_py_err;
 use crate::graph::PyGraph;
@@ -24,7 +24,7 @@ pub fn execute(py: Python<'_>, graph: &PyGraph, query: &str) -> PyResult<PyGqlRe
     let py_rows: Vec<PyGqlRow> = rows
         .into_iter()
         .map(|row| {
-            let inner: HashMap<String, PyObject> = row
+            let inner: HashMap<String, Py<PyAny>> = row
                 .into_iter()
                 .map(|(k, v)| (k, gql_value_to_py(py, &v)))
                 .collect();
@@ -81,7 +81,9 @@ impl PyGqlResult {
         let len = self.rows.len() as isize;
         let idx = if index < 0 { len + index } else { index };
         if idx < 0 || idx >= len {
-            return Err(pyo3::exceptions::PyIndexError::new_err("row index out of range"));
+            return Err(pyo3::exceptions::PyIndexError::new_err(
+                "row index out of range",
+            ));
         }
         Ok(self.rows[idx as usize].clone())
     }
@@ -114,7 +116,9 @@ pub struct PyGqlResultIter {
 
 #[pymethods]
 impl PyGqlResultIter {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> { slf }
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
 
     fn __next__(&mut self) -> Option<PyGqlRow> {
         if self.index < self.rows.len() {
@@ -128,22 +132,26 @@ impl PyGqlResultIter {
 }
 
 /// A single result row: column name → Python value.
-#[pyclass(name = "GqlRow", frozen)]
+#[pyclass(name = "GqlRow", frozen, from_py_object)]
 pub struct PyGqlRow {
-    inner: HashMap<String, PyObject>,
+    inner: HashMap<String, Py<PyAny>>,
 }
 
 impl Clone for PyGqlRow {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| Self {
-            inner: self.inner.iter().map(|(k, v)| (k.clone(), v.clone_ref(py))).collect(),
+        Python::attach(|py| Self {
+            inner: self
+                .inner
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone_ref(py)))
+                .collect(),
         })
     }
 }
 
 #[pymethods]
 impl PyGqlRow {
-    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<PyObject> {
+    fn __getitem__(&self, py: Python<'_>, key: &str) -> PyResult<Py<PyAny>> {
         self.inner
             .get(key)
             .map(|v| v.clone_ref(py))
@@ -162,7 +170,7 @@ impl PyGqlRow {
 }
 
 /// Summary of mutations applied (currently unused — reserved for future mutation support).
-#[pyclass(name = "GqlMutationResult", frozen)]
+#[pyclass(name = "GqlMutationResult", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyGqlMutationResult {
     #[pyo3(get)]
@@ -180,24 +188,37 @@ pub struct PyGqlMutationResult {
 // ── Value conversion ────────────────────────────────────────────────────────
 
 /// Converts a `GqlValue` to a native Python object.
-fn gql_value_to_py(py: Python<'_>, val: &tessera_graph::GqlValue) -> PyObject {
+fn gql_value_to_py(py: Python<'_>, val: &tessera_graph::GqlValue) -> Py<PyAny> {
     use tessera_graph::GqlValue;
     match val {
         GqlValue::Null => py.None(),
-        GqlValue::Bool(b) => b.into_pyobject(py).expect("bool to py").to_owned().into_any().unbind(),
+        GqlValue::Bool(b) => b
+            .into_pyobject(py)
+            .expect("bool to py")
+            .to_owned()
+            .into_any()
+            .unbind(),
         GqlValue::Int(i) => i.into_pyobject(py).expect("int to py").into_any().unbind(),
-        GqlValue::Float(f) => f.into_pyobject(py).expect("float to py").into_any().unbind(),
+        GqlValue::Float(f) => f
+            .into_pyobject(py)
+            .expect("float to py")
+            .into_any()
+            .unbind(),
         GqlValue::Str(s) => s.into_pyobject(py).expect("str to py").into_any().unbind(),
         GqlValue::List(items) => {
-            let py_items: Vec<PyObject> = items.iter().map(|v| gql_value_to_py(py, v)).collect();
-            pyo3::types::PyList::new(py, &py_items).expect("list to py").into_any().unbind()
+            let py_items: Vec<Py<PyAny>> = items.iter().map(|v| gql_value_to_py(py, v)).collect();
+            pyo3::types::PyList::new(py, &py_items)
+                .expect("list to py")
+                .into_any()
+                .unbind()
         }
         GqlValue::Map(entries) => {
             // A property map (e.g. `MERGE (...) RETURN n`) surfaces as a Python
             // dict, recursing on each value just like the list case.
             let dict = pyo3::types::PyDict::new(py);
             for (k, v) in entries {
-                dict.set_item(k, gql_value_to_py(py, v)).expect("dict set_item");
+                dict.set_item(k, gql_value_to_py(py, v))
+                    .expect("dict set_item");
             }
             dict.into_any().unbind()
         }
@@ -212,32 +233,42 @@ fn gql_value_to_py(py: Python<'_>, val: &tessera_graph::GqlValue) -> PyObject {
 }
 
 /// Converts a `GqlNode` to a Python dict `{id, labels, properties}`.
-fn gql_node_to_py(py: Python<'_>, n: &tessera_graph::gql::GqlNode) -> PyObject {
+fn gql_node_to_py(py: Python<'_>, n: &tessera_graph::gql::GqlNode) -> Py<PyAny> {
     let dict = pyo3::types::PyDict::new(py);
     dict.set_item("id", n.id).expect("node id");
-    dict.set_item("labels", n.labels.clone()).expect("node labels");
-    dict.set_item("properties", props_to_py(py, &n.props)).expect("node properties");
+    dict.set_item("labels", n.labels.clone())
+        .expect("node labels");
+    dict.set_item("properties", props_to_py(py, &n.props))
+        .expect("node properties");
     dict.into_any().unbind()
 }
 
 /// Converts a `GqlRelationship` to a dict `{id, type, start, end, properties}`.
-fn gql_relationship_to_py(py: Python<'_>, r: &tessera_graph::gql::GqlRelationship) -> PyObject {
+fn gql_relationship_to_py(py: Python<'_>, r: &tessera_graph::gql::GqlRelationship) -> Py<PyAny> {
     let dict = pyo3::types::PyDict::new(py);
     dict.set_item("id", r.id).expect("rel id");
     dict.set_item("type", r.rel_type.clone()).expect("rel type");
     dict.set_item("start", r.start_id).expect("rel start");
     dict.set_item("end", r.end_id).expect("rel end");
-    dict.set_item("properties", props_to_py(py, &r.props)).expect("rel properties");
+    dict.set_item("properties", props_to_py(py, &r.props))
+        .expect("rel properties");
     dict.into_any().unbind()
 }
 
 /// Converts a `GqlPath` to a dict `{nodes, relationships}` (lists of dicts).
-fn gql_path_to_py(py: Python<'_>, p: &tessera_graph::gql::GqlPath) -> PyObject {
+fn gql_path_to_py(py: Python<'_>, p: &tessera_graph::gql::GqlPath) -> Py<PyAny> {
     let dict = pyo3::types::PyDict::new(py);
-    let nodes: Vec<PyObject> = p.nodes.iter().map(|n| gql_node_to_py(py, n)).collect();
-    let rels: Vec<PyObject> = p.rels.iter().map(|r| gql_relationship_to_py(py, r)).collect();
-    dict.set_item("nodes", pyo3::types::PyList::new(py, &nodes).expect("path nodes"))
-        .expect("path nodes set");
+    let nodes: Vec<Py<PyAny>> = p.nodes.iter().map(|n| gql_node_to_py(py, n)).collect();
+    let rels: Vec<Py<PyAny>> = p
+        .rels
+        .iter()
+        .map(|r| gql_relationship_to_py(py, r))
+        .collect();
+    dict.set_item(
+        "nodes",
+        pyo3::types::PyList::new(py, &nodes).expect("path nodes"),
+    )
+    .expect("path nodes set");
     dict.set_item(
         "relationships",
         pyo3::types::PyList::new(py, &rels).expect("path rels"),
@@ -250,10 +281,11 @@ fn gql_path_to_py(py: Python<'_>, p: &tessera_graph::gql::GqlPath) -> PyObject {
 fn props_to_py(
     py: Python<'_>,
     props: &std::collections::HashMap<String, tessera_graph::GqlValue>,
-) -> PyObject {
+) -> Py<PyAny> {
     let dict = pyo3::types::PyDict::new(py);
     for (k, v) in props {
-        dict.set_item(k, gql_value_to_py(py, v)).expect("prop set_item");
+        dict.set_item(k, gql_value_to_py(py, v))
+            .expect("prop set_item");
     }
     dict.into_any().unbind()
 }

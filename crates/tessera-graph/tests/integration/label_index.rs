@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashSet;
 
-use tessera_graph::{Graph, GraphConfig, NodeId, EdgeId, props};
+use tessera_graph::{EdgeId, Graph, GraphConfig, NodeId, props};
 
 // ── In-memory label index tests ──────────────────────────────────────
 
@@ -252,14 +252,22 @@ fn update_edge_label_updates_index() {
 fn label_index_insert_throughput_regression_guard() {
     let mut g = Graph::new();
     let labels = ["Person", "Device", "Location", "Event", "Resource"];
-    let start = std::time::Instant::now();
-    for i in 0..10_000_usize {
+    let first_start = std::time::Instant::now();
+    for i in 0..5_000_usize {
         g.add_node(labels[i % labels.len()], props! {}).unwrap();
     }
-    let elapsed = start.elapsed();
-    // In debug mode, < 2 seconds is conservative for 10k inserts.
+    let first_half = first_start.elapsed();
+    let second_start = std::time::Instant::now();
+    for i in 5_000..10_000_usize {
+        g.add_node(labels[i % labels.len()], props! {}).unwrap();
+    }
+    let second_half = second_start.elapsed();
+    let ratio = second_half.as_secs_f64() / first_half.as_secs_f64().max(f64::EPSILON);
+    // Equal-sized halves should cost roughly the same. Super-linear index
+    // maintenance makes the second half grow disproportionately.
     assert!(
-        elapsed.as_secs() < 2,
-        "label index insert regression: {elapsed:?} for 10k nodes"
+        ratio < 3.0,
+        "label index insert scaling regression: ratio {ratio:.2} \
+         (first 5k {first_half:?}, second 5k {second_half:?})"
     );
 }

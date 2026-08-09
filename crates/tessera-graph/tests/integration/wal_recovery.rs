@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
-use tessera_graph::{Graph, GraphConfig, Properties, WalRecord, WalWriter, props};
 use tempfile::TempDir;
+use tessera_graph::{Graph, GraphConfig, Properties, WalRecord, WalWriter, props};
 
 const fn wal_config() -> GraphConfig {
     GraphConfig {
@@ -37,7 +37,11 @@ fn data_survives_simulated_crash_add_node() {
     // Session 2: reopen — WAL recovery should restore the node.
     {
         let g = Graph::open(tmp.path(), &config).unwrap();
-        assert_eq!(g.node_count(), 1, "node should survive crash via WAL recovery");
+        assert_eq!(
+            g.node_count(),
+            1,
+            "node should survive crash via WAL recovery"
+        );
         let node = g.node(node_id).unwrap();
         assert_eq!(node.label(), "Person");
     }
@@ -53,7 +57,8 @@ fn data_survives_simulated_crash_add_edge() {
         let mut g = Graph::open(tmp.path(), &config).unwrap();
         nid_a = g.add_node("A", Properties::new()).unwrap();
         nid_b = g.add_node("B", Properties::new()).unwrap();
-        g.add_edge("KNOWS", nid_a, nid_b, Properties::new()).unwrap();
+        g.add_edge("KNOWS", nid_a, nid_b, Properties::new())
+            .unwrap();
         crash_graph(g);
     }
 
@@ -87,7 +92,11 @@ fn tombstone_survives_crash() {
 
     {
         let g = Graph::open(tmp.path(), &config).unwrap();
-        assert_eq!(g.node_count(), 0, "tombstone should survive crash via WAL recovery");
+        assert_eq!(
+            g.node_count(),
+            0,
+            "tombstone should survive crash via WAL recovery"
+        );
     }
 }
 
@@ -133,7 +142,10 @@ fn partial_wal_record_at_end_is_ignored() {
     {
         let g = Graph::open(tmp.path(), &config).unwrap();
         // At least some data should be recovered (the first node).
-        assert!(g.node_count() >= 1, "at least first node should survive partial WAL");
+        assert!(
+            g.node_count() >= 1,
+            "at least first node should survive partial WAL"
+        );
     }
 }
 
@@ -167,7 +179,11 @@ fn multiple_crash_recovery_cycles_preserve_data() {
     // Final verification.
     {
         let g = Graph::open(tmp.path(), &config).unwrap();
-        assert_eq!(g.node_count(), 3, "all three nodes should exist after multi-cycle");
+        assert_eq!(
+            g.node_count(),
+            3,
+            "all three nodes should exist after multi-cycle"
+        );
     }
 }
 
@@ -206,7 +222,9 @@ fn overflow_properties_survive_crash() {
     let node_id;
     {
         let mut g = Graph::open(tmp.path(), &config).unwrap();
-        node_id = g.add_node("Node", props! { "data" => big_value.as_str() }).unwrap();
+        node_id = g
+            .add_node("Node", props! { "data" => big_value.as_str() })
+            .unwrap();
         crash_graph(g);
     }
 
@@ -215,7 +233,10 @@ fn overflow_properties_survive_crash() {
         assert_eq!(g.node_count(), 1);
         let node = g.node(node_id).unwrap();
         assert_eq!(node.label(), "Node");
-        assert_eq!(node.properties().get("data").unwrap().to_string(), big_value);
+        assert_eq!(
+            node.properties().get("data").unwrap().to_string(),
+            big_value
+        );
     }
 }
 
@@ -241,9 +262,7 @@ fn corrupt_middle_wal_record_does_not_lose_subsequent_data() {
         let mut data = std::fs::read(&wal_path).unwrap();
         assert!(data.len() > 10, "WAL should contain records for B and C");
         // The first record's length is in the first 4 bytes (LE u32).
-        let first_record_len = u32::from_le_bytes(
-            data[0..4].try_into().unwrap(),
-        ) as usize;
+        let first_record_len = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
         let total_first_record = 4 + first_record_len;
         // Zero out the entire first record (not just flip the CRC) because
         // zeroing prevents false-positive decodes: a zeroed length field (0)
@@ -264,7 +283,10 @@ fn corrupt_middle_wal_record_does_not_lose_subsequent_data() {
         // Node A was flushed before crash — always survives.
         assert!(g.node_exists(nid_a), "node A was flushed, must survive");
         // Node C should be recovered from the WAL despite B's record being corrupt.
-        assert!(g.node_exists(nid_c), "node C should survive via forward-scanning");
+        assert!(
+            g.node_exists(nid_c),
+            "node C should survive via forward-scanning"
+        );
         assert!(g.node_count() >= 2, "at least nodes A and C should exist");
         let node_c = g.node(nid_c).unwrap();
         assert_eq!(node_c.label(), "Third");
@@ -334,7 +356,10 @@ fn checkpoint_mid_wal_does_not_discard_subsequent_records() {
     {
         let g = Graph::open(tmp.path(), &config).unwrap();
         assert!(g.node_exists(nid_a), "nid_a was flushed to disk pages");
-        assert!(g.node_exists(nid_b), "nid_b must survive post-Checkpoint WAL records");
+        assert!(
+            g.node_exists(nid_b),
+            "nid_b must survive post-Checkpoint WAL records"
+        );
         assert_eq!(g.node(nid_b).unwrap().label(), "After");
     }
 }
@@ -362,11 +387,19 @@ fn wal_recovery_lazy_adj_pages_survive_crash() {
         assert_eq!(g.edge_count(), 1, "edge must survive crash via WAL");
 
         let out = g.outgoing_edges(nid_a).unwrap();
-        assert_eq!(out.len(), 1, "source node must have 1 outgoing edge after recovery");
+        assert_eq!(
+            out.len(),
+            1,
+            "source node must have 1 outgoing edge after recovery"
+        );
         assert_eq!(out[0].id(), eid, "recovered outgoing edge id must match");
 
         let inc = g.incoming_edges(nid_b).unwrap();
-        assert_eq!(inc.len(), 1, "target node must have 1 incoming edge after recovery");
+        assert_eq!(
+            inc.len(),
+            1,
+            "target node must have 1 incoming edge after recovery"
+        );
         assert_eq!(inc[0].id(), eid, "recovered incoming edge id must match");
     }
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Shared seeding helpers for `admin databases` / `admin grants`
 //! integration tests. Each test still owns its own `tempfile::TempDir`

@@ -5,7 +5,18 @@ Parameters
 Licensor:             BelowZero Security OU (tesseradb.io)
 Licensed Work:        tessera-graph-server
                       The Licensed Work is (c) 2026 BelowZero Security OU.
-Additional Use Grant: None.
+Additional Use Grant: You may use the Licensed Work in production solely for
+                      your internal business purposes, provided that you do
+                      not, without a separate commercial agreement with the
+                      Licensor:
+
+                      (a) embed, distribute or make the Licensed Work
+                          available to third parties as part of a product;
+                      (b) host or offer the Licensed Work to third parties as
+                          a database-as-a-service or substantially similar
+                          managed service; or
+                      (c) use the Licensed Work to create or offer a product
+                          or service that competes with the Licensed Work.
 Change Date:          Four years from the date each version of the Licensed
                       Work is first made publicly available.
 Change License:       Apache License, Version 2.0

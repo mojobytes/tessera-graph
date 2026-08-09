@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! DDL-statement parser — runs before the regular GQL parser so
 //! `CREATE INDEX`, `DROP INDEX`, `CREATE CONSTRAINT`, `DROP CONSTRAINT`,
@@ -10,8 +10,8 @@
 //! Both legacy (`CREATE INDEX ON :L(p)`) and modern
 //! (`CREATE INDEX FOR (n:L) ON (n.p)`) index syntaxes are supported.
 
-use tessera_graph::gql::DdlStatement;
 use tessera_graph::Result;
+use tessera_graph::gql::DdlStatement;
 
 use crate::parse_util::{strip_ci, strip_ci_ws, syntax_err};
 
@@ -280,38 +280,58 @@ mod tests {
 
     #[test]
     fn parse_alter_label_set_append_only() {
-        let stmt = try_parse_ddl("ALTER LABEL :Event SET APPEND ONLY").unwrap().unwrap();
+        let stmt = try_parse_ddl("ALTER LABEL :Event SET APPEND ONLY")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "Event".to_owned(), on: true }
+            DdlStatement::SetLabelAppendOnly {
+                label: "Event".to_owned(),
+                on: true
+            }
         );
     }
 
     #[test]
     fn parse_alter_label_remove_append_only() {
-        let stmt = try_parse_ddl("ALTER LABEL :Event REMOVE APPEND ONLY").unwrap().unwrap();
+        let stmt = try_parse_ddl("ALTER LABEL :Event REMOVE APPEND ONLY")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "Event".to_owned(), on: false }
+            DdlStatement::SetLabelAppendOnly {
+                label: "Event".to_owned(),
+                on: false
+            }
         );
     }
 
     #[test]
     fn parse_alter_label_accepts_semicolon_and_mixed_case() {
-        let stmt = try_parse_ddl("alter label :AuditEvent set append only;").unwrap().unwrap();
+        let stmt = try_parse_ddl("alter label :AuditEvent set append only;")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "AuditEvent".to_owned(), on: true }
+            DdlStatement::SetLabelAppendOnly {
+                label: "AuditEvent".to_owned(),
+                on: true
+            }
         );
     }
 
     #[test]
     fn parse_alter_label_accepts_label_without_colon() {
         // The colon is idiomatic Cypher but the label is unambiguous without it.
-        let stmt = try_parse_ddl("ALTER LABEL Event SET APPEND ONLY").unwrap().unwrap();
+        let stmt = try_parse_ddl("ALTER LABEL Event SET APPEND ONLY")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "Event".to_owned(), on: true }
+            DdlStatement::SetLabelAppendOnly {
+                label: "Event".to_owned(),
+                on: true
+            }
         );
     }
 
@@ -373,26 +393,41 @@ mod tests {
 
     #[test]
     fn label_containing_the_action_keyword_parses_correctly() {
-        let stmt = try_parse_ddl("ALTER LABEL :SetPoint SET APPEND ONLY").unwrap().unwrap();
+        let stmt = try_parse_ddl("ALTER LABEL :SetPoint SET APPEND ONLY")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "SetPoint".to_owned(), on: true },
+            DdlStatement::SetLabelAppendOnly {
+                label: "SetPoint".to_owned(),
+                on: true
+            },
             "a label starting with SET must not be mistaken for the keyword"
         );
 
-        let stmt = try_parse_ddl("ALTER LABEL :RemoveMe REMOVE APPEND ONLY").unwrap().unwrap();
+        let stmt = try_parse_ddl("ALTER LABEL :RemoveMe REMOVE APPEND ONLY")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "RemoveMe".to_owned(), on: false }
+            DdlStatement::SetLabelAppendOnly {
+                label: "RemoveMe".to_owned(),
+                on: false
+            }
         );
     }
 
     #[test]
     fn extra_whitespace_around_the_action_is_tolerated() {
-        let stmt = try_parse_ddl("ALTER LABEL :Event  SET  APPEND ONLY").unwrap().unwrap();
+        let stmt = try_parse_ddl("ALTER LABEL :Event  SET  APPEND ONLY")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::SetLabelAppendOnly { label: "Event".to_owned(), on: true }
+            DdlStatement::SetLabelAppendOnly {
+                label: "Event".to_owned(),
+                on: true
+            }
         );
     }
 
@@ -413,21 +448,32 @@ mod tests {
     fn a_node_pattern_starting_with_alter_is_not_ddl() {
         // Defence against over-eager prefix matching: `ALTER` only introduces
         // DDL when followed by LABEL.
-        assert!(try_parse_ddl("MATCH (n:Alteration) RETURN n").unwrap().is_none());
+        assert!(
+            try_parse_ddl("MATCH (n:Alteration) RETURN n")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn parse_create_index_legacy() {
-        let stmt = try_parse_ddl("CREATE INDEX ON :Person(id)").unwrap().unwrap();
+        let stmt = try_parse_ddl("CREATE INDEX ON :Person(id)")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::CreateIndexLegacy { label: "Person".to_owned(), prop: "id".to_owned() }
+            DdlStatement::CreateIndexLegacy {
+                label: "Person".to_owned(),
+                prop: "id".to_owned()
+            }
         );
     }
 
     #[test]
     fn parse_create_index_legacy_semicolon() {
-        let stmt = try_parse_ddl("CREATE INDEX ON :AssetNode(organizationId);").unwrap().unwrap();
+        let stmt = try_parse_ddl("CREATE INDEX ON :AssetNode(organizationId);")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
             DdlStatement::CreateIndexLegacy {
@@ -439,10 +485,15 @@ mod tests {
 
     #[test]
     fn parse_create_index_for() {
-        let stmt = try_parse_ddl("CREATE INDEX FOR (n:Asset) ON (n.status)").unwrap().unwrap();
+        let stmt = try_parse_ddl("CREATE INDEX FOR (n:Asset) ON (n.status)")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::CreateIndexFor { label: "Asset".to_owned(), prop: "status".to_owned() }
+            DdlStatement::CreateIndexFor {
+                label: "Asset".to_owned(),
+                prop: "status".to_owned()
+            }
         );
     }
 
@@ -451,7 +502,10 @@ mod tests {
         let stmt = try_parse_ddl("DROP INDEX ON :Risk(id)").unwrap().unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::DropIndex { label: "Risk".to_owned(), prop: "id".to_owned() }
+            DdlStatement::DropIndex {
+                label: "Risk".to_owned(),
+                prop: "id".to_owned()
+            }
         );
     }
 
@@ -476,7 +530,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::DropConstraint { label: "AssetNode".to_owned(), prop: "id".to_owned() }
+            DdlStatement::DropConstraint {
+                label: "AssetNode".to_owned(),
+                prop: "id".to_owned()
+            }
         );
     }
 
@@ -506,10 +563,15 @@ mod tests {
 
     #[test]
     fn parse_create_index_case_insensitive() {
-        let stmt = try_parse_ddl("create index on :Person(id)").unwrap().unwrap();
+        let stmt = try_parse_ddl("create index on :Person(id)")
+            .unwrap()
+            .unwrap();
         assert_eq!(
             stmt,
-            DdlStatement::CreateIndexLegacy { label: "Person".to_owned(), prop: "id".to_owned() }
+            DdlStatement::CreateIndexLegacy {
+                label: "Person".to_owned(),
+                prop: "id".to_owned()
+            }
         );
     }
 

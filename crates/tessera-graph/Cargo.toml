@@ -3,11 +3,9 @@ name = "tessera-graph"
 version.workspace      = true
 edition.workspace      = true
 authors.workspace      = true
-# Community/Enterprise split: the engine is the open, embeddable library and
-# is published to crates.io under Apache-2.0 — permissive with an explicit
-# patent grant, the standard for infrastructure crates. It does NOT inherit the
-# proprietary workspace licence.
-license      = "Apache-2.0"
+# The embeddable core is the permissive adoption layer and is published as an
+# independent crate. Server-side components use BSL 1.1 separately.
+license      = "MIT"
 rust-version.workspace = true
 description = "Embeddable graph database for Rust. No server, no schema, no infrastructure."
 repository = "https://github.com/mojobytes/tessera-graph"

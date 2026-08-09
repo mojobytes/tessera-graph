@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! `PyGraph` — Python wrapper around `tessera_graph::Graph`.
 
@@ -25,7 +25,9 @@ impl PyGraph {
     #[staticmethod]
     #[pyo3(name = "new")]
     fn new_() -> Self {
-        Self { inner: Graph::new() }
+        Self {
+            inner: Graph::new(),
+        }
     }
 
     /// Opens a file-backed graph at the given path.
@@ -111,12 +113,20 @@ impl PyGraph {
 
     /// Returns all node IDs in the graph.
     fn node_ids(&self) -> Vec<PyNodeId> {
-        self.inner.node_ids().into_iter().map(PyNodeId::from).collect()
+        self.inner
+            .node_ids()
+            .into_iter()
+            .map(PyNodeId::from)
+            .collect()
     }
 
     /// Returns node IDs whose label matches exactly.
     fn nodes_by_label(&self, label: &str) -> Vec<PyNodeId> {
-        self.inner.nodes_by_label(label).into_iter().map(PyNodeId::from).collect()
+        self.inner
+            .nodes_by_label(label)
+            .into_iter()
+            .map(PyNodeId::from)
+            .collect()
     }
 
     // ── Node mutations ──────────────────────────────────────────────────
@@ -151,18 +161,28 @@ impl PyGraph {
 
     /// Returns edge IDs whose label matches exactly.
     fn edges_by_label(&self, label: &str) -> Vec<PyEdgeId> {
-        self.inner.edges_by_label(label).into_iter().map(PyEdgeId::from).collect()
+        self.inner
+            .edges_by_label(label)
+            .into_iter()
+            .map(PyEdgeId::from)
+            .collect()
     }
 
     /// Returns outgoing edges from the given node.
     fn outgoing_edges(&self, node: &PyNodeId) -> PyResult<Vec<PyEdge>> {
-        let edges = self.inner.outgoing_edges(to_node_id(node)).map_err(to_py_err)?;
+        let edges = self
+            .inner
+            .outgoing_edges(to_node_id(node))
+            .map_err(to_py_err)?;
         Ok(edges.into_iter().map(PyEdge::from).collect())
     }
 
     /// Returns incoming edges to the given node.
     fn incoming_edges(&self, node: &PyNodeId) -> PyResult<Vec<PyEdge>> {
-        let edges = self.inner.incoming_edges(to_node_id(node)).map_err(to_py_err)?;
+        let edges = self
+            .inner
+            .incoming_edges(to_node_id(node))
+            .map_err(to_py_err)?;
         Ok(edges.into_iter().map(PyEdge::from).collect())
     }
 
@@ -256,10 +276,7 @@ impl PyGraph {
     }
 
     /// Creates a subgraph extraction query.
-    fn subgraph(
-        slf: Py<Self>,
-        start: &PyNodeId,
-    ) -> crate::query::subgraph::PySubgraphQuery {
+    fn subgraph(slf: Py<Self>, start: &PyNodeId) -> crate::query::subgraph::PySubgraphQuery {
         crate::query::subgraph::PySubgraphQuery::new(slf, *start)
     }
 

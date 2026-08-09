@@ -27,9 +27,7 @@ pub use password::{
 };
 pub use secret::SecretString;
 pub use system_graph::{SystemGraphAuthProvider, SystemGraphAuthStore, UserRecord};
-pub use traits::{
-    AccessLevel, AuthError, AuthOutcome, AuthProvider, AuthStoreError, UserSummary,
-};
+pub use traits::{AccessLevel, AuthError, AuthOutcome, AuthProvider, AuthStoreError, UserSummary};
 // Los tipos de datos de permisos y catálogo se reexportan desde la interfaz que
 // los usa, no desde `traits`: allí convivían con los de autenticación, que sí
 // son Community, y un fichero público acababa describiendo la forma de las

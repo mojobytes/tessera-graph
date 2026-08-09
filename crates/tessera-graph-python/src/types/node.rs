@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -7,7 +7,7 @@ use super::node_id::PyNodeId;
 use super::properties;
 
 /// A node (vertex) snapshot from the graph.
-#[pyclass(name = "Node", frozen)]
+#[pyclass(name = "Node", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyNode {
     pub(crate) inner: tessera_graph::Node,
@@ -31,7 +31,11 @@ impl PyNode {
     }
 
     fn __repr__(&self) -> String {
-        format!("Node(id={}, label={:?})", self.inner.id().as_u64(), self.inner.label())
+        format!(
+            "Node(id={}, label={:?})",
+            self.inner.id().as_u64(),
+            self.inner.label()
+        )
     }
 
     fn __eq__(&self, other: &Self) -> bool {

@@ -4,20 +4,17 @@ build-backend = "maturin"
 
 [project]
 name = "tessera-graph"
-version = "0.1.0"
+version = "0.13.0"
 description = "Python bindings for tessera-graph — embeddable graph database."
 requires-python = ">=3.9"
-# Proprietary, all-rights-reserved. These bindings embed the TesseraGraph
-# engine in-process (they depend on the `tessera-graph` crate directly), so
-# they carry the engine's proprietary licence — NOT an open-source licence.
-# Full terms in ../tessera-graph/LICENSE. Do NOT publish under MIT/OSI.
-license = { text = "Proprietary — (c) 2026 BelowZero Security OU. All rights reserved. See LICENSE." }
+# The bindings expose the MIT-licensed embeddable core.
+license = "MIT"
 authors = [{ name = "Tessera DB", email = "info@tesseradb.io" }]
 keywords = ["graph", "database", "embedded", "property-graph"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: Other/Proprietary License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",

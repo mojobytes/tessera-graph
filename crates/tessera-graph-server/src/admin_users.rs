@@ -94,44 +94,44 @@ async fn dispatch_show_users(
     conn_id: u64,
     audit: &AuditSink,
 ) -> Result<AdminPending, (String, String)> {
-            let users = store.list_users().await.map_err(|e| {
-                let pair = (
-                    "Neo.DatabaseError.General.UnknownError".to_owned(),
-                    e.to_string(),
-                );
-                audit.admin_action(
-                    conn_id,
-                    caller_user,
-                    AdminAction::Failed {
-                        reason: format!("list_users: {e}"),
-                    },
-                );
-                pair
-            })?;
+    let users = store.list_users().await.map_err(|e| {
+        let pair = (
+            "Neo.DatabaseError.General.UnknownError".to_owned(),
+            e.to_string(),
+        );
+        audit.admin_action(
+            conn_id,
+            caller_user,
+            AdminAction::Failed {
+                reason: format!("list_users: {e}"),
+            },
+        );
+        pair
+    })?;
 
-            audit.admin_action(conn_id, caller_user, AdminAction::ShowUsers);
+    audit.admin_action(conn_id, caller_user, AdminAction::ShowUsers);
 
-            let rows: Vec<Vec<PackStreamValue>> = users
-                .into_iter()
-                .map(|u| {
-                    vec![
-                        PackStreamValue::String(u.username),
-                        PackStreamValue::Bool(u.enabled),
-                        PackStreamValue::Bool(u.is_admin),
-                        PackStreamValue::String(u.created_at),
-                    ]
-                })
-                .collect();
+    let rows: Vec<Vec<PackStreamValue>> = users
+        .into_iter()
+        .map(|u| {
+            vec![
+                PackStreamValue::String(u.username),
+                PackStreamValue::Bool(u.enabled),
+                PackStreamValue::Bool(u.is_admin),
+                PackStreamValue::String(u.created_at),
+            ]
+        })
+        .collect();
 
-            Ok(AdminPending {
-                fields_psv: vec![
-                    PackStreamValue::String("user".to_owned()),
-                    PackStreamValue::String("enabled".to_owned()),
-                    PackStreamValue::String("is_admin".to_owned()),
-                    PackStreamValue::String("created_at".to_owned()),
-                ],
-                rows,
-            })
+    Ok(AdminPending {
+        fields_psv: vec![
+            PackStreamValue::String("user".to_owned()),
+            PackStreamValue::String("enabled".to_owned()),
+            PackStreamValue::String("is_admin".to_owned()),
+            PackStreamValue::String("created_at".to_owned()),
+        ],
+        rows,
+    })
 }
 
 /// Las seis sentencias de cuentas locales, con la superficie de identidad
@@ -154,11 +154,7 @@ pub(crate) async fn dispatch_users_only(
     audit: &AuditSink,
 ) -> Result<AdminPending, (String, String)> {
     if !caller_is_admin && !is_non_admin_accessible(&stmt, caller_user) {
-        audit.admin_action(
-            conn_id,
-            caller_user,
-            AdminAction::ShowUsers,
-        );
+        audit.admin_action(conn_id, caller_user, AdminAction::ShowUsers);
         return Err((
             "Neo.ClientError.Security.Forbidden".to_owned(),
             "admin privileges required".to_owned(),
@@ -234,9 +230,7 @@ pub(crate) async fn dispatch_users_only(
             )
         }
 
-        AdminStatement::ShowUsers => {
-            dispatch_show_users(store, caller_user, conn_id, audit).await
-        }
+        AdminStatement::ShowUsers => dispatch_show_users(store, caller_user, conn_id, audit).await,
 
         other => unreachable!("dispatch_users_only con sentencia de pago: {other:?}"),
     }
@@ -300,9 +294,7 @@ pub(crate) fn map_auth_store_error(e: &AuthStoreError) -> (String, String) {
         | AuthStoreError::PasswordEmpty
         | AuthStoreError::InvalidDatabaseName { .. }
         | AuthStoreError::InvalidQuota { .. }
-        | AuthStoreError::InvalidGrant { .. } => {
-            "Neo.ClientError.Statement.ArgumentError"
-        }
+        | AuthStoreError::InvalidGrant { .. } => "Neo.ClientError.Statement.ArgumentError",
         AuthStoreError::Backend(_) => "Neo.DatabaseError.General.UnknownError",
     };
     (code.to_owned(), e.to_string())

@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::storage::codec::adjacency_codec::AdjacencyPointer;
 
@@ -99,11 +99,9 @@ impl AdjCache {
                 inner.slots.len() - 1
             } else {
                 // Ring buffer is full-sized but has None holes from remove().
-                inner
-                    .slots
-                    .iter()
-                    .position(Option::is_none)
-                    .expect("free slot must exist when count < capacity and slots.len() == capacity")
+                inner.slots.iter().position(Option::is_none).expect(
+                    "free slot must exist when count < capacity and slots.len() == capacity",
+                )
             }
         } else {
             // At capacity — clock-hand eviction.
@@ -249,7 +247,10 @@ mod tests {
 
         // Insert one more — node_id=0 should survive (recently used)
         cache.insert(99, ptr(Some(99), None));
-        assert!(cache.get(0).is_some(), "node 0 was recently used, should survive");
+        assert!(
+            cache.get(0).is_some(),
+            "node 0 was recently used, should survive"
+        );
         assert!(cache.get(99).is_some());
     }
 

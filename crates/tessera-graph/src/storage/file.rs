@@ -1,22 +1,22 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
+use crate::Error;
 use crate::error::Result;
 use crate::storage::backend::{DataFile, PageId, StorageBackend};
-use crate::storage::codec::node_codec::{SLOTS_PER_PAGE, SLOT_TOMBSTONE};
 use crate::storage::buffer_pool::BufferPool;
+use crate::storage::codec::node_codec::{SLOT_TOMBSTONE, SLOTS_PER_PAGE};
 use crate::storage::meta::GraphMeta;
 use crate::storage::page::{
-    finalize_page, finalize_page_with_lsn, magic, new_page_buf, PageBuf, PageHeader, PageType,
-    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PAGE_SIZE,
+    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PAGE_SIZE, PageBuf, PageHeader, PageType, finalize_page,
+    finalize_page_with_lsn, magic, new_page_buf,
 };
 use crate::wal::reader::WalReader;
 use crate::wal::record::WalRecord;
 use crate::wal::writer::WalWriter;
-use crate::Error;
 
 /// Configuration for opening a file-backed graph.
 #[derive(Debug, Clone)]
@@ -165,8 +165,7 @@ impl FileBackend {
         // Recalculate strings_write_offset from actual page data.
         // After recovery, meta's value may be stale.
         if needs_truncate {
-            meta.strings_write_offset =
-                Self::recalculate_strings_write_offset(&pool, &meta)?;
+            meta.strings_write_offset = Self::recalculate_strings_write_offset(&pool, &meta)?;
         }
 
         // Dirty flag without WAL recovery: previous shutdown was not clean (container
@@ -230,8 +229,7 @@ impl FileBackend {
         if self.wal_checkpoint_pending {
             return;
         }
-        let (Some(wal), Some(threshold)) =
-            (self.wal.as_ref(), self.wal_checkpoint_threshold_bytes)
+        let (Some(wal), Some(threshold)) = (self.wal.as_ref(), self.wal_checkpoint_threshold_bytes)
         else {
             return;
         };
@@ -277,6 +275,7 @@ impl FileBackend {
     /// Split from [`Self::recover_from_wal`] so that reading the journal and
     /// applying it stay separately readable; the dispatch below is long by
     /// nature — one arm per record type.
+    #[allow(clippy::too_many_lines)] // The exhaustive WAL dispatch is clearer as one auditable unit.
     fn replay_records(
         pool: &BufferPool,
         meta: &mut GraphMeta,
@@ -295,41 +294,90 @@ impl FileBackend {
 
         for record in records {
             match record {
-                WalRecord::WriteNode { lsn, page_id, slot_idx, slot, txn_id } => {
+                WalRecord::WriteNode {
+                    lsn,
+                    page_id,
+                    slot_idx,
+                    slot,
+                    txn_id,
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
                     Self::ensure_page_count(meta, DataFile::Nodes, page_id + 1);
-                    Self::replay_slot(pool, DataFile::Nodes, page_id, slot_idx, &slot,
-                        magic::NODES, PageType::Node, lsn)?;
+                    Self::replay_slot(
+                        pool,
+                        DataFile::Nodes,
+                        page_id,
+                        slot_idx,
+                        &slot,
+                        magic::NODES,
+                        PageType::Node,
+                        lsn,
+                    )?;
                     replayed += 1;
                 }
-                WalRecord::WriteEdge { lsn, page_id, slot_idx, slot, txn_id } => {
+                WalRecord::WriteEdge {
+                    lsn,
+                    page_id,
+                    slot_idx,
+                    slot,
+                    txn_id,
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
                     Self::ensure_page_count(meta, DataFile::Edges, page_id + 1);
-                    Self::replay_slot(pool, DataFile::Edges, page_id, slot_idx, &slot,
-                        magic::EDGES, PageType::Edge, lsn)?;
+                    Self::replay_slot(
+                        pool,
+                        DataFile::Edges,
+                        page_id,
+                        slot_idx,
+                        &slot,
+                        magic::EDGES,
+                        PageType::Edge,
+                        lsn,
+                    )?;
                     replayed += 1;
                 }
-                WalRecord::TombstoneNode { node_id, txn_id, .. } => {
+                WalRecord::TombstoneNode {
+                    node_id, txn_id, ..
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
-                    Self::replay_tombstone(pool, meta, DataFile::Nodes, node_id,
-                        magic::NODES, PageType::Node)?;
+                    Self::replay_tombstone(
+                        pool,
+                        meta,
+                        DataFile::Nodes,
+                        node_id,
+                        magic::NODES,
+                        PageType::Node,
+                    )?;
                     replayed += 1;
                 }
-                WalRecord::TombstoneEdge { edge_id, txn_id, .. } => {
+                WalRecord::TombstoneEdge {
+                    edge_id, txn_id, ..
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
-                    Self::replay_tombstone(pool, meta, DataFile::Edges, edge_id,
-                        magic::EDGES, PageType::Edge)?;
+                    Self::replay_tombstone(
+                        pool,
+                        meta,
+                        DataFile::Edges,
+                        edge_id,
+                        magic::EDGES,
+                        PageType::Edge,
+                    )?;
                     replayed += 1;
                 }
-                WalRecord::WriteAdjPage { page_id, data, txn_id, .. } => {
+                WalRecord::WriteAdjPage {
+                    page_id,
+                    data,
+                    txn_id,
+                    ..
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
@@ -337,7 +385,12 @@ impl FileBackend {
                     pool.put_page(DataFile::Adjacency, page_id, &data)?;
                     replayed += 1;
                 }
-                WalRecord::WriteStringPage { page_id, data, txn_id, .. } => {
+                WalRecord::WriteStringPage {
+                    page_id,
+                    data,
+                    txn_id,
+                    ..
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
@@ -345,7 +398,12 @@ impl FileBackend {
                     pool.put_page(DataFile::Strings, page_id, &data)?;
                     replayed += 1;
                 }
-                WalRecord::WriteOverflowPage { page_id, data, txn_id, .. } => {
+                WalRecord::WriteOverflowPage {
+                    page_id,
+                    data,
+                    txn_id,
+                    ..
+                } => {
                     if !is_durable(txn_id) {
                         continue;
                     }
@@ -409,12 +467,7 @@ impl FileBackend {
             );
         }
 
-        let replayed = Self::replay_records(
-            pool,
-            meta,
-            result.records,
-            &result.committed_txn_ids,
-        )?;
+        let replayed = Self::replay_records(pool, meta, result.records, &result.committed_txn_ids)?;
 
         if replayed > 0 {
             // Flush recovered pages to disk.
@@ -431,10 +484,7 @@ impl FileBackend {
     /// For each page, the header's `slot_count` field stores the number of
     /// payload bytes used on that page. The total offset is the sum across
     /// all fully-used pages plus the last page's used bytes.
-    fn recalculate_strings_write_offset(
-        pool: &BufferPool,
-        meta: &GraphMeta,
-    ) -> Result<u32> {
+    fn recalculate_strings_write_offset(pool: &BufferPool, meta: &GraphMeta) -> Result<u32> {
         let page_count = meta.strings_page_count;
         if page_count == 0 {
             return Ok(0);
@@ -561,7 +611,8 @@ impl FileBackend {
     /// yet allocated" from a real I/O error requires adding a `page_exists`
     /// predicate to `BufferPool` and is deferred to a future milestone.
     fn read_page_or_new(pool: &BufferPool, file: DataFile, page_id: u32) -> PageBuf {
-        pool.get_page(file, page_id).unwrap_or_else(|_| new_page_buf())
+        pool.get_page(file, page_id)
+            .unwrap_or_else(|_| new_page_buf())
     }
 
     /// Writes the meta page and clears the dirty flag.
@@ -1012,7 +1063,11 @@ mod tests {
         // Write through the ordinary append path until the 100-byte threshold
         // is behind us. One node record is already well past it, but loop so
         // the test does not depend on the encoded size of a single record.
-        while backend.wal.as_ref().is_some_and(|w| w.bytes_written() <= 100) {
+        while backend
+            .wal
+            .as_ref()
+            .is_some_and(|w| w.bytes_written() <= 100)
+        {
             backend
                 .wal_append(WalRecord::WriteNode {
                     lsn: 0,
@@ -1361,11 +1416,15 @@ mod tests {
 
         let mut data1 = new_page_buf();
         data1[0] = 0x11;
-        backend.write_page(DataFile::Edges, page_id, &data1).unwrap();
+        backend
+            .write_page(DataFile::Edges, page_id, &data1)
+            .unwrap();
 
         let mut data2 = new_page_buf();
         data2[0] = 0x22;
-        backend.write_page(DataFile::Edges, page_id, &data2).unwrap();
+        backend
+            .write_page(DataFile::Edges, page_id, &data2)
+            .unwrap();
 
         let read_back = backend.read_page(DataFile::Edges, page_id).unwrap();
         assert_eq!(read_back[0], 0x22);
@@ -1474,7 +1533,10 @@ mod tests {
         // Open (sets dirty), flush (clears dirty), verify on disk
         {
             let mut backend = FileBackend::open(tmp.path(), &test_config()).unwrap();
-            assert!(backend.meta().is_dirty(), "dirty flag should be set on open");
+            assert!(
+                backend.meta().is_dirty(),
+                "dirty flag should be set on open"
+            );
             backend.flush().unwrap();
         }
 
@@ -1540,20 +1602,33 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
         // Force directory init so open() below reopens rather than creates.
-        FileBackend::open(dir, &test_config()).unwrap().flush().unwrap();
+        FileBackend::open(dir, &test_config())
+            .unwrap()
+            .flush()
+            .unwrap();
 
         {
             let mut w = WalWriter::open(&dir.join("wal.log")).unwrap();
             w.append(WalRecord::Begin { lsn: 0, txn_id: 1 }).unwrap();
             w.append(WalRecord::WriteNode {
-                lsn: 0, page_id: 0, slot_idx: 0, slot: Box::new(live_node_slot()), txn_id: Some(1),
-            }).unwrap();
+                lsn: 0,
+                page_id: 0,
+                slot_idx: 0,
+                slot: Box::new(live_node_slot()),
+                txn_id: Some(1),
+            })
+            .unwrap();
             // No Commit: simulates a crash mid-transaction.
         }
 
-        let backend = FileBackend::open(dir, &GraphConfig {
-            create_if_missing: false, ..test_config()
-        }).unwrap();
+        let backend = FileBackend::open(
+            dir,
+            &GraphConfig {
+                create_if_missing: false,
+                ..test_config()
+            },
+        )
+        .unwrap();
         // The uncommitted node must NOT be in the page.
         assert_eq!(
             slot0_flags(&backend, DataFile::Nodes),
@@ -1565,20 +1640,33 @@ mod tests {
     fn recover_from_wal_replays_committed_txn_writes() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
-        FileBackend::open(dir, &test_config()).unwrap().flush().unwrap();
+        FileBackend::open(dir, &test_config())
+            .unwrap()
+            .flush()
+            .unwrap();
 
         {
             let mut w = WalWriter::open(&dir.join("wal.log")).unwrap();
             w.append(WalRecord::Begin { lsn: 0, txn_id: 1 }).unwrap();
             w.append(WalRecord::WriteNode {
-                lsn: 0, page_id: 0, slot_idx: 0, slot: Box::new(live_node_slot()), txn_id: Some(1),
-            }).unwrap();
+                lsn: 0,
+                page_id: 0,
+                slot_idx: 0,
+                slot: Box::new(live_node_slot()),
+                txn_id: Some(1),
+            })
+            .unwrap();
             w.append(WalRecord::Commit { lsn: 0, txn_id: 1 }).unwrap();
         }
 
-        let backend = FileBackend::open(dir, &GraphConfig {
-            create_if_missing: false, ..test_config()
-        }).unwrap();
+        let backend = FileBackend::open(
+            dir,
+            &GraphConfig {
+                create_if_missing: false,
+                ..test_config()
+            },
+        )
+        .unwrap();
         assert_eq!(
             slot0_flags(&backend, DataFile::Nodes),
             crate::storage::codec::node_codec::SLOT_LIVE
@@ -1591,18 +1679,31 @@ mod tests {
         // always replay — the v0.9.0 behavior for 100% of today's writes.
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
-        FileBackend::open(dir, &test_config()).unwrap().flush().unwrap();
+        FileBackend::open(dir, &test_config())
+            .unwrap()
+            .flush()
+            .unwrap();
 
         {
             let mut w = WalWriter::open(&dir.join("wal.log")).unwrap();
             w.append(WalRecord::WriteNode {
-                lsn: 0, page_id: 0, slot_idx: 0, slot: Box::new(live_node_slot()), txn_id: None,
-            }).unwrap();
+                lsn: 0,
+                page_id: 0,
+                slot_idx: 0,
+                slot: Box::new(live_node_slot()),
+                txn_id: None,
+            })
+            .unwrap();
         }
 
-        let backend = FileBackend::open(dir, &GraphConfig {
-            create_if_missing: false, ..test_config()
-        }).unwrap();
+        let backend = FileBackend::open(
+            dir,
+            &GraphConfig {
+                create_if_missing: false,
+                ..test_config()
+            },
+        )
+        .unwrap();
         assert_eq!(
             slot0_flags(&backend, DataFile::Nodes),
             crate::storage::codec::node_codec::SLOT_LIVE

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 use clap::{Parser, Subcommand};
 
@@ -121,7 +121,6 @@ pub enum AdminAction {
     /// Compute an `argon2id` PHC hash for a password. Useful for scripted bootstrap.
     Hash(HashArgs),
 }
-
 
 #[derive(Parser, Debug)]
 pub struct UsersArgs {
@@ -310,13 +309,9 @@ mod tests {
 
     #[test]
     fn parse_import_continue_on_error_flag() {
-        let cli = Cli::try_parse_from([
-            "tessera-cli",
-            "import",
-            "data.json",
-            "--continue-on-error",
-        ])
-        .unwrap(); // OK: test
+        let cli =
+            Cli::try_parse_from(["tessera-cli", "import", "data.json", "--continue-on-error"])
+                .unwrap(); // OK: test
         let Some(Command::Import(i)) = cli.command else {
             panic!("expected Import command");
         };
@@ -364,13 +359,7 @@ mod tests {
 
     #[test]
     fn parse_admin_hash_positional_password() {
-        let cli = Cli::try_parse_from([
-            "tessera-cli",
-            "admin",
-            "hash",
-            "hunter22!x",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["tessera-cli", "admin", "hash", "hunter22!x"]).unwrap();
         let Some(Command::Admin(a)) = cli.command else {
             panic!("expected Admin command");
         };
@@ -381,11 +370,9 @@ mod tests {
         assert!(!h.prompt);
     }
 
-
     #[test]
     fn parse_admin_hash_prompt_flag() {
-        let cli =
-            Cli::try_parse_from(["tessera-cli", "admin", "hash", "--prompt"]).unwrap();
+        let cli = Cli::try_parse_from(["tessera-cli", "admin", "hash", "--prompt"]).unwrap();
         let Some(Command::Admin(a)) = cli.command else {
             panic!("expected Admin");
         };
@@ -398,14 +385,8 @@ mod tests {
 
     #[test]
     fn parse_admin_hash_rejects_both_prompt_and_password() {
-        let err = Cli::try_parse_from([
-            "tessera-cli",
-            "admin",
-            "hash",
-            "hunter22!x",
-            "--prompt",
-        ])
-        .expect_err("mutually exclusive args must clash");
+        let err = Cli::try_parse_from(["tessera-cli", "admin", "hash", "hunter22!x", "--prompt"])
+            .expect_err("mutually exclusive args must clash");
         let msg = err.to_string();
         assert!(msg.contains("cannot be used with"), "got: {msg}");
     }
@@ -465,15 +446,5 @@ mod tests {
 
     // ─── admin databases ──────────────────────────────────────────────────
 
-
-
-
-
     // ─── admin grants ─────────────────────────────────────────────────────
-
-
-
-
-
-
 }

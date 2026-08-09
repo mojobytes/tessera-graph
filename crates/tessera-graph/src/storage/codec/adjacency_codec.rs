@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Adjacency page encoding.
 //!
@@ -13,12 +13,12 @@
 //! wrap first. Sites relying on this carry a short reference to this note
 //! (issue #65).
 
+use crate::Error;
 use crate::error::Result;
 use crate::storage::backend::{DataFile, PageId, StorageBackend};
 use crate::storage::page::{
-    finalize_page, magic, new_page_buf, PageType, PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE,
+    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PageType, finalize_page, magic, new_page_buf,
 };
-use crate::Error;
 
 const NO_NEXT: u32 = 0xFFFF_FFFF;
 
@@ -164,7 +164,13 @@ pub fn write_adjacency(
         buf[PAGE_HEADER_SIZE..PAGE_HEADER_SIZE + encoded.len()].copy_from_slice(&encoded);
         // Single-page: tail is the first page (derivable on read), so the
         // last_page_id field stays at its 0 placeholder. Stamp V2.
-        finalize_page(&mut buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 1);
+        finalize_page(
+            &mut buf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V2,
+            PageType::Adjacency,
+            1,
+        );
         backend.write_page(DataFile::Adjacency, page_id, &buf)?;
         return Ok(page_id);
     }
@@ -198,7 +204,13 @@ pub fn write_adjacency(
         let np_off = p + PAGE_PAYLOAD_SIZE - 4;
         buf[np_off..np_off + 4].copy_from_slice(&next_page_id.to_le_bytes());
 
-        finalize_page(&mut buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 1);
+        finalize_page(
+            &mut buf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V2,
+            PageType::Adjacency,
+            1,
+        );
         backend.write_page(DataFile::Adjacency, first_page_id, &buf)?;
     }
 
@@ -226,7 +238,13 @@ pub fn write_adjacency(
             off += 8;
         }
 
-        finalize_page(&mut buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 0);
+        finalize_page(
+            &mut buf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V2,
+            PageType::Adjacency,
+            0,
+        );
         backend.write_page(DataFile::Adjacency, current_page_id, &buf)?;
         last_written_page = current_page_id;
         current_page_id = next;
@@ -252,7 +270,13 @@ fn backpatch_last_page_id(
     let off = PAGE_HEADER_SIZE + LAST_PAGE_ID_TAIL_OFFSET;
     buf[off..off + 4].copy_from_slice(&last_page_id.to_le_bytes());
     // Re-finalize preserving magic/type; slot_count for a first page is 1.
-    finalize_page(&mut buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 1);
+    finalize_page(
+        &mut buf,
+        magic::ADJACENCY,
+        ADJ_FORMAT_V2,
+        PageType::Adjacency,
+        1,
+    );
     backend.write_page(DataFile::Adjacency, first_page_id, &buf)?;
     Ok(())
 }
@@ -317,7 +341,9 @@ pub fn read_adj_chain_state(
     // absent, so fall back to walking the chain once.
     if version >= ADJ_FORMAT_V2 {
         let last_page_id = u32::from_le_bytes(
-            payload[LAST_PAGE_ID_TAIL_OFFSET..LAST_PAGE_ID_TAIL_OFFSET + 4].try_into().unwrap(),
+            payload[LAST_PAGE_ID_TAIL_OFFSET..LAST_PAGE_ID_TAIL_OFFSET + 4]
+                .try_into()
+                .unwrap(),
         );
         return Ok(state_after_append(first_page_id, last_page_id, total_edges));
     }
@@ -325,8 +351,7 @@ pub fn read_adj_chain_state(
     // V1 (legacy) fallback: the field is absent, so walk to the last page. Any
     // subsequent append rewrites the first page as V2, migrating it lazily.
     debug_assert_eq!(version, ADJ_FORMAT_V1, "unexpected adjacency page version");
-    let mut next_page =
-        u32::from_le_bytes(payload[PAGE_PAYLOAD_SIZE - 4..].try_into().unwrap());
+    let mut next_page = u32::from_le_bytes(payload[PAGE_PAYLOAD_SIZE - 4..].try_into().unwrap());
     let mut last_page_id = first_page_id;
     let mut edges_accounted = first_page_edges_for_version(version);
 
@@ -357,7 +382,11 @@ pub fn read_adj_chain_state(
 /// Pure arithmetic over the page-capacity constants — no page reads — so callers
 /// can cache the post-append tail without re-walking the chain. Mirrors what
 /// `read_adj_chain_state` would return for the same chain.
-const fn state_after_append(first_page_id: PageId, last_page_id: PageId, new_total: usize) -> AdjChainState {
+const fn state_after_append(
+    first_page_id: PageId,
+    last_page_id: PageId,
+    new_total: usize,
+) -> AdjChainState {
     if new_total <= MAX_EDGES_SINGLE_PAGE {
         return AdjChainState {
             first_page_id,
@@ -418,7 +447,13 @@ fn append_into_single_page(
         off += 8;
     }
 
-    finalize_page(&mut buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 1);
+    finalize_page(
+        &mut buf,
+        magic::ADJACENCY,
+        ADJ_FORMAT_V2,
+        PageType::Adjacency,
+        1,
+    );
     backend.write_page(DataFile::Adjacency, first_page_id, &buf)?;
     let new_state = state_after_append(first_page_id, first_page_id, real_new_total);
     Ok((first_page_id, vec![first_page_id], new_state))
@@ -503,14 +538,20 @@ fn try_migrate_v1_chain(
     let first_page = backend.read_page(DataFile::Adjacency, first_page_id)?;
     let version = crate::storage::page::PageHeader::read_from(&first_page).version;
     let total_edges = u32::from_le_bytes(
-        first_page[PAGE_HEADER_SIZE + 9..PAGE_HEADER_SIZE + 13].try_into().unwrap(),
+        first_page[PAGE_HEADER_SIZE + 9..PAGE_HEADER_SIZE + 13]
+            .try_into()
+            .unwrap(),
     ) as usize;
     if version >= ADJ_FORMAT_V2 || total_edges <= MAX_EDGES_SINGLE_PAGE {
         return Ok(None);
     }
     let mut all = read_adjacency(backend, first_page_id)?.edge_ids;
     all.extend_from_slice(new_edge_ids);
-    let record = AdjacencyRecord { node_id, direction, edge_ids: all };
+    let record = AdjacencyRecord {
+        node_id,
+        direction,
+        edge_ids: all,
+    };
     let pid = write_adjacency(backend, &record)?;
     let migrated = read_adj_chain_state(backend, pid)?;
     Ok(Some((pid, vec![pid], migrated)))
@@ -546,7 +587,13 @@ fn rewrite_first_page_chained(
     let head_cont = backend.allocate_page(DataFile::Adjacency)?;
     let np_off = p + PAGE_PAYLOAD_SIZE - 4;
     first_buf[np_off..np_off + 4].copy_from_slice(&head_cont.to_le_bytes());
-    finalize_page(&mut first_buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 1);
+    finalize_page(
+        &mut first_buf,
+        magic::ADJACENCY,
+        ADJ_FORMAT_V2,
+        PageType::Adjacency,
+        1,
+    );
     backend.write_page(DataFile::Adjacency, first_page_id, &first_buf)?;
     written_pages.push(first_page_id);
 
@@ -609,12 +656,7 @@ pub fn append_adjacency_with_state(
 
     if state.is_single && new_total <= MAX_EDGES_SINGLE_PAGE {
         // Case A: single page, new edges fit without triggering chaining.
-        return append_into_single_page(
-            backend,
-            first_page_id,
-            state.total_edges,
-            new_edge_ids,
-        );
+        return append_into_single_page(backend, first_page_id, state.total_edges, new_edge_ids);
     }
 
     if state.is_single {
@@ -674,7 +716,13 @@ pub fn append_adjacency_with_state(
         last_buf[off..off + 8].copy_from_slice(&eid.to_le_bytes());
         off += 8;
     }
-    finalize_page(&mut last_buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 0);
+    finalize_page(
+        &mut last_buf,
+        magic::ADJACENCY,
+        ADJ_FORMAT_V2,
+        PageType::Adjacency,
+        0,
+    );
     backend.write_page(DataFile::Adjacency, state.last_page_id, &last_buf)?;
     written_pages.push(state.last_page_id);
 
@@ -695,7 +743,13 @@ pub fn append_adjacency_with_state(
         first_buf[p + 9..p + 13].copy_from_slice(&(new_total as u32).to_le_bytes());
         let lp_off = p + LAST_PAGE_ID_TAIL_OFFSET;
         first_buf[lp_off..lp_off + 4].copy_from_slice(&last_page_id.to_le_bytes());
-        finalize_page(&mut first_buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 1);
+        finalize_page(
+            &mut first_buf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V2,
+            PageType::Adjacency,
+            1,
+        );
         backend.write_page(DataFile::Adjacency, first_page_id, &first_buf)?;
         written_pages.push(first_page_id);
     }
@@ -737,7 +791,13 @@ fn write_continuation_pages(
             cont_buf[coff..coff + 8].copy_from_slice(&eid.to_le_bytes());
             coff += 8;
         }
-        finalize_page(&mut cont_buf, magic::ADJACENCY, ADJ_FORMAT_V2, PageType::Adjacency, 0);
+        finalize_page(
+            &mut cont_buf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V2,
+            PageType::Adjacency,
+            0,
+        );
         backend.write_page(DataFile::Adjacency, current_id, &cont_buf)?;
         written_pages.push(current_id);
 
@@ -750,10 +810,7 @@ fn write_continuation_pages(
 }
 
 /// Reads an adjacency record starting from the given page.
-pub fn read_adjacency(
-    backend: &dyn StorageBackend,
-    page_id: PageId,
-) -> Result<AdjacencyRecord> {
+pub fn read_adjacency(backend: &dyn StorageBackend, page_id: PageId) -> Result<AdjacencyRecord> {
     let page = backend.read_page(DataFile::Adjacency, page_id)?;
     let header = crate::storage::page::PageHeader::read_from(&page);
     ensure_dedicated_chain_page(&header, page_id)?;
@@ -773,7 +830,9 @@ pub fn read_adjacency(
         let mut edge_ids = Vec::with_capacity(edge_count);
         let mut off = RECORD_HEADER_SIZE;
         for _ in 0..edge_count {
-            edge_ids.push(u64::from_le_bytes(payload[off..off + 8].try_into().unwrap()));
+            edge_ids.push(u64::from_le_bytes(
+                payload[off..off + 8].try_into().unwrap(),
+            ));
             off += 8;
         }
         return Ok(AdjacencyRecord {
@@ -790,11 +849,12 @@ pub fn read_adjacency(
 
     let mut off = RECORD_HEADER_SIZE;
     for _ in 0..first_page_edges_for_version(version) {
-        edge_ids.push(u64::from_le_bytes(payload[off..off + 8].try_into().unwrap()));
+        edge_ids.push(u64::from_le_bytes(
+            payload[off..off + 8].try_into().unwrap(),
+        ));
         off += 8;
     }
-    let mut next_page =
-        u32::from_le_bytes(payload[PAGE_PAYLOAD_SIZE - 4..].try_into().unwrap());
+    let mut next_page = u32::from_le_bytes(payload[PAGE_PAYLOAD_SIZE - 4..].try_into().unwrap());
 
     // Read continuation pages
     while next_page != NO_NEXT && edge_ids.len() < edge_count {
@@ -807,7 +867,9 @@ pub fn read_adjacency(
         let batch_size = remaining.min(MAX_EDGES_CONT_PAGE);
         let mut off = 4;
         for _ in 0..batch_size {
-            edge_ids.push(u64::from_le_bytes(payload[off..off + 8].try_into().unwrap()));
+            edge_ids.push(u64::from_le_bytes(
+                payload[off..off + 8].try_into().unwrap(),
+            ));
             off += 8;
         }
     }
@@ -839,11 +901,7 @@ mod tests {
     /// Writes a two-page adjacency chain in the LEGACY V1 layout (header 16
     /// bytes, first page holds 507 edges, only 4 trailing bytes for `next_page`,
     /// page version = 1). Used to exercise the V1→V2 migration path.
-    fn write_v1_chain(
-        backend: &mut dyn StorageBackend,
-        node_id: u64,
-        edge_ids: &[u64],
-    ) -> PageId {
+    fn write_v1_chain(backend: &mut dyn StorageBackend, node_id: u64, edge_ids: &[u64]) -> PageId {
         const V1_FIRST_PAGE_EDGES: usize = (PAGE_PAYLOAD_SIZE - RECORD_HEADER_SIZE - 4) / 8; // 507
         assert!(edge_ids.len() > V1_FIRST_PAGE_EDGES, "need a chained chain");
         let first_pid = backend.allocate_page(DataFile::Adjacency).unwrap();
@@ -864,8 +922,16 @@ mod tests {
         }
         let np_off = p + PAGE_PAYLOAD_SIZE - 4;
         buf[np_off..np_off + 4].copy_from_slice(&cont_pid.to_le_bytes());
-        finalize_page(&mut buf, magic::ADJACENCY, ADJ_FORMAT_V1, PageType::Adjacency, 1);
-        backend.write_page(DataFile::Adjacency, first_pid, &buf).unwrap();
+        finalize_page(
+            &mut buf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V1,
+            PageType::Adjacency,
+            1,
+        );
+        backend
+            .write_page(DataFile::Adjacency, first_pid, &buf)
+            .unwrap();
 
         // Continuation page: next_page = NO_NEXT + remaining edges.
         let mut cbuf = new_page_buf();
@@ -875,8 +941,16 @@ mod tests {
             cbuf[coff..coff + 8].copy_from_slice(&eid.to_le_bytes());
             coff += 8;
         }
-        finalize_page(&mut cbuf, magic::ADJACENCY, ADJ_FORMAT_V1, PageType::Adjacency, 0);
-        backend.write_page(DataFile::Adjacency, cont_pid, &cbuf).unwrap();
+        finalize_page(
+            &mut cbuf,
+            magic::ADJACENCY,
+            ADJ_FORMAT_V1,
+            PageType::Adjacency,
+            0,
+        );
+        backend
+            .write_page(DataFile::Adjacency, cont_pid, &cbuf)
+            .unwrap();
         first_pid
     }
 
@@ -923,7 +997,11 @@ mod tests {
         // The migrated chain is V2: tail resolves in one read.
         b.read_count.store(0, Relaxed);
         let state = read_adj_chain_state(&b, new_first).unwrap();
-        assert_eq!(b.read_count.load(Relaxed), 1, "migrated chain must be V2 (O(1) tail)");
+        assert_eq!(
+            b.read_count.load(Relaxed),
+            1,
+            "migrated chain must be V2 (O(1) tail)"
+        );
         assert_eq!(state.total_edges, 523);
     }
 
@@ -1098,8 +1176,8 @@ mod tests {
         // last_page_id persisted in the first page) must resolve its tail state
         // reading ONLY the first page — O(1) — instead of walking every page.
         let mut b = CountingBackend::new();
-        let edge_ids: Vec<u64> = (1..=(MAX_EDGES_CHAINED_PAGE + 3 * MAX_EDGES_CONT_PAGE) as u64)
-            .collect();
+        let edge_ids: Vec<u64> =
+            (1..=(MAX_EDGES_CHAINED_PAGE + 3 * MAX_EDGES_CONT_PAGE) as u64).collect();
         let record = AdjacencyRecord {
             node_id: 7,
             direction: AdjDirection::Outgoing,
@@ -1110,9 +1188,15 @@ mod tests {
         b.read_count.store(0, Relaxed);
         let state = read_adj_chain_state(&b, first_pid).unwrap();
         let reads = b.read_count.load(Relaxed);
-        assert_eq!(reads, 1, "new-format tail resolution must read only the first page");
+        assert_eq!(
+            reads, 1,
+            "new-format tail resolution must read only the first page"
+        );
         // And the state must still be correct (same as a walk would produce).
-        assert_eq!(state.total_edges, MAX_EDGES_CHAINED_PAGE + 3 * MAX_EDGES_CONT_PAGE);
+        assert_eq!(
+            state.total_edges,
+            MAX_EDGES_CHAINED_PAGE + 3 * MAX_EDGES_CONT_PAGE
+        );
         assert_ne!(state.last_page_id, first_pid);
         assert!(!state.is_single);
         assert_eq!(state.last_page_used_slots, MAX_EDGES_CONT_PAGE);
@@ -1179,12 +1263,20 @@ mod tests {
         let first_pid = write_adjacency(&mut b, &initial).unwrap();
         let alloc_before = b.alloc_count;
 
-        let (returned_pid, written_pages) =
-            append_adjacency(&mut b, 42, AdjDirection::Outgoing, Some(first_pid), &[4, 5, 6, 7, 8])
-                .unwrap();
+        let (returned_pid, written_pages) = append_adjacency(
+            &mut b,
+            42,
+            AdjDirection::Outgoing,
+            Some(first_pid),
+            &[4, 5, 6, 7, 8],
+        )
+        .unwrap();
 
         // No new pages allocated
-        assert_eq!(b.alloc_count, alloc_before, "must not allocate for in-page append");
+        assert_eq!(
+            b.alloc_count, alloc_before,
+            "must not allocate for in-page append"
+        );
         assert_eq!(returned_pid, first_pid);
         assert_eq!(written_pages, vec![first_pid]);
 
@@ -1212,12 +1304,21 @@ mod tests {
         let alloc_before = b.alloc_count;
 
         let new_edge = MAX_EDGES_SINGLE_PAGE as u64 + 1;
-        let (returned_pid, written_pages) =
-            append_adjacency(&mut b, 99, AdjDirection::Outgoing, Some(first_pid), &[new_edge])
-                .unwrap();
+        let (returned_pid, written_pages) = append_adjacency(
+            &mut b,
+            99,
+            AdjDirection::Outgoing,
+            Some(first_pid),
+            &[new_edge],
+        )
+        .unwrap();
 
         // Exactly 1 new continuation page.
-        assert_eq!(b.alloc_count - alloc_before, 1, "single→chained: 1 new page");
+        assert_eq!(
+            b.alloc_count - alloc_before,
+            1,
+            "single→chained: 1 new page"
+        );
         assert_eq!(returned_pid, first_pid);
         assert!(written_pages.contains(&first_pid)); // first page rewritten as chained
         assert_eq!(written_pages.len(), 2); // first + new cont
@@ -1243,9 +1344,14 @@ mod tests {
         let alloc_before = b.alloc_count;
 
         let new_edges: Vec<u64> = (506..=515).collect();
-        let (returned_pid, written_pages) =
-            append_adjacency(&mut b, 11, AdjDirection::Incoming, Some(first_pid), &new_edges)
-                .unwrap();
+        let (returned_pid, written_pages) = append_adjacency(
+            &mut b,
+            11,
+            AdjDirection::Incoming,
+            Some(first_pid),
+            &new_edges,
+        )
+        .unwrap();
 
         assert_eq!(b.alloc_count - alloc_before, 1);
         assert_eq!(returned_pid, first_pid);
@@ -1272,11 +1378,19 @@ mod tests {
         let alloc_before = b.alloc_count;
 
         let new_edges: Vec<u64> = (510..=514).collect();
-        let (returned_pid, written_pages) =
-            append_adjacency(&mut b, 200, AdjDirection::Outgoing, Some(first_pid), &new_edges)
-                .unwrap();
+        let (returned_pid, written_pages) = append_adjacency(
+            &mut b,
+            200,
+            AdjDirection::Outgoing,
+            Some(first_pid),
+            &new_edges,
+        )
+        .unwrap();
 
-        assert_eq!(b.alloc_count, alloc_before, "no new alloc: edges fit in existing last page");
+        assert_eq!(
+            b.alloc_count, alloc_before,
+            "no new alloc: edges fit in existing last page"
+        );
         assert_eq!(returned_pid, first_pid);
         // 2 pages written: first page (edge_count update) + last cont page.
         assert_eq!(written_pages.len(), 2);
@@ -1306,9 +1420,14 @@ mod tests {
         let fill = MAX_EDGES_CONT_PAGE - (509 - MAX_EDGES_CHAINED_PAGE);
         assert_eq!(fill, 507);
         let new_edges: Vec<u64> = (510..=(509 + fill as u64)).collect();
-        let (_, written_pages) =
-            append_adjacency(&mut b, 201, AdjDirection::Incoming, Some(first_pid), &new_edges)
-                .unwrap();
+        let (_, written_pages) = append_adjacency(
+            &mut b,
+            201,
+            AdjDirection::Incoming,
+            Some(first_pid),
+            &new_edges,
+        )
+        .unwrap();
 
         assert_eq!(b.alloc_count, alloc_before);
         assert_eq!(written_pages.len(), 2); // first + filled cont, no new page
@@ -1336,9 +1455,14 @@ mod tests {
         let overflow = MAX_EDGES_CONT_PAGE + 3; // 512 → 2 pages (509 + 3)
         let count = room_in_last + overflow;
         let new_edges: Vec<u64> = (510..=(509 + count as u64)).collect();
-        let (_, written_pages) =
-            append_adjacency(&mut b, 202, AdjDirection::Outgoing, Some(first_pid), &new_edges)
-                .unwrap();
+        let (_, written_pages) = append_adjacency(
+            &mut b,
+            202,
+            AdjDirection::Outgoing,
+            Some(first_pid),
+            &new_edges,
+        )
+        .unwrap();
 
         // 2 new pages: the overflow (512) fills one cont (509) + one cont (3).
         assert_eq!(b.alloc_count - alloc_before, 2, "case D: 2 new cont pages");
@@ -1364,14 +1488,12 @@ mod tests {
         let mut edge_counter: u64 = 0;
 
         for i in 0..K {
-            let new_edges: Vec<u64> =
-                (edge_counter + 1..=edge_counter + BATCH as u64).collect();
+            let new_edges: Vec<u64> = (edge_counter + 1..=edge_counter + BATCH as u64).collect();
             edge_counter += BATCH as u64;
 
             let alloc_before = b.alloc_count;
             let (pid, _) =
-                append_adjacency(&mut b, 1, AdjDirection::Outgoing, first_pid, &new_edges)
-                    .unwrap();
+                append_adjacency(&mut b, 1, AdjDirection::Outgoing, first_pid, &new_edges).unwrap();
             first_pid = Some(pid);
 
             let alloc_delta = b.alloc_count - alloc_before;
@@ -1523,7 +1645,10 @@ mod tests {
         b.read_count.store(0, Relaxed);
         let state = read_adj_chain_state(&b, first_pid).unwrap();
         let resolve_reads = b.read_count.load(Relaxed);
-        assert_eq!(resolve_reads, 1, "V2 tail resolution must read one page, got {resolve_reads}");
+        assert_eq!(
+            resolve_reads, 1,
+            "V2 tail resolution must read one page, got {resolve_reads}"
+        );
 
         // Append with the precomputed state; count only this call's reads.
         b.read_count.store(0, Relaxed);
@@ -1596,7 +1721,8 @@ mod tests {
             file: DataFile,
             page_id: PageId,
         ) -> crate::error::Result<crate::storage::page::PageBuf> {
-            self.read_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.read_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.inner.read_page(file, page_id)
         }
         fn write_page(
@@ -1672,7 +1798,9 @@ mod proptests {
                 },
                 // Distinct, position-dependent ids: a chunk copied from the
                 // wrong offset shows up as a wrong id rather than blending in.
-                edge_ids: (0..n).map(|i| (i as u64).wrapping_mul(0x9E37_79B9) | 1).collect(),
+                edge_ids: (0..n)
+                    .map(|i| (i as u64).wrapping_mul(0x9E37_79B9) | 1)
+                    .collect(),
             }
         })
     }

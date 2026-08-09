@@ -255,7 +255,6 @@ impl GraphRegistry for SingleDatabaseManager {
             }
         }
     }
-
 }
 
 #[cfg(test)]

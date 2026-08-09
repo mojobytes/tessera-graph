@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Internal cache of adjacency-chain tail state, keyed by `(node_id,
 //! AdjDirection)`.
@@ -132,8 +132,14 @@ mod tests {
         let cache = AdjTailCache::new(16);
         cache.insert(7, AdjDirection::Outgoing, state(1, 10));
         cache.insert(7, AdjDirection::Incoming, state(2, 20));
-        assert_eq!(cache.get(7, AdjDirection::Outgoing).unwrap().total_edges, 10);
-        assert_eq!(cache.get(7, AdjDirection::Incoming).unwrap().total_edges, 20);
+        assert_eq!(
+            cache.get(7, AdjDirection::Outgoing).unwrap().total_edges,
+            10
+        );
+        assert_eq!(
+            cache.get(7, AdjDirection::Incoming).unwrap().total_edges,
+            20
+        );
     }
 
     #[test]

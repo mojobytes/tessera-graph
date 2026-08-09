@@ -4,8 +4,9 @@ description = "CLI tool for TesseraGraph — connect, query, and import data via
 version.workspace     = true
 edition.workspace     = true
 authors.workspace     = true
-license.workspace     = true
+license-file          = "../tessera-graph-server/LICENSE"
 rust-version.workspace = true
+publish = false
 
 [lib]
 name = "tessera_graph_cli_lib"
@@ -22,7 +23,6 @@ tessera-graph-server   = { workspace = true }
 tokio            = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync"] }
 tokio-rustls     = { workspace = true }
 rustls           = "0.23"
-rustls-pemfile   = "2"
 rustls-native-certs = "0.8"
 clap             = { version = "4", features = ["derive", "env"] }
 rpassword        = { workspace = true }

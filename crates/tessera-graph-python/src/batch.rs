@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Batch context manager for `PyGraph`.
 
@@ -27,7 +27,7 @@ impl PyBatchContext {
 
 #[pymethods]
 impl PyBatchContext {
-    fn __enter__(&self, py: Python<'_>) -> Option<PyObject> {
+    fn __enter__(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.graph.borrow_mut(py).inner.begin_batch();
         None
     }

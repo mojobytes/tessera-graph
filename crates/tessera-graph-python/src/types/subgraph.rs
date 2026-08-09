@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 
@@ -8,7 +8,7 @@ use super::node::PyNode;
 use super::node_id::PyNodeId;
 
 /// A subgraph extracted from a parent graph: a set of nodes and edges.
-#[pyclass(name = "Subgraph", frozen)]
+#[pyclass(name = "Subgraph", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PySubgraph {
     nodes: Vec<PyNode>,
@@ -67,22 +67,22 @@ impl PySubgraph {
     /// is in this subgraph.
     fn __contains__(&self, item: &Bound<'_, PyAny>) -> bool {
         if let Ok(nid) = item.extract::<PyNodeId>() {
-            return self.nodes.iter().any(|n| n.inner.id().as_u64() == nid.value);
-        }
-        if let Ok(node) = item.extract::<PyNode>() {
             return self
                 .nodes
                 .iter()
-                .any(|n| n.inner.id() == node.inner.id());
+                .any(|n| n.inner.id().as_u64() == nid.value);
+        }
+        if let Ok(node) = item.extract::<PyNode>() {
+            return self.nodes.iter().any(|n| n.inner.id() == node.inner.id());
         }
         if let Ok(eid) = item.extract::<PyEdgeId>() {
-            return self.edges.iter().any(|e| e.inner.id().as_u64() == eid.value);
-        }
-        if let Ok(edge) = item.extract::<PyEdge>() {
             return self
                 .edges
                 .iter()
-                .any(|e| e.inner.id() == edge.inner.id());
+                .any(|e| e.inner.id().as_u64() == eid.value);
+        }
+        if let Ok(edge) = item.extract::<PyEdge>() {
+            return self.edges.iter().any(|e| e.inner.id() == edge.inner.id());
         }
         false
     }

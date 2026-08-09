@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Issue #54 verification harness — adjacency density by graph shape.
 //!
@@ -71,14 +71,22 @@ struct ShapeResult {
 fn run_audit(n_events: u64) -> ShapeResult {
     let (mut graph, _dir) = open_graph();
     let principals: Vec<_> = (0..3)
-        .map(|p| graph.add_node(format!("Principal{p}"), Properties::new()).expect("add"))
+        .map(|p| {
+            graph
+                .add_node(format!("Principal{p}"), Properties::new())
+                .expect("add")
+        })
         .collect();
     graph.reset_pool_instrumentation();
     let start = Instant::now();
     for i in 0..n_events {
-        let event = graph.add_node(format!("Event{}", i % 8), Properties::new()).expect("add_node");
+        let event = graph
+            .add_node(format!("Event{}", i % 8), Properties::new())
+            .expect("add_node");
         let target = principals[(i % 3) as usize];
-        graph.add_edge("ACCESS", event, target, Properties::new()).expect("add_edge");
+        graph
+            .add_edge("ACCESS", event, target, Properties::new())
+            .expect("add_edge");
     }
     finish(&graph, start, n_events, n_events)
 }
@@ -93,14 +101,22 @@ fn run_perms(n_edges: u64) -> ShapeResult {
     let (mut graph, _dir) = open_graph();
     let subjects = 3_u64; // tessera authz test: 3 subjects, homogeneous spread
     let subject_ids: Vec<_> = (0..subjects)
-        .map(|s| graph.add_node(format!("Subject{s}"), Properties::new()).expect("add"))
+        .map(|s| {
+            graph
+                .add_node(format!("Subject{s}"), Properties::new())
+                .expect("add")
+        })
         .collect();
     graph.reset_pool_instrumentation();
     let start = Instant::now();
     for i in 0..n_edges {
-        let resource = graph.add_node("Resource", Properties::new()).expect("add_node");
+        let resource = graph
+            .add_node("Resource", Properties::new())
+            .expect("add_node");
         let subject = subject_ids[(i % subjects) as usize];
-        graph.add_edge("GRANT", subject, resource, Properties::new()).expect("add_edge");
+        graph
+            .add_edge("GRANT", subject, resource, Properties::new())
+            .expect("add_edge");
     }
     finish(&graph, start, n_edges, n_edges)
 }
@@ -113,7 +129,9 @@ fn run_dense(n_edges: u64) -> ShapeResult {
     let start = Instant::now();
     for _ in 0..n_edges {
         let leaf = graph.add_node("Leaf", Properties::new()).expect("add_node");
-        graph.add_edge("LINK", hub, leaf, Properties::new()).expect("add_edge");
+        graph
+            .add_edge("LINK", hub, leaf, Properties::new())
+            .expect("add_edge");
     }
     finish(&graph, start, n_edges, n_edges)
 }
@@ -122,8 +140,13 @@ fn finish(graph: &Graph, start: Instant, ops: u64, edges: u64) -> ShapeResult {
     let elapsed = start.elapsed().as_secs_f64();
     let (_hits, _misses, evictions) = graph.pool_instrumentation();
     let (p_nodes, p_edges, p_adj, p_strings) = graph.data_file_page_counts();
-    let total_pages = u64::from(p_nodes) + u64::from(p_edges) + u64::from(p_adj) + u64::from(p_strings);
-    let edges_per_adj_page = if p_adj == 0 { 0.0 } else { edges as f64 / f64::from(p_adj) };
+    let total_pages =
+        u64::from(p_nodes) + u64::from(p_edges) + u64::from(p_adj) + u64::from(p_strings);
+    let edges_per_adj_page = if p_adj == 0 {
+        0.0
+    } else {
+        edges as f64 / f64::from(p_adj)
+    };
     ShapeResult {
         edges,
         us_per_edge: (elapsed * 1e6) / (ops as f64),
@@ -138,7 +161,13 @@ fn print_row(shape: &str, n: u64, r: &ShapeResult) {
     let fill_pct = (r.edges_per_adj_page / EDGES_PER_FULL_PAGE) * 100.0;
     println!(
         "{shape:>7} | {n:>9} | {:>10} | {:>9} | {:>8} | {:>8.2} | {:>5.1}% | {:>9.2}   (evict={})",
-        r.edges, r.adj_pages, r.total_pages, r.edges_per_adj_page, fill_pct, r.us_per_edge, r.evictions
+        r.edges,
+        r.adj_pages,
+        r.total_pages,
+        r.edges_per_adj_page,
+        fill_pct,
+        r.us_per_edge,
+        r.evictions
     );
 }
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! `PyShortestPathQuery` — Python wrapper for `ShortestPathQuery`.
 
@@ -49,7 +49,9 @@ impl PyShortestPathQuery {
     /// Executes BFS and returns the shortest `Path`, or `None` if unreachable.
     fn find(&self, py: Python<'_>) -> PyResult<Option<PyPath>> {
         let g = self.graph.borrow(py);
-        let mut b = g.inner.shortest_path(to_node_id(&self.from), to_node_id(&self.to));
+        let mut b = g
+            .inner
+            .shortest_path(to_node_id(&self.from), to_node_id(&self.to));
         b = b.direction(self.direction.into());
         if let Some(ref l) = self.label_filter {
             b = b.label(l.as_str());

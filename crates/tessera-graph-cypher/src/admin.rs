@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Admin-statement parser — runs before the regular GQL parser so
 //! `CREATE USER`, `DROP USER`, `ALTER USER ...`, and `SHOW USERS` are
@@ -11,10 +11,10 @@
 //! usernames (validated again at the store, so this parser only needs
 //! to lex them).
 
+use tessera_graph::Result;
 use tessera_graph::gql::{
     AccessLevelAst, AdminStatement, DatabaseOptions, GrantTargetAst, SecretPlainPassword,
 };
-use tessera_graph::Result;
 
 use crate::parse_util::{strip_ci, strip_ci_ws, syntax_err, take_identifier};
 
@@ -140,7 +140,9 @@ fn parse_alter_user(s: &str) -> Result<AdminStatement> {
         };
         return Ok(AdminStatement::AlterUserAdmin { username, is_admin });
     }
-    Err(syntax_err("ALTER USER ... SET expects PASSWORD|STATUS|ADMIN"))
+    Err(syntax_err(
+        "ALTER USER ... SET expects PASSWORD|STATUS|ADMIN",
+    ))
 }
 
 fn parse_create_database(s: &str) -> Result<AdminStatement> {
@@ -346,14 +348,16 @@ fn parse_database_options(body: &str) -> Result<DatabaseOptions> {
         let (k, v) = (k.trim(), v.trim());
         match k {
             "max_size_bytes" => {
-                opts.max_size_bytes = Some(v.parse().map_err(|e| {
-                    syntax_err(&format!("max_size_bytes must be u64: {e}"))
-                })?);
+                opts.max_size_bytes = Some(
+                    v.parse()
+                        .map_err(|e| syntax_err(&format!("max_size_bytes must be u64: {e}")))?,
+                );
             }
             "max_connections" => {
-                opts.max_connections = Some(v.parse().map_err(|e| {
-                    syntax_err(&format!("max_connections must be usize: {e}"))
-                })?);
+                opts.max_connections = Some(
+                    v.parse()
+                        .map_err(|e| syntax_err(&format!("max_connections must be usize: {e}")))?,
+                );
             }
             other => {
                 return Err(syntax_err(&format!("unknown option: {other}")));
@@ -372,9 +376,7 @@ fn take_database_name(s: &str) -> Result<(String, &str)> {
     if s.is_empty() {
         return Err(syntax_err("invalid database name: missing"));
     }
-    let end = s
-        .find(char::is_whitespace)
-        .unwrap_or(s.len());
+    let end = s.find(char::is_whitespace).unwrap_or(s.len());
     let candidate = &s[..end];
     validate_database_name(candidate)?;
     Ok((candidate.to_owned(), &s[end..]))
@@ -405,9 +407,7 @@ fn validate_database_name(name: &str) -> Result<()> {
         }
     }
     if RESERVED_DATABASE_NAMES.contains(&name) {
-        return Err(syntax_err(&format!(
-            "reserved database name: {name}"
-        )));
+        return Err(syntax_err(&format!("reserved database name: {name}")));
     }
     Ok(())
 }
@@ -428,9 +428,7 @@ fn starts_with_ci_word(s: &str, word: &str) -> bool {
     {
         return false;
     }
-    bytes
-        .get(w.len())
-        .is_none_or(u8::is_ascii_whitespace)
+    bytes.get(w.len()).is_none_or(u8::is_ascii_whitespace)
 }
 
 // ── lexer helpers ────────────────────────────────────────────────────────────
@@ -454,9 +452,7 @@ fn take_string_literal(s: &str) -> Result<String> {
             // End of string — the remainder of the input must be empty
             // (the caller is expected to have stripped any trailing
             // whitespace / semicolon).
-            let tail = std::str::from_utf8(&bytes[i + 1..])
-                .unwrap_or("")
-                .trim();
+            let tail = std::str::from_utf8(&bytes[i + 1..]).unwrap_or("").trim();
             if !tail.is_empty() {
                 return Err(syntax_err(&format!(
                     "unexpected tokens after string: {tail}"

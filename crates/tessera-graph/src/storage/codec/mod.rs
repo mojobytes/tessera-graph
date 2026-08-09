@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 pub mod adj_slab_codec;
 pub mod adjacency_codec;

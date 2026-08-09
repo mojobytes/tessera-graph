@@ -104,7 +104,10 @@ impl BandwidthLimiter {
             return std::time::Duration::ZERO;
         }
         let wait = {
-            let mut bucket = self.bucket.lock().expect("BandwidthLimiter bucket poisoned");
+            let mut bucket = self
+                .bucket
+                .lock()
+                .expect("BandwidthLimiter bucket poisoned");
             bucket.take(n, Instant::now())
         };
         if !wait.is_zero() {
@@ -235,18 +238,12 @@ impl<I: AsyncWrite + Unpin> AsyncWrite for RateLimited<I> {
         result
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let this = self.get_mut();
         Pin::new(&mut this.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let this = self.get_mut();
         Pin::new(&mut this.inner).poll_shutdown(cx)
     }

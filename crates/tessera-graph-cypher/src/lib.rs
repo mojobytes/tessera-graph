@@ -1,19 +1,19 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Cypher compatibility layer for `TesseraGraph` Enterprise.
 //!
 //! Provides `parse_with_mode` which accepts Cypher-flavoured syntax in
 //! `CypherCompat` mode and rejects it in `StrictGql` mode.
 
-use tessera_graph_config::QueryLanguage;
 use tessera_graph::GqlStatement;
+use tessera_graph_config::QueryLanguage;
 
 pub mod admin;
 pub mod cache;
 pub mod call;
 pub mod ddl;
-pub mod preprocessor;
 pub(crate) mod parse_util;
+pub mod preprocessor;
 
 pub use admin::try_parse_admin;
 pub use ddl::try_parse_ddl;
@@ -111,7 +111,10 @@ mod tests {
     fn cache_miss_populates_on_first_call() {
         let qc = cache::QueryCache::new(16);
         let q = "MATCH (n) RETURN n";
-        let key = cache::CacheKey { query: q.to_owned(), params_signature: 0 };
+        let key = cache::CacheKey {
+            query: q.to_owned(),
+            params_signature: 0,
+        };
         assert!(qc.get(&key).is_none());
         parse_with_mode_cached(q, QueryLanguage::CypherCompat, 0, &qc).unwrap(); // OK: test
         assert!(qc.get(&key).is_some());
@@ -129,12 +132,7 @@ mod tests {
     #[test]
     fn parse_error_is_not_cached() {
         let qc = cache::QueryCache::new(16);
-        let _ = parse_with_mode_cached(
-            "NOT VALID ~~~",
-            QueryLanguage::CypherCompat,
-            0,
-            &qc,
-        );
+        let _ = parse_with_mode_cached("NOT VALID ~~~", QueryLanguage::CypherCompat, 0, &qc);
         assert!(
             qc.get(&cache::CacheKey {
                 query: "NOT VALID ~~~".to_owned(),
@@ -161,12 +159,10 @@ mod tests {
         )
         .unwrap(); // OK: test
         match stmt {
-            GqlStatement::Query(q) => {
-                match q.where_clause.expect("expected WHERE").predicate {
-                    Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
-                    other => panic!("expected StartsWith, got {other:?}"),
-                }
-            }
+            GqlStatement::Query(q) => match q.where_clause.expect("expected WHERE").predicate {
+                Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
+                other => panic!("expected StartsWith, got {other:?}"),
+            },
             other => panic!("expected Query, got {other:?}"),
         }
     }
@@ -180,12 +176,10 @@ mod tests {
         )
         .unwrap(); // OK: test
         match stmt {
-            GqlStatement::Query(q) => {
-                match q.where_clause.expect("expected WHERE").predicate {
-                    Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::EndsWith),
-                    other => panic!("expected EndsWith, got {other:?}"),
-                }
-            }
+            GqlStatement::Query(q) => match q.where_clause.expect("expected WHERE").predicate {
+                Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::EndsWith),
+                other => panic!("expected EndsWith, got {other:?}"),
+            },
             other => panic!("expected Query, got {other:?}"),
         }
     }
@@ -220,8 +214,15 @@ mod tests {
             parse_with_mode_cached(query, QueryLanguage::CypherCompat, 0, &cache).unwrap();
         }
         let ops = f64::from(iterations) / start.elapsed().as_secs_f64();
-        let min = if cfg!(debug_assertions) { 200_000.0 } else { 2_000_000.0 };
-        assert!(ops >= min, "cache throughput regression: {ops:.0} ops/s < {min:.0} minimum");
+        let min = if cfg!(debug_assertions) {
+            200_000.0
+        } else {
+            2_000_000.0
+        };
+        assert!(
+            ops >= min,
+            "cache throughput regression: {ops:.0} ops/s < {min:.0} minimum"
+        );
     }
 
     // --- Cycle 2.2: GQL-native fast-path in CypherCompat ---
@@ -237,7 +238,10 @@ mod tests {
     #[test]
     fn cypher_compat_still_preprocesses_optional_match() {
         let result = parse_with_mode("OPTIONAL MATCH (n) RETURN n", QueryLanguage::CypherCompat);
-        assert!(result.is_ok(), "OPTIONAL MATCH must be transformed, not rejected");
+        assert!(
+            result.is_ok(),
+            "OPTIONAL MATCH must be transformed, not rejected"
+        );
     }
 
     #[test]
@@ -320,12 +324,17 @@ mod tests {
 
     #[test]
     fn remove_append_only_routes_to_ddl() {
-        let stmt =
-            parse_with_mode("ALTER LABEL :Event REMOVE APPEND ONLY", QueryLanguage::CypherCompat)
-                .unwrap();
+        let stmt = parse_with_mode(
+            "ALTER LABEL :Event REMOVE APPEND ONLY",
+            QueryLanguage::CypherCompat,
+        )
+        .unwrap();
         assert!(matches!(
             &stmt,
-            GqlStatement::Ddl(tessera_graph::gql::DdlStatement::SetLabelAppendOnly { on: false, .. })
+            GqlStatement::Ddl(tessera_graph::gql::DdlStatement::SetLabelAppendOnly {
+                on: false,
+                ..
+            })
         ));
     }
 
@@ -361,7 +370,14 @@ mod tests {
             parse_with_mode(q, QueryLanguage::CypherCompat).unwrap();
         }
         let ops = f64::from(iters) / start.elapsed().as_secs_f64();
-        let min = if cfg!(debug_assertions) { 50_000.0 } else { 500_000.0 };
-        assert!(ops >= min, "GQL fast-path regression: {ops:.0} ops/s < {min:.0}");
+        let min = if cfg!(debug_assertions) {
+            50_000.0
+        } else {
+            500_000.0
+        };
+        assert!(
+            ops >= min,
+            "GQL fast-path regression: {ops:.0} ops/s < {min:.0}"
+        );
     }
 }

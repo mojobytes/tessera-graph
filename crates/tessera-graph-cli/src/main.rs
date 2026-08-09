@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
@@ -66,8 +66,9 @@ async fn run() -> Result<(), CliError> {
         // público no nombra ni una de las tres.
         let res = match admin_args.action {
             AdminAction::Users(u) => admin::users::run(u).await,
-            AdminAction::Hash(h) => admin::hash::run(h.password, h.prompt)
-                .map_err(|msg| (1_i32, msg)),
+            AdminAction::Hash(h) => {
+                admin::hash::run(h.password, h.prompt).map_err(|msg| (1_i32, msg))
+            }
         };
         match res {
             Ok(()) => std::process::exit(0),
@@ -117,7 +118,13 @@ async fn run() -> Result<(), CliError> {
     // Ping subcommand — performs HELLO with credentials to verify connectivity
     if matches!(cli.command, Some(Command::Ping)) {
         let password = password.unwrap_or_default();
-        auth::login(&mut session, &config.username, &password, config.database.as_deref()).await?;
+        auth::login(
+            &mut session,
+            &config.username,
+            &password,
+            config.database.as_deref(),
+        )
+        .await?;
         println!("OK");
         let _ = session.client.goodbye().await;
         return Ok(());
@@ -127,7 +134,13 @@ async fn run() -> Result<(), CliError> {
     let password = password.unwrap_or_else(|| {
         rpassword::prompt_password("Password: ").unwrap_or_default() // OK: fallback to empty if terminal fails
     });
-    auth::login(&mut session, &config.username, &password, config.database.as_deref()).await?;
+    auth::login(
+        &mut session,
+        &config.username,
+        &password,
+        config.database.as_deref(),
+    )
+    .await?;
 
     // Dispatch command
     dispatch_command(cli.command, &mut session, &config).await?;
@@ -164,9 +177,7 @@ where
         Some(Command::Exec(args)) => handle_exec(session, &args).await?,
         Some(Command::Import(args)) => handle_import(session, &args).await?,
         Some(Command::Export(args)) => handle_export(session, &args).await?,
-        Some(
-            Command::Ping | Command::Version | Command::Admin(_),
-        ) => unreachable!(),
+        Some(Command::Ping | Command::Version | Command::Admin(_)) => unreachable!(),
         None => run_repl(session, config).await?,
     }
     Ok(())
@@ -231,8 +242,9 @@ where
             Box::new(std::io::stdin())
         } else {
             Box::new(std::io::BufReader::new(
-                std::fs::File::open(&args.file)
-                    .map_err(|e| CliError::ImportExport(format!("cannot open {}: {e}", args.file)))?,
+                std::fs::File::open(&args.file).map_err(|e| {
+                    CliError::ImportExport(format!("cannot open {}: {e}", args.file))
+                })?,
             ))
         };
 
@@ -318,9 +330,8 @@ where
             match rx.try_recv() {
                 Ok(stmt) => {
                     if let Err(e) = client.pipeline_run(&stmt).await {
-                        query_err = Some(CliError::ImportExport(format!(
-                            "pipeline write error: {e}"
-                        )));
+                        query_err =
+                            Some(CliError::ImportExport(format!("pipeline write error: {e}")));
                         batch_done = true;
                         break;
                     }
@@ -332,9 +343,8 @@ where
                     }
                     if let Some(stmt) = rx.recv().await {
                         if let Err(e) = client.pipeline_run(&stmt).await {
-                            query_err = Some(CliError::ImportExport(format!(
-                                "pipeline write error: {e}"
-                            )));
+                            query_err =
+                                Some(CliError::ImportExport(format!("pipeline write error: {e}")));
                             batch_done = true;
                             break;
                         }
@@ -357,9 +367,7 @@ where
 
         if pipeline_depth > 0 {
             if let Err(e) = client.flush_pipeline().await {
-                query_err = Some(CliError::ImportExport(format!(
-                    "pipeline flush error: {e}"
-                )));
+                query_err = Some(CliError::ImportExport(format!("pipeline flush error: {e}")));
                 break;
             }
 
@@ -379,9 +387,7 @@ where
                     }
                 }
                 Ok(Err(e)) => {
-                    query_err = Some(CliError::ImportExport(format!(
-                        "pipeline drain error: {e}"
-                    )));
+                    query_err = Some(CliError::ImportExport(format!("pipeline drain error: {e}")));
                     break;
                 }
                 Err(_timeout) => {
@@ -567,9 +573,11 @@ fn build_tls_config(config: &ConnectionConfig) -> Result<rustls::ClientConfig, C
     let mut root_store = rustls::RootCertStore::empty();
 
     if let Some(ca_path) = &config.ca_cert {
+        use rustls::pki_types::pem::PemObject;
+
         let pem_data = std::fs::read(ca_path)
             .map_err(|e| CliError::Config(format!("cannot read CA cert {ca_path}: {e}")))?;
-        let certs = rustls_pemfile::certs(&mut &pem_data[..])
+        let certs = rustls::pki_types::CertificateDer::pem_slice_iter(&pem_data)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| CliError::Config(format!("invalid PEM in {ca_path}: {e}")))?;
         for cert in certs {
@@ -644,9 +652,7 @@ fn dirs_history_path() -> Option<std::path::PathBuf> {
 fn infer_import_format(file: &str) -> &'static str {
     let path = std::path::Path::new(file);
     match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) if ext.eq_ignore_ascii_case("gql") || ext.eq_ignore_ascii_case("cypher") => {
-            "gql"
-        }
+        Some(ext) if ext.eq_ignore_ascii_case("gql") || ext.eq_ignore_ascii_case("cypher") => "gql",
         Some(ext) if ext.eq_ignore_ascii_case("csv") => "csv-nodes",
         Some(ext)
             if ext.eq_ignore_ascii_case("json")

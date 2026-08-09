@@ -35,7 +35,9 @@ pub fn build_dataset(graph: &mut Graph, n: u32) -> Result<(), String> {
     for i in 0..n {
         let mut props: Properties = Properties::new();
         props.insert("idx".to_owned(), Property::I64(i64::from(i)));
-        let id = graph.add_node(BENCH_NODE_LABEL, props).map_err(|e| e.to_string())?;
+        let id = graph
+            .add_node(BENCH_NODE_LABEL, props)
+            .map_err(|e| e.to_string())?;
         ids.push(id);
     }
     for i in 0..n as usize {

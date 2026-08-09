@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Post-parse parameter substitution.
 //!
@@ -188,7 +188,9 @@ fn visit_create_pattern<S: BuildHasher>(
     params: &HashMap<String, GqlValue, S>,
 ) -> Result<(), ParamError> {
     match p {
-        CreatePattern::Node { props, prop_map, .. } => {
+        CreatePattern::Node {
+            props, prop_map, ..
+        } => {
             for (_k, expr) in props {
                 visit_expr(expr, params)?;
             }
@@ -205,7 +207,10 @@ fn visit_create_pattern<S: BuildHasher>(
     Ok(())
 }
 
-fn visit_set<S: BuildHasher>(s: &mut SetClause, params: &HashMap<String, GqlValue, S>) -> Result<(), ParamError> {
+fn visit_set<S: BuildHasher>(
+    s: &mut SetClause,
+    params: &HashMap<String, GqlValue, S>,
+) -> Result<(), ParamError> {
     for a in &mut s.assignments {
         visit_set_assignment(a, params)?;
     }
@@ -239,7 +244,9 @@ fn visit_pipeline<S: BuildHasher>(
         }
     }
     match &mut p.terminal {
-        PipelineTerminal::Return { clause, order_by, .. } => {
+        PipelineTerminal::Return {
+            clause, order_by, ..
+        } => {
             for item in &mut clause.items {
                 visit_return_item(item, params)?;
             }
@@ -260,7 +267,10 @@ fn visit_pipeline<S: BuildHasher>(
     Ok(())
 }
 
-fn visit_with<S: BuildHasher>(w: &mut WithClause, params: &HashMap<String, GqlValue, S>) -> Result<(), ParamError> {
+fn visit_with<S: BuildHasher>(
+    w: &mut WithClause,
+    params: &HashMap<String, GqlValue, S>,
+) -> Result<(), ParamError> {
     for item in &mut w.items {
         visit_return_item(item, params)?;
     }
@@ -323,13 +333,14 @@ fn visit_order_item<S: BuildHasher>(
 
 // ── Expr walker ──────────────────────────────────────────────────────────────
 
-fn visit_expr<S: BuildHasher>(expr: &mut Expr, params: &HashMap<String, GqlValue, S>) -> Result<(), ParamError> {
+fn visit_expr<S: BuildHasher>(
+    expr: &mut Expr,
+    params: &HashMap<String, GqlValue, S>,
+) -> Result<(), ParamError> {
     match expr {
         Expr::ParamRef(r) => {
             let (key, missing): (String, ParamError) = match r {
-                ParamRef::Named(name) => {
-                    (name.clone(), ParamError::MissingParameter(name.clone()))
-                }
+                ParamRef::Named(name) => (name.clone(), ParamError::MissingParameter(name.clone())),
                 ParamRef::Positional(n) => {
                     (n.to_string(), ParamError::MissingPositionalParameter(*n))
                 }
@@ -379,7 +390,9 @@ fn visit_expr<S: BuildHasher>(expr: &mut Expr, params: &HashMap<String, GqlValue
             }
             Ok(())
         }
-        Expr::ListPredicate { list, predicate, .. } => {
+        Expr::ListPredicate {
+            list, predicate, ..
+        } => {
             // The iteration `var` is a fresh binding, never a parameter, so it
             // is left untouched; both the list source and the predicate may
             // reference `$params`.
@@ -447,7 +460,10 @@ mod tests {
     use crate::gql::parse_statement;
 
     fn params_with(pairs: &[(&str, GqlValue)]) -> HashMap<String, GqlValue> {
-        pairs.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
     }
 
     /// Parses a query and extracts the first RETURN item expression. Used
@@ -495,7 +511,10 @@ mod tests {
         let mut stmt = parse_statement("RETURN $b").unwrap();
         let params = params_with(&[("b", GqlValue::Bool(true))]);
         apply(&mut stmt, &params).unwrap();
-        assert_eq!(*first_return_expr(&stmt), Expr::Literal(Literal::Bool(true)));
+        assert_eq!(
+            *first_return_expr(&stmt),
+            Expr::Literal(Literal::Bool(true))
+        );
     }
 
     #[test]
@@ -594,10 +613,7 @@ mod tests {
             MutationClause::Create(c) => match &c.patterns[0] {
                 CreatePattern::Node { props, .. } => {
                     assert_eq!(props[0].1, Expr::Literal(Literal::Int(7)));
-                    assert_eq!(
-                        props[1].1,
-                        Expr::Literal(Literal::Str("alice".into())),
-                    );
+                    assert_eq!(props[1].1, Expr::Literal(Literal::Str("alice".into())),);
                 }
                 CreatePattern::Edge { .. } => panic!("expected Node pattern, got Edge"),
             },
@@ -652,10 +668,7 @@ mod tests {
     #[test]
     fn substitution_const_return_skip_and_limit_exprs() {
         let mut stmt = parse_statement("RETURN 1 SKIP $s LIMIT $l").unwrap();
-        let params = params_with(&[
-            ("s", GqlValue::Int(0)),
-            ("l", GqlValue::Int(5)),
-        ]);
+        let params = params_with(&[("s", GqlValue::Int(0)), ("l", GqlValue::Int(5))]);
         apply(&mut stmt, &params).unwrap();
         let c = match stmt {
             GqlStatement::ConstReturn(c) => c,

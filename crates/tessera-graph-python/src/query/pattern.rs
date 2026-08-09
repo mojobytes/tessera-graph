@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! `PyPatternBuilder` — Python wrapper for `PatternBuilder`.
 //!
@@ -16,11 +16,22 @@ use crate::types::properties;
 /// Internal representation of a single pattern step.
 #[derive(Clone)]
 enum Step {
-    Node { var: String },
-    Edge { var: Option<String>, direction: PyDirection },
+    Node {
+        var: String,
+    },
+    Edge {
+        var: Option<String>,
+        direction: PyDirection,
+    },
     Label(String),
-    WhereProp { key: String, value: tessera_graph::Property },
-    WhereEdgeProp { key: String, value: tessera_graph::Property },
+    WhereProp {
+        key: String,
+        value: tessera_graph::Property,
+    },
+    WhereEdgeProp {
+        key: String,
+        value: tessera_graph::Property,
+    },
 }
 
 /// Builder for graph pattern queries.
@@ -43,14 +54,19 @@ impl PyPatternBuilder {
 impl PyPatternBuilder {
     /// Adds a node step with the given variable name.
     fn node(mut slf: PyRefMut<'_, Self>, var: &str) -> Py<Self> {
-        slf.steps.push(Step::Node { var: var.to_owned() });
+        slf.steps.push(Step::Node {
+            var: var.to_owned(),
+        });
         slf.into()
     }
 
     /// Adds an unnamed edge step. Accepts `Direction` enum or string.
     fn edge(mut slf: PyRefMut<'_, Self>, direction: &Bound<'_, PyAny>) -> PyResult<Py<Self>> {
         let d = direction::coerce(direction)?;
-        slf.steps.push(Step::Edge { var: None, direction: d });
+        slf.steps.push(Step::Edge {
+            var: None,
+            direction: d,
+        });
         Ok(slf.into())
     }
 
@@ -114,7 +130,10 @@ impl PyPatternBuilder {
                     b = b.node(var.as_str());
                     node_vars.push(var.clone());
                 }
-                Step::Edge { var: None, direction } => b = b.edge((*direction).into()),
+                Step::Edge {
+                    var: None,
+                    direction,
+                } => b = b.edge((*direction).into()),
                 Step::Edge {
                     var: Some(v),
                     direction,

@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use tessera_graph::gql::{self, GqlValue};
 use tessera_graph::Graph;
+use tessera_graph::gql::{self, GqlValue};
 
-use crate::graph_accessor::{execute_match_mutation, ResultRow};
+use crate::graph_accessor::{ResultRow, execute_match_mutation};
 
 /// Runs `execute_match_mutation` (the two-lock production path) once and
 /// reports how long it took plus the `(nodes_created, edges_created)` counts.

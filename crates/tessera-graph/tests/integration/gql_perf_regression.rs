@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Performance regression guards for GQL query paths.
 //!
@@ -217,10 +217,7 @@ fn var_len_path_cycle_terminates() {
     g.add_edge("R", c, a, props! {}).unwrap();
 
     let start = Instant::now();
-    let rows = execute_query(
-        &g,
-        "MATCH (a:P)-[*1..100]->(b) RETURN DISTINCT id(b)",
-    );
+    let rows = execute_query(&g, "MATCH (a:P)-[*1..100]->(b) RETURN DISTINCT id(b)");
     let elapsed = start.elapsed();
 
     assert!(!rows.is_empty(), "should find reachable nodes");
@@ -265,8 +262,16 @@ fn label_filter_hop_throughput_guard() {
     g.end_batch().unwrap();
 
     let query_str = "MATCH (h:Hub)-[:LINK]->(t:Target) RETURN id(t)";
+    let baseline_query = "MATCH (h:Hub)-[:LINK]->(t) RETURN id(t)";
 
     let iterations = 200;
+    let baseline_start = Instant::now();
+    for _ in 0..iterations {
+        let rows = execute_query(&g, baseline_query);
+        assert_eq!(rows.len(), 1_000);
+    }
+    let baseline_elapsed = baseline_start.elapsed();
+
     let start = Instant::now();
     for _ in 0..iterations {
         let rows = execute_query(&g, query_str);
@@ -274,22 +279,15 @@ fn label_filter_hop_throughput_guard() {
     }
     let elapsed = start.elapsed();
 
-    // Signal behind this ceiling, measured unoptimized (the profile `cargo test`
-    // builds): 1.03s with the fast path, 2.58s without (2.5x) — the weakest
-    // signal still guarded by a clock here, so the ceiling is correspondingly
-    // tight. 1.8s gives 1.75x of headroom over the healthy timing and sits 1.4x
-    // below the regressed one.
-    //
-    // If this proves flaky under real CI load, widen the gap by making the
-    // fillers heavier (more/larger properties to skip decoding). Do NOT simply
-    // raise the ceiling: past ~2.5s it clears the regressed timing too and the
-    // guard silently stops guarding, which is how it ended up meaningless
-    // before (issue #69).
+    // Compare against work performed on the same graph and process instead of
+    // an absolute wall-clock ceiling. External CPU contention affects both
+    // measurements; losing the label-only fast path makes the filtered query
+    // converge on the full materialisation baseline.
+    let ratio = elapsed.as_secs_f64() / baseline_elapsed.as_secs_f64().max(f64::EPSILON);
     assert!(
-        elapsed.as_secs_f64() < 1.8,
-        "label_filter_hop too slow: {:.3}s for {iterations} iterations \
-         (expected <1.8s, typically ~1.03s) — label-only fast path may be lost",
-        elapsed.as_secs_f64()
+        ratio < 0.8,
+        "label-filtered traversal took {ratio:.2}x the unfiltered baseline \
+         (threshold: 0.8x) — label-only fast path may be lost"
     );
 }
 
@@ -410,6 +408,13 @@ fn count_one_hop_throughput_guard() {
     }
 
     let iterations = 50;
+    let baseline_start = Instant::now();
+    for _ in 0..iterations {
+        let rows = execute_query(&g, "MATCH (p:Container)-[:CONTAINS]->(c:Item) RETURN c");
+        assert_eq!(rows.len(), 5_000);
+    }
+    let baseline_elapsed = baseline_start.elapsed();
+
     let start = Instant::now();
     for _ in 0..iterations {
         let rows = execute_query(
@@ -420,23 +425,11 @@ fn count_one_hop_throughput_guard() {
     }
     let elapsed = start.elapsed();
 
-    // Signal behind this ceiling, measured UNOPTIMIZED (`cargo test` builds the
-    // dev profile, and every timing here must come from the profile the guard
-    // actually runs in — the same scenario is ~4x faster under --release):
-    // 1.47s with pushdown, 6.27s without (4.3x).
-    //
-    // 3.0s sits between them: 2.0x of headroom over the healthy timing, and a
-    // lost pushdown overshoots it by more than 2x rather than grazing it.
-    //
-    // The scenario is what makes that gap exist; see the note on the Item
-    // properties above. An earlier revision of this guard measured only
-    // 1.34-1.72x and concluded no ceiling could work here. That gap was a
-    // property of the scenario (empty Items), not of the engine.
+    let ratio = elapsed.as_secs_f64() / baseline_elapsed.as_secs_f64().max(f64::EPSILON);
     assert!(
-        elapsed.as_secs_f64() < 3.0,
-        "COUNT 1-hop pushdown too slow: {:.3}s for {iterations} iterations \
-         (expected <3.0s, typically ~1.5s) — aggregate pushdown may be lost",
-        elapsed.as_secs_f64()
+        ratio < 0.8,
+        "COUNT 1-hop pushdown ratio {ratio:.2} (count {elapsed:?}, materialized baseline \
+         {baseline_elapsed:?}); aggregate pushdown may be lost"
     );
 }
 
@@ -452,7 +445,15 @@ fn order_by_throughput_guard() {
     }
 
     let query = "MATCH (n:Item) RETURN n.score ORDER BY n.score DESC";
+    let baseline_query = "MATCH (n:Item) RETURN n.score";
     let iterations = 100;
+    let baseline_start = Instant::now();
+    for _ in 0..iterations {
+        let rows = execute_query(&g, baseline_query);
+        assert_eq!(rows.len(), 500, "baseline must return all rows");
+    }
+    let baseline_elapsed = baseline_start.elapsed();
+
     let start = Instant::now();
     for _ in 0..iterations {
         let rows = execute_query(&g, query);
@@ -460,22 +461,14 @@ fn order_by_throughput_guard() {
     }
     let elapsed = start.elapsed();
 
-    // Signal behind this ceiling, measured unoptimized (the profile `cargo test`
-    // builds) by restoring the pre-3a12381 comparator: 0.39s with the
-    // pre-computation, 0.94s without (2.4x). The gap widens with row count
-    // (at 5 000 rows it is 4.80s vs 12.04s, 2.5x) because the comparator does
-    // O(N log N) evaluations against O(N) — but 500 rows already separates the
-    // two cleanly, so the scenario is left as it was.
-    //
-    // 0.9s gives 2.3x of headroom over the healthy timing and still sits just
-    // under the regressed one. This was the only one of the three previously
-    // unverified guards that turned out to work; it was merely calibrated
-    // 5x too loose at 2.0s.
+    // A same-process unsorted baseline makes this robust against machine load.
+    // Sort-key pre-computation adds bounded sorting work; evaluating expressions
+    // inside every comparator call makes this ratio grow with O(N log N).
+    let ratio = elapsed.as_secs_f64() / baseline_elapsed.as_secs_f64().max(f64::EPSILON);
     assert!(
-        elapsed.as_secs_f64() < 0.9,
-        "ORDER BY throughput too slow: {:.3}s for {iterations} iterations \
-         (expected <0.9s, typically ~0.39s) — sort-key pre-computation may be lost",
-        elapsed.as_secs_f64()
+        ratio < 2.5,
+        "ORDER BY took {ratio:.2}x the unsorted baseline (threshold: 2.5x) \
+         — sort-key pre-computation may be lost"
     );
 }
 
@@ -621,6 +614,13 @@ fn multi_property_index_throughput_guard() {
     let query_str = "MATCH (p:Person {status: 'Active', id: 42}) RETURN id(p)";
 
     let iterations = 200;
+    let baseline_start = Instant::now();
+    for _ in 0..iterations {
+        let rows = execute_query(&g, "MATCH (p:Person {status: 'Active'}) RETURN id(p)");
+        assert_eq!(rows.len(), 5_000);
+    }
+    let baseline_elapsed = baseline_start.elapsed();
+
     let start = Instant::now();
     for _ in 0..iterations {
         let rows = execute_query(&g, query_str);
@@ -628,15 +628,11 @@ fn multi_property_index_throughput_guard() {
     }
     let elapsed = start.elapsed();
 
-    // Signal behind this ceiling, measured unoptimized (the profile `cargo test`
-    // builds): 0.95s with intersection, 10.94s without — 11x, the strongest
-    // signal in this file. 3.0s leaves 3.1x of headroom over the healthy timing
-    // and still sits 3.6x below the regressed one.
+    let ratio = elapsed.as_secs_f64() / baseline_elapsed.as_secs_f64().max(f64::EPSILON);
     assert!(
-        elapsed.as_secs_f64() < 3.0,
-        "multi_property_index_throughput_guard: {:.3}s for {iterations} iterations \
-         (expected <3.0s, typically ~0.95s) — index intersection may be lost",
-        elapsed.as_secs_f64()
+        ratio < 0.5,
+        "multi-property index ratio {ratio:.2} (intersection {elapsed:?}, broad baseline \
+         {baseline_elapsed:?}); index intersection may be lost"
     );
 }
 
@@ -680,22 +676,25 @@ fn adj_pointer_no_page_scan_guard() {
     // Reopen — adj_cache is pre-warmed by rebuild_adj_cache at open time.
     let g = Graph::open(tmp.path(), &config).unwrap();
 
-    let iterations = 50;
-    let start = Instant::now();
-    for _ in 0..iterations {
-        for &nid in &node_ids {
-            let _ = g.outgoing_edges(nid).unwrap();
+    let measure = |ids: &[tessera_graph::NodeId]| {
+        let start = Instant::now();
+        for _ in 0..50 {
+            for &nid in ids {
+                let _ = g.outgoing_edges(nid).unwrap();
+            }
         }
-    }
-    let elapsed = start.elapsed();
+        start.elapsed()
+    };
+    let small = measure(&node_ids[..100]);
+    let large = measure(&node_ids);
+    let ratio = large.as_secs_f64() / small.as_secs_f64().max(f64::EPSILON);
 
-    // 50 iterations × 200 nodes = 10 000 lookups, all O(1) via pre-warmed cache.
-    // Without pre-warming each lookup would scan all adjacency pages (O(N));
-    // this threshold catches that regression even in debug/CI builds.
+    // Doubling the lookup set should stay close to linear. A page scan on each
+    // miss makes the work grow quadratically and pushes this ratio toward 4x.
     assert!(
-        elapsed.as_secs_f64() < 1.0,
-        "adj_pointer_no_page_scan_guard: {:.3}s for {iterations} iterations (expected <1.0s) — adj_cache pre-warming may be broken",
-        elapsed.as_secs_f64()
+        ratio < 3.0,
+        "adjacency lookup scaling ratio {ratio:.2} (100 nodes {small:?}, 200 nodes {large:?}); \
+         adj_cache pre-warming may be broken"
     );
 }
 

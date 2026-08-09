@@ -1,0 +1,10 @@
+.git
+.github
+target
+data
+*.crt
+*.key
+**/__pycache__
+**/.pytest_cache
+**/.venv
+

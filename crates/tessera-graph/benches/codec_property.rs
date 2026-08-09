@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use tessera_graph::storage::codec::property_codec::{decode_properties, encode_properties};

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Buffer-pool LRU scaling benchmarks (issue #51).
 //!
@@ -19,11 +19,11 @@
 
 use std::fs::File;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use tempfile::NamedTempFile;
 use tessera_graph::storage::backend::DataFile;
 use tessera_graph::storage::buffer_pool::BufferPool;
-use tessera_graph::storage::page::{new_page_buf, PAGE_SIZE};
+use tessera_graph::storage::page::{PAGE_SIZE, new_page_buf};
 use tessera_graph::{Graph, GraphConfig, Properties};
 
 /// Builds a pool with capacity for `cached * 2` pages (so nothing is evicted)
@@ -59,14 +59,18 @@ fn bench_touch_cache_hit(c: &mut Criterion) {
     payload[0] = 0xAB;
 
     for cached in [64_u32, 512, 4_000, 16_000] {
-        group.bench_with_input(BenchmarkId::from_parameter(cached), &cached, |b, &cached| {
-            let (pool, _f) = prefilled_pool(cached);
-            // Re-put page 0 (least-recently-used): a cache hit that fires
-            // touch_lru_inner. Pre-fix this scans the whole LRU list.
-            b.iter(|| {
-                pool.put_page(DataFile::Nodes, 0, &payload).unwrap();
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(cached),
+            &cached,
+            |b, &cached| {
+                let (pool, _f) = prefilled_pool(cached);
+                // Re-put page 0 (least-recently-used): a cache hit that fires
+                // touch_lru_inner. Pre-fix this scans the whole LRU list.
+                b.iter(|| {
+                    pool.put_page(DataFile::Nodes, 0, &payload).unwrap();
+                });
+            },
+        );
     }
     group.finish();
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Configuration management for tessera-graph-enterprise.
 
@@ -81,11 +81,13 @@ impl AuditConfig {
     /// - `TESSERA_AUDIT_MAX_FILES` (default `0` = keep all)
     #[must_use]
     pub fn from_env() -> Self {
-        let enabled = std::env::var("TESSERA_AUDIT_ENABLED")
-            .map_or(true, |v| v != "false" && v != "0");
+        let enabled =
+            std::env::var("TESSERA_AUDIT_ENABLED").map_or(true, |v| v != "false" && v != "0");
 
-        let log_path = std::env::var("TESSERA_AUDIT_PATH")
-            .map_or_else(|_| std::path::PathBuf::from("audit.ndjson"), std::path::PathBuf::from);
+        let log_path = std::env::var("TESSERA_AUDIT_PATH").map_or_else(
+            |_| std::path::PathBuf::from("audit.ndjson"),
+            std::path::PathBuf::from,
+        );
 
         let rotation_max_mb: u64 = std::env::var("TESSERA_AUDIT_ROTATION_MAX_MB")
             .ok()

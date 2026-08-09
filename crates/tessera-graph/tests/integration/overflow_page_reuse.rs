@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Property-overflow pages must be reusable.
 //!
@@ -148,10 +148,7 @@ fn packing_keeps_every_node_readable() {
     let mut ids = Vec::new();
     for i in 0..100_u32 {
         let v = overflowing_value(&format!("node{i}"));
-        ids.push((
-            g.add_node("P", props! { "name" => v.as_str() }).unwrap(),
-            v,
-        ));
+        ids.push((g.add_node("P", props! { "name" => v.as_str() }).unwrap(), v));
     }
 
     for (id, expected) in &ids {
@@ -254,10 +251,16 @@ fn reuse_never_hands_out_a_page_that_is_still_live() {
     let mut g = Graph::open(tmp.path(), &test_config()).unwrap();
 
     let keep = g
-        .add_node("Keep", props! { "name" => overflowing_value("keep").as_str() })
+        .add_node(
+            "Keep",
+            props! { "name" => overflowing_value("keep").as_str() },
+        )
         .unwrap();
     let drop_me = g
-        .add_node("Drop", props! { "name" => overflowing_value("drop").as_str() })
+        .add_node(
+            "Drop",
+            props! { "name" => overflowing_value("drop").as_str() },
+        )
         .unwrap();
 
     g.remove_node(drop_me).unwrap();
@@ -397,7 +400,11 @@ fn a_commit_does_not_release_pages_a_live_reader_may_still_need() {
 
     let setup = g.begin_txn().unwrap();
     let id = g
-        .add_node_in_txn(setup, "P", props! { "name" => overflowing_value("a").as_str() })
+        .add_node_in_txn(
+            setup,
+            "P",
+            props! { "name" => overflowing_value("a").as_str() },
+        )
         .unwrap();
     g.commit_txn(setup).unwrap();
     g.vacuum_once().unwrap();

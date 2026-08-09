@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use crate::error::{NodeId, Result};
 use crate::node::Node;
@@ -88,8 +88,7 @@ pub fn encode_node_slot(node: &Node) -> Result<([u8; NODE_SLOT_SIZE], NodeSlotOv
         #[allow(clippy::cast_possible_truncation)]
         let label_len = label_bytes.len() as u8;
         slot[OFF_LABEL_LEN] = label_len;
-        slot[OFF_LABEL_INLINE..OFF_LABEL_INLINE + label_bytes.len()]
-            .copy_from_slice(label_bytes);
+        slot[OFF_LABEL_INLINE..OFF_LABEL_INLINE + label_bytes.len()].copy_from_slice(label_bytes);
     } else {
         slot[OFF_LABEL_LEN] = LABEL_OVERFLOW_MARKER;
         overflow.label_overflowed = true;
@@ -101,8 +100,10 @@ pub fn encode_node_slot(node: &Node) -> Result<([u8; NODE_SLOT_SIZE], NodeSlotOv
     // A wrapped count is worse than a rejected write: 65,536 properties would
     // record as 0, so the whole set reads back as absent while its bytes sit
     // on disk (issue #62).
-    let prop_count = u16::try_from(node.properties().len())
-        .map_err(|_| crate::Error::RecordTooLarge { size: node.properties().len() })?;
+    let prop_count =
+        u16::try_from(node.properties().len()).map_err(|_| crate::Error::RecordTooLarge {
+            size: node.properties().len(),
+        })?;
     slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].copy_from_slice(&prop_count.to_le_bytes());
 
     if props_encoded.len() <= NODE_PROP_INLINE_MAX {
@@ -123,8 +124,7 @@ pub fn encode_node_slot(node: &Node) -> Result<([u8; NODE_SLOT_SIZE], NodeSlotOv
     // redo) preserves it. A node with no edges yet holds the sentinel/0. The
     // slot stores two heads — outgoing and incoming chain — so a bidirectional
     // node keeps both without a page scan.
-    slot[OFF_ADJ_PAGE_ID..OFF_ADJ_PAGE_ID + 4]
-        .copy_from_slice(&node.adj_page_id.to_le_bytes());
+    slot[OFF_ADJ_PAGE_ID..OFF_ADJ_PAGE_ID + 4].copy_from_slice(&node.adj_page_id.to_le_bytes());
     slot[OFF_ADJ_FLAGS] = node.adj_flags;
     slot[OFF_ADJ_INCOMING_PAGE_ID..OFF_ADJ_INCOMING_PAGE_ID + 4]
         .copy_from_slice(&node.adj_incoming_page_id.to_le_bytes());
@@ -168,7 +168,13 @@ pub fn decode_node_slot_projected(
     resolve_props: impl FnOnce(u32) -> Result<Vec<u8>>,
     projected_keys: &[&str],
 ) -> Result<Option<Node>> {
-    decode_node_slot_inner(slot, page_id, resolve_label, resolve_props, Some(projected_keys))
+    decode_node_slot_inner(
+        slot,
+        page_id,
+        resolve_label,
+        resolve_props,
+        Some(projected_keys),
+    )
 }
 
 fn decode_node_slot_inner(
@@ -225,11 +231,8 @@ fn decode_node_slot_inner(
     };
 
     // properties
-    let prop_count = u16::from_le_bytes(
-        slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2]
-            .try_into()
-            .unwrap(),
-    );
+    let prop_count =
+        u16::from_le_bytes(slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap());
 
     let inline_len = u16::from_le_bytes(
         slot[OFF_PROP_INLINE_LEN..OFF_PROP_INLINE_LEN + 2]
@@ -368,11 +371,8 @@ pub fn slot_prop_overflow_ref(slot: &[u8; NODE_SLOT_SIZE]) -> u32 {
 /// Returns true if the slot has overflowed properties that need resolution.
 #[must_use]
 pub fn slot_needs_prop_resolve(slot: &[u8; NODE_SLOT_SIZE]) -> bool {
-    let prop_count = u16::from_le_bytes(
-        slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2]
-            .try_into()
-            .unwrap(),
-    );
+    let prop_count =
+        u16::from_le_bytes(slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap());
     let inline_len = u16::from_le_bytes(
         slot[OFF_PROP_INLINE_LEN..OFF_PROP_INLINE_LEN + 2]
             .try_into()
@@ -383,10 +383,8 @@ pub fn slot_needs_prop_resolve(slot: &[u8; NODE_SLOT_SIZE]) -> bool {
 
 /// Patches the `label_overflow` and `prop_overflow` offsets into an already-encoded slot.
 pub fn patch_overflow(slot: &mut [u8; NODE_SLOT_SIZE], label_overflow: u32, prop_overflow: u32) {
-    slot[OFF_LABEL_OVERFLOW..OFF_LABEL_OVERFLOW + 4]
-        .copy_from_slice(&label_overflow.to_le_bytes());
-    slot[OFF_PROP_OVERFLOW..OFF_PROP_OVERFLOW + 4]
-        .copy_from_slice(&prop_overflow.to_le_bytes());
+    slot[OFF_LABEL_OVERFLOW..OFF_LABEL_OVERFLOW + 4].copy_from_slice(&label_overflow.to_le_bytes());
+    slot[OFF_PROP_OVERFLOW..OFF_PROP_OVERFLOW + 4].copy_from_slice(&prop_overflow.to_le_bytes());
 }
 
 /// Returns the node's adjacency head page ID from the slot.
@@ -469,7 +467,9 @@ mod tests {
         match encode_node_slot(&node) {
             Err(crate::Error::RecordTooLarge { size }) => assert_eq!(size, 65_536),
             Err(other) => panic!("expected RecordTooLarge, got {other:?}"),
-            Ok(_) => panic!("65,536 properties wrap the count to 0 — all of them read back as none"),
+            Ok(_) => {
+                panic!("65,536 properties wrap the count to 0 — all of them read back as none")
+            }
         }
     }
 
@@ -535,7 +535,11 @@ mod tests {
             NODE_LABEL_INLINE_MAX + 1
         );
         assert_eq!(
-            overflow.label_bytes.as_ref().expect("overflow bytes must be set").len(),
+            overflow
+                .label_bytes
+                .as_ref()
+                .expect("overflow bytes must be set")
+                .len(),
             NODE_LABEL_INLINE_MAX + 1
         );
         assert_eq!(slot[OFF_LABEL_LEN], LABEL_OVERFLOW_MARKER);
@@ -599,9 +603,8 @@ mod tests {
         let (slot, overflow) = encode_node_slot(&node).unwrap();
         assert!(!overflow.props_overflowed);
 
-        let prop_count = u16::from_le_bytes(
-            slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap(),
-        );
+        let prop_count =
+            u16::from_le_bytes(slot[OFF_PROP_COUNT..OFF_PROP_COUNT + 2].try_into().unwrap());
         let prop_inline_len = u16::from_le_bytes(
             slot[OFF_PROP_INLINE_LEN..OFF_PROP_INLINE_LEN + 2]
                 .try_into()
@@ -653,11 +656,8 @@ mod tests {
         let node = make_node(1, "Person", Properties::new());
         let (slot, _) = encode_node_slot(&node).unwrap();
 
-        let stored_hash = u32::from_le_bytes(
-            slot[OFF_LABEL_HASH..OFF_LABEL_HASH + 4]
-                .try_into()
-                .unwrap(),
-        );
+        let stored_hash =
+            u32::from_le_bytes(slot[OFF_LABEL_HASH..OFF_LABEL_HASH + 4].try_into().unwrap());
         assert_eq!(stored_hash, label_hash("Person"));
     }
 
@@ -713,8 +713,7 @@ mod tests {
         slot[OFF_LABEL_INLINE + 1] = 0xFE;
         slot[OFF_LABEL_INLINE + 2] = 0xFD;
 
-        let err = decode_node_slot(&slot, 42, no_resolve_label, no_resolve_props)
-            .unwrap_err();
+        let err = decode_node_slot(&slot, 42, no_resolve_label, no_resolve_props).unwrap_err();
         match err {
             crate::Error::CorruptPage { page_id, .. } => assert_eq!(page_id, 42),
             other => panic!("expected CorruptPage, got {other:?}"),
@@ -761,15 +760,10 @@ mod tests {
         // Simulate: caller wrote props to overflow page 99
         patch_overflow(&mut slot, 0, 99);
 
-        let decoded = decode_node_slot(
-            &slot,
-            0,
-            no_resolve_label,
-            move |page_id| {
-                assert_eq!(page_id, 99);
-                Ok(raw_props)
-            },
-        )
+        let decoded = decode_node_slot(&slot, 0, no_resolve_label, move |page_id| {
+            assert_eq!(page_id, 99);
+            Ok(raw_props)
+        })
         .unwrap()
         .unwrap();
         assert_eq!(decoded.properties(), &props);
@@ -808,10 +802,9 @@ mod tests {
 
         let (slot, _) = encode_node_slot(&node).unwrap();
 
-        let decoded =
-            decode_node_slot_projected(&slot, 0, no_resolve_label, no_resolve_props, &[])
-                .unwrap()
-                .unwrap();
+        let decoded = decode_node_slot_projected(&slot, 0, no_resolve_label, no_resolve_props, &[])
+            .unwrap()
+            .unwrap();
 
         assert!(decoded.properties().is_empty());
         assert_eq!(decoded.label(), "Person");
@@ -827,10 +820,9 @@ mod tests {
         assert!(overflow.props_overflowed);
 
         // no_resolve_props panics if called — this proves it's never invoked
-        let decoded =
-            decode_node_slot_projected(&slot, 0, no_resolve_label, no_resolve_props, &[])
-                .unwrap()
-                .unwrap();
+        let decoded = decode_node_slot_projected(&slot, 0, no_resolve_label, no_resolve_props, &[])
+            .unwrap()
+            .unwrap();
 
         assert!(decoded.properties().is_empty());
         assert_eq!(decoded.label(), "N");
@@ -904,7 +896,11 @@ mod tests {
             "no incoming head must leave the incoming field at the sentinel"
         );
         let flags = slot_adj_flags(&slot);
-        assert_eq!(flags & ADJ_FLAG_OUTGOING, ADJ_FLAG_OUTGOING, "outgoing flag set");
+        assert_eq!(
+            flags & ADJ_FLAG_OUTGOING,
+            ADJ_FLAG_OUTGOING,
+            "outgoing flag set"
+        );
         assert_eq!(flags & ADJ_FLAG_INCOMING, 0, "incoming flag clear");
     }
 
@@ -920,18 +916,42 @@ mod tests {
         patch_adj_pointer(&mut slot, Some(7), Some(9));
 
         assert_eq!(slot_adj_page_id(&slot), 7, "outgoing head persisted");
-        assert_eq!(slot_adj_incoming_page_id(&slot), 9, "incoming head persisted");
+        assert_eq!(
+            slot_adj_incoming_page_id(&slot),
+            9,
+            "incoming head persisted"
+        );
         let flags = slot_adj_flags(&slot);
-        assert_eq!(flags & ADJ_FLAG_OUTGOING, ADJ_FLAG_OUTGOING, "outgoing flag set");
-        assert_eq!(flags & ADJ_FLAG_INCOMING, ADJ_FLAG_INCOMING, "incoming flag set");
+        assert_eq!(
+            flags & ADJ_FLAG_OUTGOING,
+            ADJ_FLAG_OUTGOING,
+            "outgoing flag set"
+        );
+        assert_eq!(
+            flags & ADJ_FLAG_INCOMING,
+            ADJ_FLAG_INCOMING,
+            "incoming flag set"
+        );
 
         // Overwriting with incoming-only must clear the outgoing head and flag.
         patch_adj_pointer(&mut slot, None, Some(11));
-        assert_eq!(slot_adj_page_id(&slot), ADJ_PAGE_ID_SENTINEL, "outgoing head cleared");
-        assert_eq!(slot_adj_incoming_page_id(&slot), 11, "incoming head updated");
+        assert_eq!(
+            slot_adj_page_id(&slot),
+            ADJ_PAGE_ID_SENTINEL,
+            "outgoing head cleared"
+        );
+        assert_eq!(
+            slot_adj_incoming_page_id(&slot),
+            11,
+            "incoming head updated"
+        );
         let flags = slot_adj_flags(&slot);
         assert_eq!(flags & ADJ_FLAG_OUTGOING, 0, "outgoing flag cleared");
-        assert_eq!(flags & ADJ_FLAG_INCOMING, ADJ_FLAG_INCOMING, "incoming flag set");
+        assert_eq!(
+            flags & ADJ_FLAG_INCOMING,
+            ADJ_FLAG_INCOMING,
+            "incoming flag set"
+        );
     }
 
     #[test]
@@ -943,10 +963,7 @@ mod tests {
         slot[OFF_LABEL_INLINE + 1] = 0xFE;
         slot[OFF_LABEL_INLINE + 2] = 0xFD;
         let result = slot_inline_label(&slot, 7);
-        assert!(
-            result.is_err(),
-            "expected Err for invalid UTF-8, got Ok"
-        );
+        assert!(result.is_err(), "expected Err for invalid UTF-8, got Ok");
         match result.unwrap_err() {
             crate::Error::CorruptPage { page_id, .. } => assert_eq!(page_id, 7),
             other => panic!("expected CorruptPage, got {other:?}"),

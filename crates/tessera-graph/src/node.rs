@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use crate::error::NodeId;
 use crate::property::Properties;
@@ -38,9 +38,7 @@ impl PartialEq for Node {
     /// compare equal. Physical/storage-only fields (like the adjacency pointer)
     /// stay out.
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.label == other.label
-            && self.properties == other.properties
+        self.id == other.id && self.label == other.label && self.properties == other.properties
     }
 }
 

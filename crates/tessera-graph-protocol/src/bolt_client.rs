@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Bolt 4.4 client — performs the handshake and provides typed request/response
 //! methods for the Bolt protocol.
@@ -9,7 +9,9 @@
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::bolt_frame::{BoltChunkedReader, BoltChunkedWriter};
-use crate::bolt_handshake::{BOLT_MAGIC, NO_VERSION_RESPONSE, SUPPORTED_VERSION, parse_version_proposal};
+use crate::bolt_handshake::{
+    BOLT_MAGIC, NO_VERSION_RESPONSE, SUPPORTED_VERSION, parse_version_proposal,
+};
 use crate::bolt_message::{BoltRequest, BoltResponse, decode_response, encode_request};
 use crate::error::ProtocolError;
 use crate::packstream::PackStreamValue;
@@ -100,8 +102,7 @@ where
         }
 
         // Validate the negotiated version matches what we support.
-        let (major, minor, _range, _padding) =
-            parse_version_proposal(u32::from_be_bytes(resp));
+        let (major, minor, _range, _padding) = parse_version_proposal(u32::from_be_bytes(resp));
         if major != SUPPORTED_VERSION.major || minor != SUPPORTED_VERSION.minor {
             return Err(ProtocolError::BoltInvalidHandshake {
                 reason: "server negotiated an unsupported Bolt version",
@@ -461,7 +462,11 @@ fn extract_string(metadata: &[(String, PackStreamValue)], key: &str) -> Option<S
         if k != key {
             return None;
         }
-        if let PackStreamValue::String(s) = v { Some(s.clone()) } else { None }
+        if let PackStreamValue::String(s) = v {
+            Some(s.clone())
+        } else {
+            None
+        }
     })
 }
 
@@ -473,13 +478,21 @@ fn extract_fields(metadata: &[(String, PackStreamValue)]) -> Vec<String> {
             if k != "fields" {
                 return None;
             }
-            if let PackStreamValue::List(items) = v { Some(items) } else { None }
+            if let PackStreamValue::List(items) = v {
+                Some(items)
+            } else {
+                None
+            }
         })
         .map(|items| {
             items
                 .iter()
                 .filter_map(|item| {
-                    if let PackStreamValue::String(s) = item { Some(s.clone()) } else { None }
+                    if let PackStreamValue::String(s) = item {
+                        Some(s.clone())
+                    } else {
+                        None
+                    }
                 })
                 .collect()
         })

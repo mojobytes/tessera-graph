@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Server-wide concurrent cache for parsed query ASTs.
 //!
@@ -8,8 +8,8 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-use tessera_graph::gql::GqlValue;
 use tessera_graph::GqlStatement;
+use tessera_graph::gql::GqlValue;
 
 /// Composite key identifying a cached parsed AST.
 ///
@@ -171,7 +171,10 @@ mod tests {
     use super::*;
 
     fn key(q: &str) -> CacheKey {
-        CacheKey { query: q.to_owned(), params_signature: 0 }
+        CacheKey {
+            query: q.to_owned(),
+            params_signature: 0,
+        }
     }
 
     #[test]
@@ -200,8 +203,13 @@ mod tests {
         }
         cache.sync_eviction();
         // After eviction, at most 4 entries should remain.
-        let present = (0..20).filter(|i| cache.get(&key(&format!("q{i}"))).is_some()).count();
-        assert!(present <= 8, "expected at most ~capacity entries, got {present}");
+        let present = (0..20)
+            .filter(|i| cache.get(&key(&format!("q{i}"))).is_some())
+            .count();
+        assert!(
+            present <= 8,
+            "expected at most ~capacity entries, got {present}"
+        );
         assert!(present >= 1, "cache should still hold recent entries");
     }
 
@@ -223,9 +231,20 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("x".to_owned(), GqlValue::Int(1));
         let sig = hash_params(&params);
-        cache.insert(CacheKey { query: q.to_owned(), params_signature: sig }, stmt.clone());
+        cache.insert(
+            CacheKey {
+                query: q.to_owned(),
+                params_signature: sig,
+            },
+            stmt.clone(),
+        );
         assert_eq!(
-            cache.get(&CacheKey { query: q.to_owned(), params_signature: sig }).unwrap(), // OK: test
+            cache
+                .get(&CacheKey {
+                    query: q.to_owned(),
+                    params_signature: sig
+                })
+                .unwrap(), // OK: test
             stmt,
         );
     }
@@ -240,12 +259,18 @@ mod tests {
         let mut b = HashMap::new();
         b.insert("x".to_owned(), GqlValue::Int(2));
         cache.insert(
-            CacheKey { query: q.to_owned(), params_signature: hash_params(&a) },
+            CacheKey {
+                query: q.to_owned(),
+                params_signature: hash_params(&a),
+            },
             stmt,
         );
         assert!(
             cache
-                .get(&CacheKey { query: q.to_owned(), params_signature: hash_params(&b) })
+                .get(&CacheKey {
+                    query: q.to_owned(),
+                    params_signature: hash_params(&b)
+                })
                 .is_none(),
             "different param values must miss the cache",
         );

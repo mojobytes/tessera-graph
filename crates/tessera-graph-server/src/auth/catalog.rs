@@ -75,10 +75,7 @@ mod tests {
         async fn list_databases(&self) -> Result<Vec<DatabaseInfo>, AuthStoreError> {
             unimplemented!()
         }
-        async fn get_database(
-            &self,
-            _name: &str,
-        ) -> Result<Option<DatabaseInfo>, AuthStoreError> {
+        async fn get_database(&self, _name: &str) -> Result<Option<DatabaseInfo>, AuthStoreError> {
             unimplemented!()
         }
     }

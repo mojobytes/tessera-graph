@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! The active-transaction registry: tracks which transactions are live and the
 //! `start_ts` snapshot each one holds.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::clock::TxnClock;
 use super::delta_table::EntityKey;
@@ -83,7 +83,13 @@ impl TxnRegistry {
         self.active
             .write()
             .expect("txn registry lock poisoned")
-            .insert(txn_id, TxnState { start_ts, bytes_used: 0 });
+            .insert(
+                txn_id,
+                TxnState {
+                    start_ts,
+                    bytes_used: 0,
+                },
+            );
         self.overlays
             .write()
             .expect("txn registry lock poisoned")

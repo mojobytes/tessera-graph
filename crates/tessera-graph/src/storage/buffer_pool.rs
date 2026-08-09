@@ -1,14 +1,14 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::RwLock;
 
+use crate::Error;
 use crate::error::Result;
 use crate::storage::backend::{DataFile, PageId};
-use crate::storage::page::{magic, new_page_buf, validate_page_buf, PageBuf, PAGE_SIZE};
-use crate::Error;
+use crate::storage::page::{PAGE_SIZE, PageBuf, magic, new_page_buf, validate_page_buf};
 
 /// Lock-poison message for the buffer pool's `RwLock`.
 const LOCK_POISON_MSG: &str = "buffer_pool lock poisoned";
@@ -100,7 +100,6 @@ struct PoolInner {
     evictions: std::sync::atomic::AtomicU64,
 }
 
-
 impl BufferPool {
     /// Creates a new buffer pool with the given memory limit in bytes.
     ///
@@ -165,7 +164,11 @@ impl BufferPool {
 
     /// Registers a file handle for a data file type.
     pub fn register_file(&self, data_file: DataFile, file: File) {
-        self.inner.write().expect(LOCK_POISON_MSG).files.insert(data_file, file);
+        self.inner
+            .write()
+            .expect(LOCK_POISON_MSG)
+            .files
+            .insert(data_file, file);
     }
 
     /// Returns an owned copy of the cached page, loading from disk if needed.
@@ -191,11 +194,7 @@ impl BufferPool {
     /// eliminating the race where an eviction between the lock release and
     /// a subsequent acquire could remove the page.
     #[allow(clippy::significant_drop_tightening)]
-    pub fn get_page(
-        &self,
-        file: DataFile,
-        page_id: PageId,
-    ) -> Result<PageBuf> {
+    pub fn get_page(&self, file: DataFile, page_id: PageId) -> Result<PageBuf> {
         let key = (file, page_id);
 
         // Phase 1: try read lock for cache hit (fast path).
@@ -203,7 +202,9 @@ impl BufferPool {
             let inner = self.inner.read().expect(LOCK_POISON_MSG);
             if let Some(frame) = inner.frames.get(&key) {
                 #[cfg(feature = "pool-instrumentation")]
-                inner.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                inner
+                    .cache_hits
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let mut copy = new_page_buf();
                 copy.copy_from_slice(frame.data.as_ref());
                 return Ok(copy);
@@ -219,13 +220,18 @@ impl BufferPool {
         // loaded the page between the read-lock drop and write-lock acquire.
         if !inner.frames.contains_key(&key) {
             #[cfg(feature = "pool-instrumentation")]
-            inner.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            inner
+                .cache_misses
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Self::ensure_capacity_inner(&mut inner, self.max_pages)?;
-            let disk_file = inner.files.get_mut(&file).ok_or_else(|| Error::CorruptPage {
-                file: file.file_name(),
-                page_id: 0,
-                reason: "data file not registered",
-            })?;
+            let disk_file = inner
+                .files
+                .get_mut(&file)
+                .ok_or_else(|| Error::CorruptPage {
+                    file: file.file_name(),
+                    page_id: 0,
+                    reason: "data file not registered",
+                })?;
             let data = Self::read_from_disk(disk_file, file, page_id)?;
             let frame = BufferFrame {
                 data,
@@ -252,12 +258,7 @@ impl BufferPool {
     /// The page is not immediately written to disk — it will be flushed
     /// on eviction or explicit `flush_all`.
     #[allow(clippy::significant_drop_tightening)]
-    pub fn put_page(
-        &self,
-        file: DataFile,
-        page_id: PageId,
-        data: &PageBuf,
-    ) -> Result<()> {
+    pub fn put_page(&self, file: DataFile, page_id: PageId, data: &PageBuf) -> Result<()> {
         let mut inner = self.inner.write().expect(LOCK_POISON_MSG);
         let key = (file, page_id);
 
@@ -265,14 +266,18 @@ impl BufferPool {
             frame.data.copy_from_slice(data.as_ref());
             frame.dirty = true;
             #[cfg(feature = "pool-instrumentation")]
-            inner.cache_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            inner
+                .cache_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Self::touch_lru_inner(&mut inner, key);
             return Ok(());
         }
 
         // Not cached — evict if full, then insert
         #[cfg(feature = "pool-instrumentation")]
-        inner.cache_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        inner
+            .cache_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Self::ensure_capacity_inner(&mut inner, self.max_pages)?;
         let mut buf = new_page_buf();
         buf.copy_from_slice(data.as_ref());
@@ -294,7 +299,9 @@ impl BufferPool {
         let mut inner = self.inner.write().expect(LOCK_POISON_MSG);
         // Collect dirty page ids first to avoid borrow conflict between
         // files (needs &mut File) and frames (needs &mut BufferFrame).
-        let dirty_pages: Vec<PageId> = inner.frames.iter()
+        let dirty_pages: Vec<PageId> = inner
+            .frames
+            .iter()
             .filter(|((df, _), frame)| *df == file && frame.dirty)
             .map(|((_, pid), _)| *pid)
             .collect();
@@ -304,13 +311,20 @@ impl BufferPool {
             let mut page_copy = new_page_buf();
             page_copy.copy_from_slice(frame.data.as_ref());
 
-            let disk_file = inner.files.get_mut(&file).ok_or_else(|| Error::CorruptPage {
-                file: file.file_name(),
-                page_id: 0,
-                reason: "data file not registered",
-            })?;
+            let disk_file = inner
+                .files
+                .get_mut(&file)
+                .ok_or_else(|| Error::CorruptPage {
+                    file: file.file_name(),
+                    page_id: 0,
+                    reason: "data file not registered",
+                })?;
             Self::write_to_disk(disk_file, pid, &page_copy)?;
-            inner.frames.get_mut(&(file, pid)).expect("just collected").dirty = false;
+            inner
+                .frames
+                .get_mut(&(file, pid))
+                .expect("just collected")
+                .dirty = false;
         }
         Ok(())
     }
@@ -333,7 +347,9 @@ impl BufferPool {
     #[must_use]
     #[cfg(test)]
     pub fn is_dirty(&self, file: DataFile, page_id: PageId) -> bool {
-        self.inner.read().expect(LOCK_POISON_MSG)
+        self.inner
+            .read()
+            .expect(LOCK_POISON_MSG)
             .frames
             .get(&(file, page_id))
             .is_some_and(|f| f.dirty)
@@ -492,7 +508,9 @@ impl BufferPool {
         // other.
         Self::lru_unlink_inner(inner, victim);
         #[cfg(feature = "pool-instrumentation")]
-        inner.evictions.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        inner
+            .evictions
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let (victim_file, victim_page_id) = victim;
         let removed = inner.frames.remove(&victim);
         // Both maps have now dropped the victim, so they are back in sync even
@@ -500,11 +518,15 @@ impl BufferPool {
         Self::debug_assert_lru_synced(inner);
         if let Some(frame) = removed {
             if frame.dirty {
-                let disk_file = inner.files.get_mut(&victim_file).ok_or_else(|| Error::CorruptPage {
-                    file: victim_file.file_name(),
-                    page_id: 0,
-                    reason: "data file not registered",
-                })?;
+                let disk_file =
+                    inner
+                        .files
+                        .get_mut(&victim_file)
+                        .ok_or_else(|| Error::CorruptPage {
+                            file: victim_file.file_name(),
+                            page_id: 0,
+                            reason: "data file not registered",
+                        })?;
                 Self::write_to_disk(disk_file, victim_page_id, &frame.data)?;
             }
         }
@@ -600,7 +622,7 @@ mod tests {
     /// is read back at offset `PAGE_HEADER_SIZE`, since byte 0 now holds the
     /// page magic (validated on read by [`BufferPool::read_from_disk`]).
     fn write_page_to_file(f: &mut File, page_id: u32, marker: u8) {
-        use crate::storage::page::{finalize_page, magic, PageType};
+        use crate::storage::page::{PageType, finalize_page, magic};
         let offset = u64::from(page_id) * PAGE_SIZE as u64;
         f.seek(SeekFrom::Start(offset)).unwrap();
         let mut buf = new_page_buf();
@@ -742,7 +764,14 @@ mod tests {
         pool.put_page(DataFile::Nodes, 2, &data2).unwrap();
 
         assert_eq!(pool.cached_count(), 2);
-        assert!(!pool.inner.read().expect("lock").frames.contains_key(&(DataFile::Nodes, 0)));
+        assert!(
+            !pool
+                .inner
+                .read()
+                .expect("lock")
+                .frames
+                .contains_key(&(DataFile::Nodes, 0))
+        );
 
         // Page 0 should have been flushed to disk
         let f = tf.as_file_mut();
@@ -887,9 +916,7 @@ mod tests {
                     for _ in 0..1000 {
                         // allow: test fixture
                         #[allow(clippy::cast_sign_loss)]
-                        let page = pool
-                            .get_page(DataFile::Nodes, page_id as u32)
-                            .unwrap();
+                        let page = pool.get_page(DataFile::Nodes, page_id as u32).unwrap();
                         assert_eq!(page[PAGE_HEADER_SIZE], expected);
                     }
                 })
@@ -1052,8 +1079,14 @@ mod tests {
         pool.put_page(DataFile::Nodes, 4, &d4).unwrap();
 
         let inner = pool.inner.read().expect("lock");
-        assert!(!inner.frames.contains_key(&(DataFile::Nodes, 0)), "0 should be evicted");
-        assert!(inner.frames.contains_key(&(DataFile::Nodes, 2)), "2 should survive");
+        assert!(
+            !inner.frames.contains_key(&(DataFile::Nodes, 0)),
+            "0 should be evicted"
+        );
+        assert!(
+            inner.frames.contains_key(&(DataFile::Nodes, 2)),
+            "2 should survive"
+        );
         assert!(inner.frames.contains_key(&(DataFile::Nodes, 3)));
         assert!(inner.frames.contains_key(&(DataFile::Nodes, 4)));
     }
@@ -1077,8 +1110,14 @@ mod tests {
         pool.put_page(DataFile::Nodes, 3, &d3).unwrap();
 
         let inner = pool.inner.read().expect("lock");
-        assert!(inner.frames.contains_key(&(DataFile::Nodes, 0)), "pinned 0 must survive");
-        assert!(!inner.frames.contains_key(&(DataFile::Nodes, 1)), "1 should be evicted");
+        assert!(
+            inner.frames.contains_key(&(DataFile::Nodes, 0)),
+            "pinned 0 must survive"
+        );
+        assert!(
+            !inner.frames.contains_key(&(DataFile::Nodes, 1)),
+            "1 should be evicted"
+        );
         assert!(inner.frames.contains_key(&(DataFile::Nodes, 2)));
         assert!(inner.frames.contains_key(&(DataFile::Nodes, 3)));
     }

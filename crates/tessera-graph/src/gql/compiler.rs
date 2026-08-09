@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! GQL-to-PatternBuilder compiler.
 //!
@@ -10,16 +10,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::BuildHasher;
 use std::time::Instant;
 
+use crate::Direction;
 use crate::access::GraphAccess;
 use crate::error::{EdgeId, Error, NodeId};
 use crate::property::Property;
-use crate::Direction;
 use crate::query::pattern::PatternMatch;
 
 use super::ast::{
     AggFunc, AstDirection, BinOp, ConstReturnQuery, EdgeLength, EdgePattern, Expr, GqlQuery,
-    Literal, MatchClause, NodePattern,
-    OrderByClause, ParamRef, PathPattern, ReturnItem, SetAssignment, UnaryOp,
+    Literal, MatchClause, NodePattern, OrderByClause, ParamRef, PathPattern, ReturnItem,
+    SetAssignment, UnaryOp,
 };
 
 // ── Runtime value types ─────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ impl DeadlineAbort {
     }
 
     /// Returns `true` once the deadline has tripped this cell.
-    fn is_aborted(&self) -> bool {
+    const fn is_aborted(&self) -> bool {
         self.aborted.get()
     }
 
@@ -304,7 +304,13 @@ pub fn resolve_create_props<G: GraphAccess + ?Sized>(
         } else {
             // CREATE prop expressions are not a runaway-BFS site; no deadline.
             // No path binding is in scope for CREATE props.
-            eval_expr(expr, pm, &PathBindings::new(), graph, &DeadlineAbort::none())
+            eval_expr(
+                expr,
+                pm,
+                &PathBindings::new(),
+                graph,
+                &DeadlineAbort::none(),
+            )
         };
         if let Some(prop) = gql_value_to_property(&val) {
             result.insert(key.clone(), prop);
@@ -373,7 +379,13 @@ pub fn execute_expr<G: GraphAccess + ?Sized>(
     // External callers (server UNWIND list eval) evaluate bounded list
     // expressions, not runaway BFS; no deadline is threaded here. No path
     // binding is in scope for these external entry points.
-    eval_expr(expr, pm, &PathBindings::new(), graph, &DeadlineAbort::none())
+    eval_expr(
+        expr,
+        pm,
+        &PathBindings::new(),
+        graph,
+        &DeadlineAbort::none(),
+    )
 }
 
 /// Maps an AST direction to a query direction.
@@ -410,11 +422,13 @@ type PathBindings = HashMap<String, GqlPath>;
 /// lowercased function name; `path` is the materialised path for the argument.
 fn compute_path_function(name: &str, path: &GqlPath) -> GqlValue {
     match name {
-        "nodes" => {
-            GqlValue::List(path.nodes.iter().cloned().map(GqlValue::Node).collect())
-        }
+        "nodes" => GqlValue::List(path.nodes.iter().cloned().map(GqlValue::Node).collect()),
         "relationships" => GqlValue::List(
-            path.rels.iter().cloned().map(GqlValue::Relationship).collect(),
+            path.rels
+                .iter()
+                .cloned()
+                .map(GqlValue::Relationship)
+                .collect(),
         ),
         #[allow(clippy::cast_possible_wrap)]
         "length" => GqlValue::Int(path.rels.len() as i64),
@@ -468,22 +482,20 @@ fn eval_expr<G: GraphAccess + ?Sized>(
 
         Expr::Aggregate { .. } => GqlValue::Null,
 
-        Expr::PropAccess { var, prop } => pm
-            .get_node(var)
-            .map_or_else(
-                |_| {
-                    pm.get_edge(var).map_or(GqlValue::Null, |edge| {
-                        edge.properties()
-                            .get(prop)
-                            .map_or(GqlValue::Null, gql_value_from_property)
-                    })
-                },
-                |node| {
-                    node.properties()
+        Expr::PropAccess { var, prop } => pm.get_node(var).map_or_else(
+            |_| {
+                pm.get_edge(var).map_or(GqlValue::Null, |edge| {
+                    edge.properties()
                         .get(prop)
                         .map_or(GqlValue::Null, gql_value_from_property)
-                },
-            ),
+                })
+            },
+            |node| {
+                node.properties()
+                    .get(prop)
+                    .map_or(GqlValue::Null, gql_value_from_property)
+            },
+        ),
 
         Expr::BinaryOp { left, op, right } => {
             let lv = eval_expr(left, pm, paths, graph, abort);
@@ -496,7 +508,10 @@ fn eval_expr<G: GraphAccess + ?Sized>(
             eval_unary_op(*op, &v)
         }
 
-        Expr::IsNull { expr: inner, negated } => {
+        Expr::IsNull {
+            expr: inner,
+            negated,
+        } => {
             let v = eval_expr(inner, pm, paths, graph, abort);
             let is_null = v == GqlValue::Null;
             GqlValue::Bool(if *negated { !is_null } else { is_null })
@@ -515,8 +530,10 @@ fn eval_expr<G: GraphAccess + ?Sized>(
         // evaluator must return actual values here rather than silently
         // collapsing to `Null`.
         Expr::ListLit(items) => {
-            let vals: Vec<GqlValue> =
-                items.iter().map(|e| eval_expr(e, pm, paths, graph, abort)).collect();
+            let vals: Vec<GqlValue> = items
+                .iter()
+                .map(|e| eval_expr(e, pm, paths, graph, abort))
+                .collect();
             GqlValue::List(vals)
         }
         Expr::Subscript { list, index } => {
@@ -524,9 +541,12 @@ fn eval_expr<G: GraphAccess + ?Sized>(
             let index_val = eval_expr(index, pm, paths, graph, abort);
             eval_subscript(&list_val, &index_val)
         }
-        Expr::ListPredicate { kind, var, list, predicate } => {
-            eval_list_predicate(*kind, var, list, predicate, pm, paths, graph, abort)
-        }
+        Expr::ListPredicate {
+            kind,
+            var,
+            list,
+            predicate,
+        } => eval_list_predicate(*kind, var, list, predicate, pm, paths, graph, abort),
     }
 }
 
@@ -600,8 +620,10 @@ fn eval_function_call<G: GraphAccess + ?Sized>(
             return compute_to_upper(&val);
         }
         "coalesce" => {
-            let evaluated: Vec<GqlValue> =
-                args.iter().map(|a| eval_expr(a, pm, paths, graph, abort)).collect();
+            let evaluated: Vec<GqlValue> = args
+                .iter()
+                .map(|a| eval_expr(a, pm, paths, graph, abort))
+                .collect();
             return compute_coalesce(&evaluated);
         }
         _ => {}
@@ -619,20 +641,19 @@ fn eval_function_call<G: GraphAccess + ?Sized>(
     };
 
     match name {
-        "id" => {
+        "id" =>
+        {
             #[allow(clippy::cast_possible_wrap)]
-            pm.get_node(var_name)
-                .map_or(GqlValue::Null, |node| GqlValue::Int(node.id().as_u64() as i64))
-        }
-        "type" => {
-            pm.get_edge(var_name)
-                .map_or(GqlValue::Null, |edge| GqlValue::Str(edge.label().to_owned()))
-        }
-        "labels" => {
             pm.get_node(var_name).map_or(GqlValue::Null, |node| {
-                GqlValue::List(vec![GqlValue::Str(node.label().to_owned())])
+                GqlValue::Int(node.id().as_u64() as i64)
             })
         }
+        "type" => pm.get_edge(var_name).map_or(GqlValue::Null, |edge| {
+            GqlValue::Str(edge.label().to_owned())
+        }),
+        "labels" => pm.get_node(var_name).map_or(GqlValue::Null, |node| {
+            GqlValue::List(vec![GqlValue::Str(node.label().to_owned())])
+        }),
         "properties" => pm.get_node(var_name).map_or_else(
             |_| {
                 pm.get_edge(var_name)
@@ -705,7 +726,10 @@ fn eval_list_predicate<G: GraphAccess + ?Sized>(
     };
     // Carry the outer MATCH bindings so the predicate can reference them
     // (e.g. `x > n.threshold`) alongside the iteration variable.
-    let mut binding = Binding { pm: pm.clone(), vals: HashMap::new() };
+    let mut binding = Binding {
+        pm: pm.clone(),
+        vals: HashMap::new(),
+    };
     apply_list_quantifier(kind, &items, |item| {
         binding.vals.insert(var.to_owned(), item.clone());
         match eval_expr_on_binding(predicate, &binding, graph) {
@@ -777,7 +801,9 @@ fn shortest_path_bfs<G: GraphAccess + ?Sized>(
             return None;
         }
         counter += 1;
-        let Ok(edges) = graph.outgoing_edges(current) else { continue };
+        let Ok(edges) = graph.outgoing_edges(current) else {
+            continue;
+        };
         for edge in &edges {
             let next = edge.target();
             if visited.contains(&next) {
@@ -844,15 +870,23 @@ fn eval_shortest_path_pattern<G: GraphAccess + ?Sized>(
     let direction = compile_direction(edge_pattern.direction);
 
     // Run constrained BFS
-    shortest_path_bfs_constrained(graph, from_id, to_id, max_depth, label_filter, direction, abort)
-        .map_or(GqlValue::Null, |path| {
-            #[allow(clippy::cast_possible_wrap)]
-            let ids: Vec<GqlValue> = path
-                .into_iter()
-                .map(|nid| GqlValue::Int(nid.as_u64() as i64))
-                .collect();
-            GqlValue::List(ids)
-        })
+    shortest_path_bfs_constrained(
+        graph,
+        from_id,
+        to_id,
+        max_depth,
+        label_filter,
+        direction,
+        abort,
+    )
+    .map_or(GqlValue::Null, |path| {
+        #[allow(clippy::cast_possible_wrap)]
+        let ids: Vec<GqlValue> = path
+            .into_iter()
+            .map(|nid| GqlValue::Int(nid.as_u64() as i64))
+            .collect();
+        GqlValue::List(ids)
+    })
 }
 
 /// BFS from `from` to `to` with optional depth limit, label filter, and direction.
@@ -967,41 +1001,35 @@ fn eval_binary_op(lv: &GqlValue, op: BinOp, rv: &GqlValue) -> GqlValue {
         BinOp::Eq => GqlValue::Bool(gql_value_eq(lv, rv)),
         BinOp::NotEq => GqlValue::Bool(!gql_value_eq(lv, rv)),
 
-        BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
-            eval_comparison(lv, op, rv)
-        }
+        BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => eval_comparison(lv, op, rv),
 
-        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-            eval_arithmetic(lv, op, rv)
-        }
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => eval_arithmetic(lv, op, rv),
 
-        BinOp::StartsWith => {
-            match (lv, rv) {
-                (GqlValue::Str(s), GqlValue::Str(prefix)) => GqlValue::Bool(s.starts_with(prefix.as_str())),
-                _ => GqlValue::Null,
+        BinOp::StartsWith => match (lv, rv) {
+            (GqlValue::Str(s), GqlValue::Str(prefix)) => {
+                GqlValue::Bool(s.starts_with(prefix.as_str()))
             }
-        }
+            _ => GqlValue::Null,
+        },
 
-        BinOp::EndsWith => {
-            match (lv, rv) {
-                (GqlValue::Str(s), GqlValue::Str(suffix)) => GqlValue::Bool(s.ends_with(suffix.as_str())),
-                _ => GqlValue::Null,
+        BinOp::EndsWith => match (lv, rv) {
+            (GqlValue::Str(s), GqlValue::Str(suffix)) => {
+                GqlValue::Bool(s.ends_with(suffix.as_str()))
             }
-        }
+            _ => GqlValue::Null,
+        },
 
-        BinOp::Contains => {
-            match (lv, rv) {
-                (GqlValue::Str(s), GqlValue::Str(needle)) => GqlValue::Bool(s.contains(needle.as_str())),
-                _ => GqlValue::Null,
+        BinOp::Contains => match (lv, rv) {
+            (GqlValue::Str(s), GqlValue::Str(needle)) => {
+                GqlValue::Bool(s.contains(needle.as_str()))
             }
-        }
+            _ => GqlValue::Null,
+        },
 
-        BinOp::In => {
-            match rv {
-                GqlValue::List(list) => GqlValue::Bool(list.iter().any(|item| gql_value_eq(lv, item))),
-                _ => GqlValue::Null,
-            }
-        }
+        BinOp::In => match rv {
+            GqlValue::List(list) => GqlValue::Bool(list.iter().any(|item| gql_value_eq(lv, item))),
+            _ => GqlValue::Null,
+        },
     }
 }
 
@@ -1056,20 +1084,20 @@ fn eval_arithmetic(lv: &GqlValue, op: BinOp, rv: &GqlValue) -> GqlValue {
         return GqlValue::Null;
     }
     match (lv, rv) {
-        (GqlValue::Int(a), GqlValue::Int(b)) => {
-            match op {
-                BinOp::Add => GqlValue::Int(a.wrapping_add(*b)),
-                BinOp::Sub => GqlValue::Int(a.wrapping_sub(*b)),
-                BinOp::Mul => GqlValue::Int(a.wrapping_mul(*b)),
-                BinOp::Div => {
-                    if *b == 0 { GqlValue::Null } else { GqlValue::Int(a / b) }
+        (GqlValue::Int(a), GqlValue::Int(b)) => match op {
+            BinOp::Add => GqlValue::Int(a.wrapping_add(*b)),
+            BinOp::Sub => GqlValue::Int(a.wrapping_sub(*b)),
+            BinOp::Mul => GqlValue::Int(a.wrapping_mul(*b)),
+            BinOp::Div => {
+                if *b == 0 {
+                    GqlValue::Null
+                } else {
+                    GqlValue::Int(a / b)
                 }
-                _ => unreachable!(),
             }
-        }
-        (GqlValue::Float(a), GqlValue::Float(b)) => {
-            eval_float_arithmetic(*a, op, *b)
-        }
+            _ => unreachable!(),
+        },
+        (GqlValue::Float(a), GqlValue::Float(b)) => eval_float_arithmetic(*a, op, *b),
         (GqlValue::Int(i), GqlValue::Float(f)) => {
             #[allow(clippy::cast_precision_loss)]
             let fi = *i as f64;
@@ -1091,7 +1119,11 @@ fn eval_float_arithmetic(a: f64, op: BinOp, b: f64) -> GqlValue {
         BinOp::Sub => GqlValue::Float(a - b),
         BinOp::Mul => GqlValue::Float(a * b),
         BinOp::Div => {
-            if b == 0.0 { GqlValue::Null } else { GqlValue::Float(a / b) }
+            if b == 0.0 {
+                GqlValue::Null
+            } else {
+                GqlValue::Float(a / b)
+            }
         }
         _ => unreachable!(),
     }
@@ -1100,8 +1132,7 @@ fn eval_float_arithmetic(a: f64, op: BinOp, b: f64) -> GqlValue {
 /// Evaluates a unary operation.
 fn eval_unary_op(op: UnaryOp, v: &GqlValue) -> GqlValue {
     match op {
-        UnaryOp::Not => eval_as_tribool(v)
-            .map_or(GqlValue::Null, |b| GqlValue::Bool(!b)),
+        UnaryOp::Not => eval_as_tribool(v).map_or(GqlValue::Null, |b| GqlValue::Bool(!b)),
         UnaryOp::Neg => match v {
             // checked_neg returns None for i64::MIN (not representable) → Null
             GqlValue::Int(i) => i.checked_neg().map_or(GqlValue::Null, GqlValue::Int),
@@ -1190,7 +1221,10 @@ pub fn expr_surface_name(expr: &Expr) -> String {
             };
             format!("{prefix}{}", expr_surface_name(inner))
         }
-        Expr::IsNull { expr: inner, negated } => {
+        Expr::IsNull {
+            expr: inner,
+            negated,
+        } => {
             let suffix = if *negated { "IS NOT NULL" } else { "IS NULL" };
             format!("{} {suffix}", expr_surface_name(inner))
         }
@@ -1199,16 +1233,19 @@ pub fn expr_surface_name(expr: &Expr) -> String {
             format!("{}({})", name, arg_strs.join(", "))
         }
         Expr::ShortestPath { .. } => "shortestPath(...)".to_string(),
-        Expr::Subscript { list, index } => format!(
-            "{}[{}]",
-            expr_surface_name(list),
-            expr_surface_name(index)
-        ),
+        Expr::Subscript { list, index } => {
+            format!("{}[{}]", expr_surface_name(list), expr_surface_name(index))
+        }
         Expr::ListLit(items) => {
             let parts: Vec<String> = items.iter().map(expr_surface_name).collect();
             format!("[{}]", parts.join(", "))
         }
-        Expr::ListPredicate { kind, var, list, predicate } => {
+        Expr::ListPredicate {
+            kind,
+            var,
+            list,
+            predicate,
+        } => {
             let kw = match kind {
                 super::ast::ListPredKind::All => "ALL",
                 super::ast::ListPredKind::Any => "ANY",
@@ -1338,7 +1375,12 @@ fn collect_expr_vars(expr: &Expr, out: &mut HashSet<String>) {
                 collect_expr_vars(item, out);
             }
         }
-        Expr::ListPredicate { var, list, predicate, .. } => {
+        Expr::ListPredicate {
+            var,
+            list,
+            predicate,
+            ..
+        } => {
             // The list expression is evaluated in the outer scope, so its
             // variables are genuine external references.
             collect_expr_vars(list, out);
@@ -1400,9 +1442,7 @@ fn validate_scope(query: &GqlQuery, bound: &HashSet<String>) -> crate::Result<()
 fn expr_has_aggregate(expr: &Expr) -> bool {
     match expr {
         Expr::Aggregate { .. } => true,
-        Expr::BinaryOp { left, right, .. } => {
-            expr_has_aggregate(left) || expr_has_aggregate(right)
-        }
+        Expr::BinaryOp { left, right, .. } => expr_has_aggregate(left) || expr_has_aggregate(right),
         Expr::UnaryOp { expr: inner, .. } | Expr::IsNull { expr: inner, .. } => {
             expr_has_aggregate(inner)
         }
@@ -1425,9 +1465,7 @@ fn validate_aggregation(
     if let Some(gb) = group_by {
         // With GROUP BY: non-aggregate RETURN exprs must appear in GROUP BY keys
         for item in items {
-            if !expr_has_aggregate(&item.expr)
-                && !gb.keys.iter().any(|k| k == &item.expr)
-            {
+            if !expr_has_aggregate(&item.expr) && !gb.keys.iter().any(|k| k == &item.expr) {
                 return Err(Error::GqlCompileError(format!(
                     "non-aggregate expression '{}' in RETURN must appear in GROUP BY",
                     expr_surface_name(&item.expr),
@@ -1441,8 +1479,7 @@ fn validate_aggregation(
 
     if any_agg && !all_agg {
         return Err(Error::GqlCompileError(
-            "cannot mix aggregate and non-aggregate expressions in RETURN without GROUP BY"
-                .into(),
+            "cannot mix aggregate and non-aggregate expressions in RETURN without GROUP BY".into(),
         ));
     }
 
@@ -1475,7 +1512,9 @@ fn compile_match<G: GraphAccess + ?Sized>(
 
     // Single pattern → no cross-join needed.
     if result_sets.len() == 1 {
-        return Ok(result_sets.into_iter().next()
+        return Ok(result_sets
+            .into_iter()
+            .next()
             .expect("result_sets.len() == 1 verified above"));
     }
 
@@ -1517,8 +1556,8 @@ fn materialise_path_for_match<G: GraphAccess + ?Sized>(
     pm: &PatternMatch,
     pp: &PathPattern,
 ) -> Option<GqlPath> {
-    let all_fixed_named = !has_variable_length_hop(pp)
-        && pp.hops.iter().all(|(ep, _)| ep.var.is_some());
+    let all_fixed_named =
+        !has_variable_length_hop(pp) && pp.hops.iter().all(|(ep, _)| ep.var.is_some());
 
     if all_fixed_named {
         // Reconstruct from named vars in traversal order. Start node and each
@@ -1595,7 +1634,10 @@ fn materialise_varlen_path<G: GraphAccess + ?Sized>(
 ) -> Option<GqlPath> {
     if start_id == end_id {
         let node = graph.node(start_id).ok()?;
-        return Some(GqlPath { nodes: vec![gql_node_from_entity(&node)], rels: vec![] });
+        return Some(GqlPath {
+            nodes: vec![gql_node_from_entity(&node)],
+            rels: vec![],
+        });
     }
 
     let mut visited: HashSet<NodeId> = HashSet::from([start_id]);
@@ -1649,13 +1691,20 @@ fn reconstruct_varlen_path<G: GraphAccess + ?Sized>(
     for edge in &rev_edges {
         // The path advances to whichever endpoint is NOT the node we came from
         // (handles undirected `Both` hops and reverse-stored edges).
-        let next = if edge.source() == prev { edge.target() } else { edge.source() };
+        let next = if edge.source() == prev {
+            edge.target()
+        } else {
+            edge.source()
+        };
         nodes.push(gql_node_from_entity(&graph.node(next).ok()?));
         prev = next;
     }
     Some(GqlPath {
         nodes,
-        rels: rev_edges.iter().map(|e| gql_relationship_from_entity(e)).collect(),
+        rels: rev_edges
+            .iter()
+            .map(|e| gql_relationship_from_entity(e))
+            .collect(),
     })
 }
 
@@ -1669,7 +1718,9 @@ const VARIABLE_HOP_SAFETY_CAP: u32 = 100;
 
 /// Returns `true` if the path pattern contains any variable-length hops.
 fn has_variable_length_hop(pp: &PathPattern) -> bool {
-    pp.hops.iter().any(|(ep, _)| matches!(ep.length, EdgeLength::Variable { .. }))
+    pp.hops
+        .iter()
+        .any(|(ep, _)| matches!(ep.length, EdgeLength::Variable { .. }))
 }
 
 /// Compiles a single path pattern into `PatternBuilder` calls.
@@ -1689,7 +1740,10 @@ fn compile_path_pattern<G: GraphAccess + ?Sized>(
 }
 
 /// Fixed-hop path pattern compilation via `PatternBuilder` (original path).
-fn compile_path_pattern_fixed<G: GraphAccess + ?Sized>(graph: &G, pp: &PathPattern) -> crate::Result<Vec<PatternMatch>> {
+fn compile_path_pattern_fixed<G: GraphAccess + ?Sized>(
+    graph: &G,
+    pp: &PathPattern,
+) -> crate::Result<Vec<PatternMatch>> {
     let mut builder = crate::query::pattern::PatternBuilder::new(graph);
     let mut anon_counter = 0_u32;
 
@@ -1737,7 +1791,15 @@ fn compile_path_pattern_with_varlen<G: GraphAccess + ?Sized>(
                 let min = min.unwrap_or(0);
                 let max = max.unwrap_or(VARIABLE_HOP_SAFETY_CAP);
                 current = expand_variable_hop(
-                    graph, &current, &prev_node_var, &end_var, ep, np, min, max, deadline,
+                    graph,
+                    &current,
+                    &prev_node_var,
+                    &end_var,
+                    ep,
+                    np,
+                    min,
+                    max,
+                    deadline,
                 )?;
             }
         }
@@ -1774,22 +1836,22 @@ fn seed_start_node<G: GraphAccess + ?Sized>(
     // narrow the initial candidate set using the property index (O(1)).
     // The full `node_matches_pattern` check still runs to validate any
     // additional property constraints beyond the first one used for lookup.
-    let candidates = if let (Some(label), Some((key, lit))) =
-        (np.labels.first(), np.props.first())
+    let candidates = if let (Some(label), Some((key, lit))) = (np.labels.first(), np.props.first())
     {
         literal_to_property(lit).map_or_else(
             || graph.nodes_by_label(label),
             |value| graph.nodes_by_label_and_property(label, key, &value),
         )
     } else {
-        np.labels.first().map_or_else(
-            || graph.node_ids(),
-            |label| graph.nodes_by_label(label),
-        )
+        np.labels
+            .first()
+            .map_or_else(|| graph.node_ids(), |label| graph.nodes_by_label(label))
     };
 
     for node_id in candidates {
-        let Ok(node) = graph.node(node_id) else { continue };
+        let Ok(node) = graph.node(node_id) else {
+            continue;
+        };
 
         if !node_matches_pattern(&node, np) {
             continue;
@@ -1805,14 +1867,19 @@ fn seed_start_node<G: GraphAccess + ?Sized>(
 
 /// Checks if a node matches a `NodePattern`'s label and property constraints.
 fn node_matches_pattern(node: &crate::Node, np: &NodePattern) -> bool {
-    debug_assert!(np.labels.len() <= 1, "multi-label patterns not yet supported in matching");
+    debug_assert!(
+        np.labels.len() <= 1,
+        "multi-label patterns not yet supported in matching"
+    );
     if let Some(label) = np.labels.first() {
         if node.label() != label {
             return false;
         }
     }
     for (key, lit) in &np.props {
-        let Some(expected) = literal_to_property(lit) else { continue };
+        let Some(expected) = literal_to_property(lit) else {
+            continue;
+        };
         match node.properties().get(key) {
             Some(actual) if *actual == expected => {}
             _ => return false,
@@ -1829,7 +1896,9 @@ fn edge_matches_pattern(edge: &crate::Edge, ep: &EdgePattern) -> bool {
         }
     }
     for (key, lit) in &ep.props {
-        let Some(expected) = literal_to_property(lit) else { continue };
+        let Some(expected) = literal_to_property(lit) else {
+            continue;
+        };
         match edge.properties().get(key) {
             Some(actual) if *actual == expected => {}
             _ => return false,
@@ -1842,10 +1911,18 @@ fn edge_matches_pattern(edge: &crate::Edge, ep: &EdgePattern) -> bool {
 fn edge_neighbor(edge: &crate::Edge, from: NodeId, direction: AstDirection) -> Option<NodeId> {
     match direction {
         AstDirection::Outgoing => {
-            if edge.source() == from { Some(edge.target()) } else { None }
+            if edge.source() == from {
+                Some(edge.target())
+            } else {
+                None
+            }
         }
         AstDirection::Incoming => {
-            if edge.target() == from { Some(edge.source()) } else { None }
+            if edge.target() == from {
+                Some(edge.source())
+            } else {
+                None
+            }
         }
         AstDirection::Both => {
             if edge.source() == from {
@@ -1888,7 +1965,9 @@ fn expand_fixed_hop<G: GraphAccess + ?Sized>(
     let mut results = Vec::new();
 
     for pm in current {
-        let Ok(start_node) = pm.get_node(start_var) else { continue };
+        let Ok(start_node) = pm.get_node(start_var) else {
+            continue;
+        };
         let start_id = start_node.id();
 
         let edges = get_edges_for_direction(graph, start_id, ep.direction)?;
@@ -1896,8 +1975,12 @@ fn expand_fixed_hop<G: GraphAccess + ?Sized>(
             if !edge_matches_pattern(edge, ep) {
                 continue;
             }
-            let Some(next_id) = edge_neighbor(edge, start_id, ep.direction) else { continue };
-            let Ok(next_node) = graph.node(next_id) else { continue };
+            let Some(next_id) = edge_neighbor(edge, start_id, ep.direction) else {
+                continue;
+            };
+            let Ok(next_node) = graph.node(next_id) else {
+                continue;
+            };
 
             if !node_matches_pattern(&next_node, np) {
                 continue;
@@ -1943,7 +2026,9 @@ fn expand_variable_hop<G: GraphAccess + ?Sized>(
     let mut counter = 0_u64;
 
     for pm in current {
-        let Ok(start_node) = pm.get_node(start_var) else { continue };
+        let Ok(start_node) = pm.get_node(start_var) else {
+            continue;
+        };
         let start_id = start_node.id();
 
         // BFS: (node_id, depth, last_edge)
@@ -1953,7 +2038,9 @@ fn expand_variable_hop<G: GraphAccess + ?Sized>(
 
         // Emit start node at depth 0 when min == 0
         if min == 0 {
-            let Ok(start_as_end) = graph.node(start_id) else { continue };
+            let Ok(start_as_end) = graph.node(start_id) else {
+                continue;
+            };
             if node_matches_pattern(&start_as_end, np) {
                 let mut nodes = pm.nodes_clone();
                 nodes.insert(end_var.to_string(), start_as_end);
@@ -1967,7 +2054,9 @@ fn expand_variable_hop<G: GraphAccess + ?Sized>(
             if !edge_matches_pattern(&edge, ep) {
                 continue;
             }
-            let Some(next_id) = edge_neighbor(&edge, start_id, ep.direction) else { continue };
+            let Some(next_id) = edge_neighbor(&edge, start_id, ep.direction) else {
+                continue;
+            };
             if !visited.insert(next_id) {
                 continue;
             }
@@ -1986,7 +2075,9 @@ fn expand_variable_hop<G: GraphAccess + ?Sized>(
 
             // Emit if within [min..=max] range and end node matches pattern
             if depth >= min {
-                let Ok(end_node) = graph.node(node_id) else { continue };
+                let Ok(end_node) = graph.node(node_id) else {
+                    continue;
+                };
                 if node_matches_pattern(&end_node, np) {
                     let mut nodes = pm.nodes_clone();
                     let mut edges_map = pm.edges_clone();
@@ -2002,13 +2093,16 @@ fn expand_variable_hop<G: GraphAccess + ?Sized>(
 
             // Continue BFS if we haven't reached max depth
             if depth < max {
-                let Ok(next_edges) = get_edges_for_direction(graph, node_id, ep.direction)
-                    else { continue };
+                let Ok(next_edges) = get_edges_for_direction(graph, node_id, ep.direction) else {
+                    continue;
+                };
                 for edge in next_edges {
                     if !edge_matches_pattern(&edge, ep) {
                         continue;
                     }
-                    let Some(next_id) = edge_neighbor(&edge, node_id, ep.direction) else { continue };
+                    let Some(next_id) = edge_neighbor(&edge, node_id, ep.direction) else {
+                        continue;
+                    };
                     if !visited.insert(next_id) {
                         continue;
                     }
@@ -2144,9 +2238,7 @@ fn eval_aggregate_core(
             } else {
                 // COUNT(expr) counts non-NULL values
                 #[allow(clippy::cast_possible_wrap)]
-                GqlValue::Int(
-                    values.iter().filter(|v| **v != GqlValue::Null).count() as i64,
-                )
+                GqlValue::Int(values.iter().filter(|v| **v != GqlValue::Null).count() as i64)
             }
         }
         AggFunc::Sum => aggregate_sum(values),
@@ -2165,20 +2257,40 @@ fn eval_aggregate_core(
 }
 
 /// Evaluates an aggregate expression across all matches.
-fn eval_aggregate<G: GraphAccess + ?Sized>(expr: &Expr, matches: &[PatternMatch], graph: &G) -> crate::Result<GqlValue> {
+fn eval_aggregate<G: GraphAccess + ?Sized>(
+    expr: &Expr,
+    matches: &[PatternMatch],
+    graph: &G,
+) -> crate::Result<GqlValue> {
     match expr {
         Expr::Aggregate { func, arg } => {
             let values: Vec<GqlValue> = arg.as_ref().map_or_else(
                 Vec::new, // COUNT(*) uses match count, not values
-                |inner| matches.iter().map(|pm| eval_expr(inner, pm, &PathBindings::new(), graph, &DeadlineAbort::none())).collect(),
+                |inner| {
+                    matches
+                        .iter()
+                        .map(|pm| {
+                            eval_expr(
+                                inner,
+                                pm,
+                                &PathBindings::new(),
+                                graph,
+                                &DeadlineAbort::none(),
+                            )
+                        })
+                        .collect()
+                },
             );
-            Ok(eval_aggregate_core(*func, &values, matches.len(), arg.is_none()))
-        }
-        _ => {
-            Err(Error::GqlCompileError(
-                "expected aggregate expression".into(),
+            Ok(eval_aggregate_core(
+                *func,
+                &values,
+                matches.len(),
+                arg.is_none(),
             ))
         }
+        _ => Err(Error::GqlCompileError(
+            "expected aggregate expression".into(),
+        )),
     }
 }
 
@@ -2195,7 +2307,8 @@ fn aggregate_sum(values: &[GqlValue]) -> GqlValue {
         let sum: f64 = values
             .iter()
             .filter_map(|v| match v {
-                GqlValue::Int(i) => {
+                GqlValue::Int(i) =>
+                {
                     #[allow(clippy::cast_precision_loss)]
                     Some(*i as f64)
                 }
@@ -2219,7 +2332,8 @@ fn aggregate_sum(values: &[GqlValue]) -> GqlValue {
 /// AVG always returns Float. Single-pass fold avoids intermediate allocation.
 fn aggregate_avg(values: &[GqlValue]) -> GqlValue {
     let (sum, count) = values.iter().fold((0.0_f64, 0_u64), |(s, n), v| match v {
-        GqlValue::Int(i) => {
+        GqlValue::Int(i) =>
+        {
             #[allow(clippy::cast_precision_loss)]
             (s + *i as f64, n + 1)
         }
@@ -2244,7 +2358,11 @@ fn aggregate_min_max(values: &[GqlValue], is_max: bool) -> GqlValue {
     };
     let result = iter.fold(first, |acc, v| {
         gql_value_cmp(v, acc).map_or(acc, |ord| {
-            if (is_max && ord.is_gt()) || (!is_max && ord.is_lt()) { v } else { acc }
+            if (is_max && ord.is_gt()) || (!is_max && ord.is_lt()) {
+                v
+            } else {
+                acc
+            }
         })
     });
     result.clone()
@@ -2314,7 +2432,15 @@ fn apply_order_by<G: GraphAccess + ?Sized>(
             order
                 .items
                 .iter()
-                .map(|item| eval_expr(&item.expr, pm, &PathBindings::new(), graph, &DeadlineAbort::none()))
+                .map(|item| {
+                    eval_expr(
+                        &item.expr,
+                        pm,
+                        &PathBindings::new(),
+                        graph,
+                        &DeadlineAbort::none(),
+                    )
+                })
                 .collect()
         })
         .collect();
@@ -2371,7 +2497,9 @@ fn is_pushdown_eligible(query: &GqlQuery) -> bool {
 fn aggregate_target(expr: &Expr) -> Option<(&str, Option<&str>)> {
     match expr {
         Expr::Aggregate { arg: None, .. } => Some(("*", None)),
-        Expr::Aggregate { arg: Some(inner), .. } => match inner.as_ref() {
+        Expr::Aggregate {
+            arg: Some(inner), ..
+        } => match inner.as_ref() {
             Expr::Var(v) => Some((v.as_str(), None)),
             Expr::PropAccess { var, prop } => Some((var.as_str(), Some(prop.as_str()))),
             _ => None,
@@ -2422,10 +2550,11 @@ fn try_aggregate_pushdown<G: GraphAccess + ?Sized>(
 
     // Determine whether we need to load nodes at all.
     // If every aggregate is COUNT(*) or COUNT(var), we only need the count.
-    let needs_node_load = query.return_clause.items.iter().any(|item| {
-        aggregate_target(&item.expr)
-            .is_some_and(|(_, prop)| prop.is_some())
-    });
+    let needs_node_load = query
+        .return_clause
+        .items
+        .iter()
+        .any(|item| aggregate_target(&item.expr).is_some_and(|(_, prop)| prop.is_some()));
 
     // ── One-hop aggregate pushdown (COUNT-only) ────────────────────────────
     if !pp.hops.is_empty() {
@@ -2450,24 +2579,26 @@ fn try_aggregate_pushdown<G: GraphAccess + ?Sized>(
                 (Direction::Outgoing, None) => graph.outgoing_edges(start_id),
                 (Direction::Incoming, Some(l)) => graph.incoming_edges_by_label(start_id, l),
                 (Direction::Incoming, None) => graph.incoming_edges(start_id),
-                (Direction::Both, Some(l)) => {
-                    match graph.outgoing_edges_by_label(start_id, l) {
-                        Ok(mut e) => match graph.incoming_edges_by_label(start_id, l) {
-                            Ok(inc) => { e.extend(inc); Ok(e) }
-                            Err(err) => Err(err),
-                        },
+                (Direction::Both, Some(l)) => match graph.outgoing_edges_by_label(start_id, l) {
+                    Ok(mut e) => match graph.incoming_edges_by_label(start_id, l) {
+                        Ok(inc) => {
+                            e.extend(inc);
+                            Ok(e)
+                        }
                         Err(err) => Err(err),
-                    }
-                }
-                (Direction::Both, None) => {
-                    match graph.outgoing_edges(start_id) {
-                        Ok(mut e) => match graph.incoming_edges(start_id) {
-                            Ok(inc) => { e.extend(inc); Ok(e) }
-                            Err(err) => Err(err),
-                        },
+                    },
+                    Err(err) => Err(err),
+                },
+                (Direction::Both, None) => match graph.outgoing_edges(start_id) {
+                    Ok(mut e) => match graph.incoming_edges(start_id) {
+                        Ok(inc) => {
+                            e.extend(inc);
+                            Ok(e)
+                        }
                         Err(err) => Err(err),
-                    }
-                }
+                    },
+                    Err(err) => Err(err),
+                },
             };
             let edges = match edges {
                 Ok(e) => e,
@@ -2522,14 +2653,26 @@ fn try_aggregate_pushdown<G: GraphAccess + ?Sized>(
     }
 
     // Streaming path: load each node once, feed all accumulators.
-    Some(pushdown_with_node_load(graph, &ids, &query.return_clause.items))
+    Some(pushdown_with_node_load(
+        graph,
+        &ids,
+        &query.return_clause.items,
+    ))
 }
 
 /// Accumulator state for a single aggregate column during pushdown.
 enum AggAccum {
     Count(i64),
-    Sum { int_sum: i64, float_sum: f64, has_float: bool, has_any: bool },
-    Avg { sum: f64, count: u64 },
+    Sum {
+        int_sum: i64,
+        float_sum: f64,
+        has_float: bool,
+        has_any: bool,
+    },
+    Avg {
+        sum: f64,
+        count: u64,
+    },
     Min(Option<GqlValue>),
     Max(Option<GqlValue>),
     Collect(Vec<GqlValue>),
@@ -2539,7 +2682,12 @@ impl AggAccum {
     const fn from_func(func: AggFunc) -> Self {
         match func {
             AggFunc::Count => Self::Count(0),
-            AggFunc::Sum => Self::Sum { int_sum: 0, float_sum: 0.0, has_float: false, has_any: false },
+            AggFunc::Sum => Self::Sum {
+                int_sum: 0,
+                float_sum: 0.0,
+                has_float: false,
+                has_any: false,
+            },
             AggFunc::Avg => Self::Avg { sum: 0.0, count: 0 },
             AggFunc::Min => Self::Min(None),
             AggFunc::Max => Self::Max(None),
@@ -2553,33 +2701,49 @@ impl AggAccum {
         }
         match self {
             Self::Count(n) => *n += 1,
-            Self::Sum { int_sum, float_sum, has_float, has_any } => {
+            Self::Sum {
+                int_sum,
+                float_sum,
+                has_float,
+                has_any,
+            } => {
                 *has_any = true;
                 match value {
                     GqlValue::Int(i) => *int_sum = int_sum.saturating_add(*i),
-                    GqlValue::Float(f) => { *float_sum += f; *has_float = true; }
+                    GqlValue::Float(f) => {
+                        *float_sum += f;
+                        *has_float = true;
+                    }
                     _ => {}
                 }
             }
-            Self::Avg { sum, count } => {
-                match value {
-                    #[allow(clippy::cast_precision_loss)]
-                    GqlValue::Int(i) => { *sum += *i as f64; *count += 1; }
-                    GqlValue::Float(f) => { *sum += f; *count += 1; }
-                    _ => {}
+            Self::Avg { sum, count } => match value {
+                #[allow(clippy::cast_precision_loss)]
+                GqlValue::Int(i) => {
+                    *sum += *i as f64;
+                    *count += 1;
                 }
-            }
+                GqlValue::Float(f) => {
+                    *sum += f;
+                    *count += 1;
+                }
+                _ => {}
+            },
             Self::Min(current) => {
-                let replace = current.as_ref().is_none_or(|c| {
-                    gql_value_cmp(value, c).is_some_and(std::cmp::Ordering::is_lt)
-                });
-                if replace { *current = Some(value.clone()); }
+                let replace = current
+                    .as_ref()
+                    .is_none_or(|c| gql_value_cmp(value, c).is_some_and(std::cmp::Ordering::is_lt));
+                if replace {
+                    *current = Some(value.clone());
+                }
             }
             Self::Max(current) => {
-                let replace = current.as_ref().is_none_or(|c| {
-                    gql_value_cmp(value, c).is_some_and(std::cmp::Ordering::is_gt)
-                });
-                if replace { *current = Some(value.clone()); }
+                let replace = current
+                    .as_ref()
+                    .is_none_or(|c| gql_value_cmp(value, c).is_some_and(std::cmp::Ordering::is_gt));
+                if replace {
+                    *current = Some(value.clone());
+                }
             }
             Self::Collect(items) => items.push(value.clone()),
         }
@@ -2588,8 +2752,15 @@ impl AggAccum {
     fn finalize(self) -> GqlValue {
         match self {
             Self::Count(n) => GqlValue::Int(n),
-            Self::Sum { int_sum, float_sum, has_float, has_any } => {
-                if !has_any { return GqlValue::Null; }
+            Self::Sum {
+                int_sum,
+                float_sum,
+                has_float,
+                has_any,
+            } => {
+                if !has_any {
+                    return GqlValue::Null;
+                }
                 if has_float {
                     #[allow(clippy::cast_precision_loss)]
                     GqlValue::Float(float_sum + int_sum as f64)
@@ -2599,7 +2770,11 @@ impl AggAccum {
             }
             #[allow(clippy::cast_precision_loss)]
             Self::Avg { sum, count } => {
-                if count == 0 { GqlValue::Null } else { GqlValue::Float(sum / count as f64) }
+                if count == 0 {
+                    GqlValue::Null
+                } else {
+                    GqlValue::Float(sum / count as f64)
+                }
             }
             Self::Min(v) | Self::Max(v) => v.unwrap_or(GqlValue::Null),
             Self::Collect(items) => GqlValue::List(items),
@@ -2624,14 +2799,20 @@ fn pushdown_with_node_load<G: GraphAccess + ?Sized>(
             .map_or_else(|| expr_surface_name(&item.expr), String::from);
 
         let Expr::Aggregate { func, arg } = &item.expr else {
-            return Err(Error::GqlCompileError("expected aggregate in pushdown".into()));
+            return Err(Error::GqlCompileError(
+                "expected aggregate in pushdown".into(),
+            ));
         };
 
         let prop_key = match arg.as_deref() {
             // COUNT(*) or COUNT(n) — just needs existence
             None | Some(Expr::Var(_)) => None,
             Some(Expr::PropAccess { prop, .. }) => Some(prop.clone()),
-            _ => return Err(Error::GqlCompileError("unsupported aggregate argument in pushdown".into())),
+            _ => {
+                return Err(Error::GqlCompileError(
+                    "unsupported aggregate argument in pushdown".into(),
+                ));
+            }
         };
 
         accums.push((col, AggAccum::from_func(*func), prop_key));
@@ -2700,14 +2881,18 @@ fn execute_with_unwind<G: GraphAccess + ?Sized>(
     let _ = abort;
 
     let unwind: &UnwindClause = query.unwind_clause.as_ref().ok_or_else(|| {
-        Error::GqlCompileError(
-            "execute_with_unwind invoked without UNWIND clause".into(),
-        )
+        Error::GqlCompileError("execute_with_unwind invoked without UNWIND clause".into())
     })?;
 
     // Evaluate the list expression in an empty context (no MATCH bindings yet).
     let empty = PatternMatch::empty();
-    let list_value = eval_expr(&unwind.expr, &empty, &PathBindings::new(), graph, &DeadlineAbort::none());
+    let list_value = eval_expr(
+        &unwind.expr,
+        &empty,
+        &PathBindings::new(),
+        graph,
+        &DeadlineAbort::none(),
+    );
 
     let elements: Vec<GqlValue> = match list_value {
         GqlValue::List(items) => items,
@@ -2725,14 +2910,10 @@ fn execute_with_unwind<G: GraphAccess + ?Sized>(
     // Cross-join: for each unwind element × each MATCH row, produce a combined row.
     // The unwind variable is injected as a synthetic node-like binding so that
     // eval_expr can resolve `Expr::Var(unwind_var)` in WHERE/RETURN.
-    let is_aggregate = validate_aggregation(
-        &query.return_clause.items,
-        query.group_by.as_ref(),
-    )?;
+    let is_aggregate = validate_aggregation(&query.return_clause.items, query.group_by.as_ref())?;
 
-    let mut combined: Vec<(PatternMatch, GqlValue)> = Vec::with_capacity(
-        elements.len() * base_matches.len().max(1),
-    );
+    let mut combined: Vec<(PatternMatch, GqlValue)> =
+        Vec::with_capacity(elements.len() * base_matches.len().max(1));
 
     if base_matches.is_empty() {
         // UNWIND without matching nodes — no cross-join partners.
@@ -2757,9 +2938,7 @@ fn execute_with_unwind<G: GraphAccess + ?Sized>(
         combined
             .into_iter()
             .filter(|(pm, elem)| {
-                let val = eval_expr_with_unwind_var(
-                    &wc.predicate, pm, graph, &unwind.var, elem,
-                );
+                let val = eval_expr_with_unwind_var(&wc.predicate, pm, graph, &unwind.var, elem);
                 eval_as_tribool(&val) == Some(true)
             })
             .collect()
@@ -2776,9 +2955,7 @@ fn execute_with_unwind<G: GraphAccess + ?Sized>(
                 .alias
                 .as_deref()
                 .map_or_else(|| expr_surface_name(&item.expr), String::from);
-            let value = eval_aggregate_with_unwind(
-                &item.expr, &filtered, graph, &unwind.var,
-            )?;
+            let value = eval_aggregate_with_unwind(&item.expr, &filtered, graph, &unwind.var)?;
             row.insert(col, value);
         }
         return Ok(vec![row]);
@@ -2794,9 +2971,7 @@ fn execute_with_unwind<G: GraphAccess + ?Sized>(
                     .alias
                     .as_deref()
                     .map_or_else(|| expr_surface_name(&item.expr), String::from);
-                let val = eval_expr_with_unwind_var(
-                    &item.expr, pm, graph, &unwind.var, elem,
-                );
+                let val = eval_expr_with_unwind_var(&item.expr, pm, graph, &unwind.var, elem);
                 row.insert(col, val);
             }
             row
@@ -2895,14 +3070,23 @@ fn eval_expr_with_unwind_var<G: GraphAccess + ?Sized>(
             let v = eval_expr_with_unwind_var(inner, pm, graph, unwind_var, unwind_elem);
             eval_unary_op(*op, &v)
         }
-        Expr::IsNull { expr: inner, negated } => {
+        Expr::IsNull {
+            expr: inner,
+            negated,
+        } => {
             let v = eval_expr_with_unwind_var(inner, pm, graph, unwind_var, unwind_elem);
             let is_null = v == GqlValue::Null;
             GqlValue::Bool(if *negated { !is_null } else { is_null })
         }
         // For everything else, fall back to the standard evaluator. UNWIND
         // expression context is not a runaway-BFS site; no deadline threaded.
-        _ => eval_expr(expr, pm, &PathBindings::new(), graph, &DeadlineAbort::none()),
+        _ => eval_expr(
+            expr,
+            pm,
+            &PathBindings::new(),
+            graph,
+            &DeadlineAbort::none(),
+        ),
     }
 }
 
@@ -2915,19 +3099,21 @@ fn eval_aggregate_with_unwind<G: GraphAccess + ?Sized>(
 ) -> crate::Result<GqlValue> {
     match expr {
         Expr::Aggregate { func, arg } => {
-            let values: Vec<GqlValue> = arg.as_ref().map_or_else(
-                Vec::new,
-                |inner| {
-                    rows.iter()
-                        .map(|(pm, elem)| {
-                            eval_expr_with_unwind_var(inner, pm, graph, unwind_var, elem)
-                        })
-                        .collect()
-                },
-            );
-            Ok(eval_aggregate_core(*func, &values, rows.len(), arg.is_none()))
+            let values: Vec<GqlValue> = arg.as_ref().map_or_else(Vec::new, |inner| {
+                rows.iter()
+                    .map(|(pm, elem)| eval_expr_with_unwind_var(inner, pm, graph, unwind_var, elem))
+                    .collect()
+            });
+            Ok(eval_aggregate_core(
+                *func,
+                &values,
+                rows.len(),
+                arg.is_none(),
+            ))
         }
-        _ => Err(Error::GqlCompileError("expected aggregate expression".into())),
+        _ => Err(Error::GqlCompileError(
+            "expected aggregate expression".into(),
+        )),
     }
 }
 
@@ -2942,13 +3128,30 @@ fn eval_aggregate_refs<G: GraphAccess + ?Sized>(
 ) -> crate::Result<GqlValue> {
     match expr {
         Expr::Aggregate { func, arg } => {
-            let values: Vec<GqlValue> = arg.as_ref().map_or_else(
-                Vec::new,
-                |inner| matches.iter().map(|pm| eval_expr(inner, pm, &PathBindings::new(), graph, &DeadlineAbort::none())).collect(),
-            );
-            Ok(eval_aggregate_core(*func, &values, matches.len(), arg.is_none()))
+            let values: Vec<GqlValue> = arg.as_ref().map_or_else(Vec::new, |inner| {
+                matches
+                    .iter()
+                    .map(|pm| {
+                        eval_expr(
+                            inner,
+                            pm,
+                            &PathBindings::new(),
+                            graph,
+                            &DeadlineAbort::none(),
+                        )
+                    })
+                    .collect()
+            });
+            Ok(eval_aggregate_core(
+                *func,
+                &values,
+                matches.len(),
+                arg.is_none(),
+            ))
         }
-        _ => Err(Error::GqlCompileError("expected aggregate expression".into())),
+        _ => Err(Error::GqlCompileError(
+            "expected aggregate expression".into(),
+        )),
     }
 }
 
@@ -2970,7 +3173,15 @@ fn execute_grouped<G: GraphAccess + ?Sized>(
         let key_values: Vec<GqlValue> = group_by
             .keys
             .iter()
-            .map(|expr| eval_expr(expr, pm, &PathBindings::new(), graph, &DeadlineAbort::none()))
+            .map(|expr| {
+                eval_expr(
+                    expr,
+                    pm,
+                    &PathBindings::new(),
+                    graph,
+                    &DeadlineAbort::none(),
+                )
+            })
             .collect();
         let key_str = format!("{key_values:?}");
 
@@ -3107,8 +3318,7 @@ pub fn execute_const_return<G: GraphAccess + ?Sized>(
     for item in &query.items {
         if contains_param_ref(&item.expr) {
             return Err(Error::GqlCompileError(
-                "internal error: unsubstituted parameter reached compiler — please report"
-                    .into(),
+                "internal error: unsubstituted parameter reached compiler — please report".into(),
             ));
         }
     }
@@ -3165,13 +3375,10 @@ fn contains_param_ref(expr: &Expr) -> bool {
     match expr {
         Expr::ParamRef(_) => true,
         // Leaf variants that bind no inner Expr.
-        Expr::Literal(_)
-        | Expr::Var(_)
-        | Expr::PropAccess { .. }
-        | Expr::ShortestPath { .. } => false,
-        Expr::BinaryOp { left, right, .. } => {
-            contains_param_ref(left) || contains_param_ref(right)
+        Expr::Literal(_) | Expr::Var(_) | Expr::PropAccess { .. } | Expr::ShortestPath { .. } => {
+            false
         }
+        Expr::BinaryOp { left, right, .. } => contains_param_ref(left) || contains_param_ref(right),
         Expr::UnaryOp { expr: inner, .. } | Expr::IsNull { expr: inner, .. } => {
             contains_param_ref(inner)
         }
@@ -3179,12 +3386,10 @@ fn contains_param_ref(expr: &Expr) -> bool {
         Expr::FunctionCall { args, .. } | Expr::ListLit(args) => {
             args.iter().any(contains_param_ref)
         }
-        Expr::Subscript { list, index } => {
-            contains_param_ref(list) || contains_param_ref(index)
-        }
-        Expr::ListPredicate { list, predicate, .. } => {
-            contains_param_ref(list) || contains_param_ref(predicate)
-        }
+        Expr::Subscript { list, index } => contains_param_ref(list) || contains_param_ref(index),
+        Expr::ListPredicate {
+            list, predicate, ..
+        } => contains_param_ref(list) || contains_param_ref(predicate),
     }
 }
 
@@ -3259,10 +3464,7 @@ pub fn execute_with_deadline<G: GraphAccess + ?Sized>(
     validate_scope(query, &bound_vars)?;
 
     // 2. Aggregation validation
-    let is_aggregate = validate_aggregation(
-        &query.return_clause.items,
-        query.group_by.as_ref(),
-    )?;
+    let is_aggregate = validate_aggregation(&query.return_clause.items, query.group_by.as_ref())?;
 
     // 2b. Aggregate pushdown: skip full materialization when possible.
     //     GROUP BY queries are not eligible for pushdown (they need per-group
@@ -3289,8 +3491,7 @@ pub fn execute_with_deadline<G: GraphAccess + ?Sized>(
             .into_iter()
             .filter(|pm| {
                 let paths = materialise_path_bindings(graph, &query.match_clause, pm);
-                eval_as_tribool(&eval_expr(&wc.predicate, pm, &paths, graph, &abort))
-                    == Some(true)
+                eval_as_tribool(&eval_expr(&wc.predicate, pm, &paths, graph, &abort)) == Some(true)
             })
             .collect()
     } else {
@@ -3450,7 +3651,6 @@ impl GqlMutationResult {
             || self.elements_changed > 0
     }
 }
-
 
 /// Resolves MATCH variables for use in mutations.
 ///
@@ -3633,11 +3833,17 @@ struct Binding {
 
 impl Binding {
     fn empty() -> Self {
-        Self { pm: PatternMatch::empty(), vals: HashMap::new() }
+        Self {
+            pm: PatternMatch::empty(),
+            vals: HashMap::new(),
+        }
     }
 
     fn from_pattern_match(pm: PatternMatch) -> Self {
-        Self { pm, vals: HashMap::new() }
+        Self {
+            pm,
+            vals: HashMap::new(),
+        }
     }
 }
 
@@ -3669,7 +3875,10 @@ fn validate_pipeline_scope(pq: &super::ast::PipelineQuery) -> crate::Result<()> 
 
     for stage in &pq.stages {
         match stage {
-            PipelineStage::Match { clause, where_clause } => {
+            PipelineStage::Match {
+                clause,
+                where_clause,
+            } => {
                 // MATCH introduces its own bindings; WHERE sees them.
                 let new_bound = collect_bound_vars(clause);
                 if let Some(wc) = where_clause {
@@ -3728,7 +3937,9 @@ fn validate_pipeline_scope(pq: &super::ast::PipelineQuery) -> crate::Result<()> 
     // Terminal clause — references must resolve against the final bound set.
     let mut referenced = HashSet::new();
     match &pq.terminal {
-        PipelineTerminal::Return { clause, order_by, .. } => {
+        PipelineTerminal::Return {
+            clause, order_by, ..
+        } => {
             for item in &clause.items {
                 collect_expr_vars(&item.expr, &mut referenced);
             }
@@ -3851,23 +4062,34 @@ pub fn execute_pipeline_with_deadline<G: GraphAccess + ?Sized>(
 
     for stage in &pq.stages {
         bindings = match stage {
-            PipelineStage::Match { clause, where_clause } => {
-                execute_match_stage(graph, clause, where_clause.as_ref(), &bindings, deadline)?
-            }
+            PipelineStage::Match {
+                clause,
+                where_clause,
+            } => execute_match_stage(graph, clause, where_clause.as_ref(), &bindings, deadline)?,
             PipelineStage::With(w) => execute_with_stage(graph, w, &bindings),
             PipelineStage::Unwind(u) => execute_unwind_stage(graph, u, &bindings),
         };
     }
 
     match &pq.terminal {
-        PipelineTerminal::Return { clause, order_by, skip, limit } => {
-            Ok(execute_pipeline_return(graph, &bindings, clause, order_by.as_ref(), *skip, *limit))
-        }
-        PipelineTerminal::Set(_)
-        | PipelineTerminal::Create(_)
-        | PipelineTerminal::Delete(_) => Err(Error::GqlUnsupported(
-            "pipeline mutation terminals are not yet implemented (Phase 9)".into(),
+        PipelineTerminal::Return {
+            clause,
+            order_by,
+            skip,
+            limit,
+        } => Ok(execute_pipeline_return(
+            graph,
+            &bindings,
+            clause,
+            order_by.as_ref(),
+            *skip,
+            *limit,
         )),
+        PipelineTerminal::Set(_) | PipelineTerminal::Create(_) | PipelineTerminal::Delete(_) => {
+            Err(Error::GqlUnsupported(
+                "pipeline mutation terminals are not yet implemented (Phase 9)".into(),
+            ))
+        }
     }
 }
 
@@ -3986,7 +4208,13 @@ fn execute_match_stage<G: GraphAccess + ?Sized>(
         let f: Vec<PatternMatch> = matches
             .into_iter()
             .filter(|pm| {
-                eval_as_tribool(&eval_expr(&wc.predicate, pm, &PathBindings::new(), graph, &abort)) == Some(true)
+                eval_as_tribool(&eval_expr(
+                    &wc.predicate,
+                    pm,
+                    &PathBindings::new(),
+                    graph,
+                    &abort,
+                )) == Some(true)
             })
             .collect();
         if abort.is_aborted() {
@@ -3996,7 +4224,10 @@ fn execute_match_stage<G: GraphAccess + ?Sized>(
     } else {
         matches
     };
-    Ok(filtered.into_iter().map(Binding::from_pattern_match).collect())
+    Ok(filtered
+        .into_iter()
+        .map(Binding::from_pattern_match)
+        .collect())
 }
 
 /// Evaluates a `WITH` stage: projection (+ optional aggregation/DISTINCT)
@@ -4046,11 +4277,17 @@ fn execute_with_stage_parts<G: GraphAccess + ?Sized>(
             // Global aggregate → single output binding.
             let mut vals: HashMap<String, GqlValue> = HashMap::new();
             for item in items {
-                let alias = item.alias.clone().unwrap_or_else(|| expr_surface_name(&item.expr));
+                let alias = item
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| expr_surface_name(&item.expr));
                 let val = eval_aggregate_over_bindings(&item.expr, incoming, graph);
                 vals.insert(alias, val);
             }
-            vec![Binding { pm: PatternMatch::empty(), vals }]
+            vec![Binding {
+                pm: PatternMatch::empty(),
+                vals,
+            }]
         } else {
             // Grouping: non-aggregate items form the group key.
             execute_with_stage_grouped_items(graph, items, incoming)
@@ -4070,7 +4307,9 @@ fn execute_with_stage_parts<G: GraphAccess + ?Sized>(
     let after_where: Vec<Binding> = if let Some(wc) = where_clause {
         distinct_rows
             .into_iter()
-            .filter(|b| eval_as_tribool(&eval_expr_on_binding(&wc.predicate, b, graph)) == Some(true))
+            .filter(|b| {
+                eval_as_tribool(&eval_expr_on_binding(&wc.predicate, b, graph)) == Some(true)
+            })
             .collect()
     } else {
         distinct_rows
@@ -4115,7 +4354,10 @@ fn project_with_items_slice<G: GraphAccess + ?Sized>(
         let mut next_edges = HashMap::new();
 
         for item in items {
-            let alias = item.alias.clone().unwrap_or_else(|| expr_surface_name(&item.expr));
+            let alias = item
+                .alias
+                .clone()
+                .unwrap_or_else(|| expr_surface_name(&item.expr));
 
             if let Expr::Var(name) = &item.expr {
                 if let Some(node) = remaining_nodes.remove(name) {
@@ -4174,10 +4416,7 @@ enum RebindEntity {
 /// a bare `GqlValue::Int` (a `count`, `size`, or property value) is never
 /// rehydrated into an entity, which previously caused scalars to collide with
 /// node ids (Fase B C3).
-fn rebind_entity_value<G: GraphAccess + ?Sized>(
-    val: &GqlValue,
-    graph: &G,
-) -> Option<RebindEntity> {
+fn rebind_entity_value<G: GraphAccess + ?Sized>(val: &GqlValue, graph: &G) -> Option<RebindEntity> {
     match val {
         #[allow(clippy::cast_sign_loss)]
         GqlValue::Node(n) if n.id >= 0 => {
@@ -4229,8 +4468,10 @@ fn execute_with_stage_grouped_items<G: GraphAccess + ?Sized>(
 
     let mut out = Vec::with_capacity(ordered_groups.len());
     for member_indices in ordered_groups {
-        let members: Vec<Binding> =
-            member_indices.iter().map(|&i| incoming[i].clone()).collect();
+        let members: Vec<Binding> = member_indices
+            .iter()
+            .map(|&i| incoming[i].clone())
+            .collect();
 
         let mut vals: HashMap<String, GqlValue> = HashMap::new();
         let mut next_nodes = HashMap::new();
@@ -4238,7 +4479,10 @@ fn execute_with_stage_grouped_items<G: GraphAccess + ?Sized>(
         let representative = &members[0];
 
         for item in items {
-            let alias = item.alias.clone().unwrap_or_else(|| expr_surface_name(&item.expr));
+            let alias = item
+                .alias
+                .clone()
+                .unwrap_or_else(|| expr_surface_name(&item.expr));
             if expr_has_aggregate(&item.expr) {
                 let val = eval_aggregate_over_bindings(&item.expr, &members, graph);
                 vals.insert(alias, val);
@@ -4294,12 +4538,18 @@ fn eval_aggregate_over_bindings<G: GraphAccess + ?Sized>(
             #[allow(clippy::cast_possible_wrap)]
             return GqlValue::Int(bindings.len() as i64);
         }
-        Some(e) => bindings.iter().map(|b| eval_expr_on_binding(e, b, graph)).collect(),
+        Some(e) => bindings
+            .iter()
+            .map(|b| eval_expr_on_binding(e, b, graph))
+            .collect(),
     };
 
     match func {
         AggFunc::Count => {
-            let c = arg_vals.iter().filter(|v| !matches!(v, GqlValue::Null)).count();
+            let c = arg_vals
+                .iter()
+                .filter(|v| !matches!(v, GqlValue::Null))
+                .count();
             #[allow(clippy::cast_possible_wrap)]
             GqlValue::Int(c as i64)
         }
@@ -4350,25 +4600,23 @@ fn eval_aggregate_over_bindings<G: GraphAccess + ?Sized>(
                 GqlValue::Float(avg)
             }
         }
-        AggFunc::Min => {
-            arg_vals
-                .iter()
-                .filter(|v| !matches!(v, GqlValue::Null))
-                .min_by(|a, b| compare_sort_keys(a, b))
-                .cloned()
-                .unwrap_or(GqlValue::Null)
-        }
-        AggFunc::Max => {
-            arg_vals
-                .iter()
-                .filter(|v| !matches!(v, GqlValue::Null))
-                .max_by(|a, b| compare_sort_keys(a, b))
-                .cloned()
-                .unwrap_or(GqlValue::Null)
-        }
+        AggFunc::Min => arg_vals
+            .iter()
+            .filter(|v| !matches!(v, GqlValue::Null))
+            .min_by(|a, b| compare_sort_keys(a, b))
+            .cloned()
+            .unwrap_or(GqlValue::Null),
+        AggFunc::Max => arg_vals
+            .iter()
+            .filter(|v| !matches!(v, GqlValue::Null))
+            .max_by(|a, b| compare_sort_keys(a, b))
+            .cloned()
+            .unwrap_or(GqlValue::Null),
         AggFunc::Collect => {
-            let items: Vec<GqlValue> =
-                arg_vals.into_iter().filter(|v| !matches!(v, GqlValue::Null)).collect();
+            let items: Vec<GqlValue> = arg_vals
+                .into_iter()
+                .filter(|v| !matches!(v, GqlValue::Null))
+                .collect();
             GqlValue::List(items)
         }
     }
@@ -4412,16 +4660,25 @@ fn substitute_aggregates<G: GraphAccess + ?Sized>(
             op: *op,
             expr: Box::new(substitute_aggregates(inner, bindings, graph)),
         },
-        Expr::IsNull { expr: inner, negated } => Expr::IsNull {
+        Expr::IsNull {
+            expr: inner,
+            negated,
+        } => Expr::IsNull {
             expr: Box::new(substitute_aggregates(inner, bindings, graph)),
             negated: *negated,
         },
         Expr::FunctionCall { name, args } => Expr::FunctionCall {
             name: name.clone(),
-            args: args.iter().map(|a| substitute_aggregates(a, bindings, graph)).collect(),
+            args: args
+                .iter()
+                .map(|a| substitute_aggregates(a, bindings, graph))
+                .collect(),
         },
         Expr::ListLit(items) => Expr::ListLit(
-            items.iter().map(|e| substitute_aggregates(e, bindings, graph)).collect(),
+            items
+                .iter()
+                .map(|e| substitute_aggregates(e, bindings, graph))
+                .collect(),
         ),
         Expr::Subscript { list, index } => Expr::Subscript {
             list: Box::new(substitute_aggregates(list, bindings, graph)),
@@ -4731,23 +4988,25 @@ pub fn execute_pipeline_mutation(
     // otherwise over the committed graph. The read view is scoped and dropped
     // before the write phase so the two never hold conflicting borrows.
     let mut bindings: Vec<Binding> = vec![Binding::empty()];
-    let run_stages = |view: &dyn GraphAccess,
-                      mut bindings: Vec<Binding>|
-     -> crate::Result<Vec<Binding>> {
-        for stage in &pq.stages {
-            bindings = match stage {
-                PipelineStage::Match { clause, where_clause } => {
-                    // Pipeline-mutation match phase is not deadline-wired yet
-                    // (the read-side `execute_pipeline` carries the deadline);
-                    // threaded as `None` here. See Task 6 design decision #6.
-                    execute_match_stage(view, clause, where_clause.as_ref(), &bindings, None)?
-                }
-                PipelineStage::With(w) => execute_with_stage(view, w, &bindings),
-                PipelineStage::Unwind(u) => execute_unwind_stage(view, u, &bindings),
-            };
-        }
-        Ok(bindings)
-    };
+    let run_stages =
+        |view: &dyn GraphAccess, mut bindings: Vec<Binding>| -> crate::Result<Vec<Binding>> {
+            for stage in &pq.stages {
+                bindings = match stage {
+                    PipelineStage::Match {
+                        clause,
+                        where_clause,
+                    } => {
+                        // Pipeline-mutation match phase is not deadline-wired yet
+                        // (the read-side `execute_pipeline` carries the deadline);
+                        // threaded as `None` here. See Task 6 design decision #6.
+                        execute_match_stage(view, clause, where_clause.as_ref(), &bindings, None)?
+                    }
+                    PipelineStage::With(w) => execute_with_stage(view, w, &bindings),
+                    PipelineStage::Unwind(u) => execute_unwind_stage(view, u, &bindings),
+                };
+            }
+            Ok(bindings)
+        };
     bindings = match txn_id {
         Some(t) => {
             let view = super::txn_view::TxnView::new(graph, t);
@@ -4926,11 +5185,7 @@ fn apply_pipeline_set(
 /// all 12 variants (`Literal`, `Var`, `PropAccess`, `BinaryOp`, `UnaryOp`,
 /// `IsNull`, `Aggregate`, `FunctionCall`, `ShortestPath`, `Subscript`,
 /// `ListLit`, `ListPredicate`).
-fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
-    expr: &Expr,
-    b: &Binding,
-    graph: &G,
-) -> GqlValue {
+fn eval_expr_on_binding<G: GraphAccess + ?Sized>(expr: &Expr, b: &Binding, graph: &G) -> GqlValue {
     match expr {
         Expr::Literal(lit) => compile_literal(lit),
         Expr::Var(name) => {
@@ -4938,7 +5193,13 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
                 return val.clone();
             }
             // Fall back to PatternMatch (returns int-encoded node/edge id).
-            eval_expr(expr, &b.pm, &PathBindings::new(), graph, &DeadlineAbort::none())
+            eval_expr(
+                expr,
+                &b.pm,
+                &PathBindings::new(),
+                graph,
+                &DeadlineAbort::none(),
+            )
         }
         Expr::BinaryOp { left, op, right } => {
             let lv = eval_expr_on_binding(left, b, graph);
@@ -4949,7 +5210,10 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
             let v = eval_expr_on_binding(inner, b, graph);
             eval_unary_op(*op, &v)
         }
-        Expr::IsNull { expr: inner, negated } => {
+        Expr::IsNull {
+            expr: inner,
+            negated,
+        } => {
             let v = eval_expr_on_binding(inner, b, graph);
             let is_null = matches!(v, GqlValue::Null);
             GqlValue::Bool(if *negated { !is_null } else { is_null })
@@ -4960,8 +5224,10 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
             GqlValue::Null
         }
         Expr::ListLit(items) => {
-            let vals: Vec<GqlValue> =
-                items.iter().map(|e| eval_expr_on_binding(e, b, graph)).collect();
+            let vals: Vec<GqlValue> = items
+                .iter()
+                .map(|e| eval_expr_on_binding(e, b, graph))
+                .collect();
             GqlValue::List(vals)
         }
         Expr::Subscript { list, index } => {
@@ -4969,12 +5235,13 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
             let index_val = eval_expr_on_binding(index, b, graph);
             eval_subscript(&list_val, &index_val)
         }
-        Expr::FunctionCall { name, args } => {
-            eval_builtin_function_call(name, args, b, graph)
-        }
-        Expr::ListPredicate { kind, var, list, predicate } => {
-            eval_list_predicate_on_binding(*kind, var, list, predicate, b, graph)
-        }
+        Expr::FunctionCall { name, args } => eval_builtin_function_call(name, args, b, graph),
+        Expr::ListPredicate {
+            kind,
+            var,
+            list,
+            predicate,
+        } => eval_list_predicate_on_binding(*kind, var, list, predicate, b, graph),
         // `var.prop` where `var` is a pipeline binding holding a first-class
         // entity (Node/Relationship) or a Map — e.g. `rel` iterating over
         // `relationships(p)`, or `n` from a prior WITH. Read the property from
@@ -4983,14 +5250,18 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
         // `ALL(rel IN relationships(p) WHERE rel.expired = false)` saw Null.
         Expr::PropAccess { var, prop } => match b.vals.get(var) {
             Some(GqlValue::Node(n)) => n.props.get(prop).cloned().unwrap_or(GqlValue::Null),
-            Some(GqlValue::Relationship(r)) => {
-                r.props.get(prop).cloned().unwrap_or(GqlValue::Null)
-            }
+            Some(GqlValue::Relationship(r)) => r.props.get(prop).cloned().unwrap_or(GqlValue::Null),
             Some(GqlValue::Map(m)) => m.get(prop).cloned().unwrap_or(GqlValue::Null),
             // A non-entity binding (scalar) has no properties.
             Some(_) => GqlValue::Null,
             // Not a binding var — resolve against the MATCH bindings.
-            None => eval_expr(expr, &b.pm, &PathBindings::new(), graph, &DeadlineAbort::none()),
+            None => eval_expr(
+                expr,
+                &b.pm,
+                &PathBindings::new(),
+                graph,
+                &DeadlineAbort::none(),
+            ),
         },
         // `shortestPath` resolves against the PatternMatch — it operates on
         // entity bindings established by a prior MATCH stage.
@@ -4998,15 +5269,18 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(
             // Pipeline-terminal `shortestPath` is not deadline-instrumented
             // (no deadline is threaded through the pipeline binding evaluator);
             // a documented limitation. See Task 6 design notes.
-            eval_expr(expr, &b.pm, &PathBindings::new(), graph, &DeadlineAbort::none())
+            eval_expr(
+                expr,
+                &b.pm,
+                &PathBindings::new(),
+                graph,
+                &DeadlineAbort::none(),
+            )
         }
         // Defensive: param substitution must have run before compile.
         // See `eval_expr` for the matching debug_assert.
         Expr::ParamRef(_) => {
-            debug_assert!(
-                false,
-                "unsubstituted ParamRef reached eval_expr_on_binding",
-            );
+            debug_assert!(false, "unsubstituted ParamRef reached eval_expr_on_binding",);
             GqlValue::Null
         }
     }
@@ -5029,7 +5303,10 @@ fn eval_list_predicate_on_binding<G: GraphAccess + ?Sized>(
     let GqlValue::List(items) = eval_expr_on_binding(list, b, graph) else {
         return GqlValue::Null;
     };
-    let mut local = Binding { pm: b.pm.clone(), vals: b.vals.clone() };
+    let mut local = Binding {
+        pm: b.pm.clone(),
+        vals: b.vals.clone(),
+    };
     apply_list_quantifier(kind, &items, |item| {
         local.vals.insert(var.to_owned(), item.clone());
         match eval_expr_on_binding(predicate, &local, graph) {
@@ -5099,8 +5376,10 @@ fn eval_builtin_function_call<G: GraphAccess + ?Sized>(
             compute_to_upper(&val)
         }
         "coalesce" => {
-            let evaluated: Vec<GqlValue> =
-                args.iter().map(|a| eval_expr_on_binding(a, b, graph)).collect();
+            let evaluated: Vec<GqlValue> = args
+                .iter()
+                .map(|a| eval_expr_on_binding(a, b, graph))
+                .collect();
             compute_coalesce(&evaluated)
         }
         // Entity-bound builtins: delegate to the PatternMatch-based evaluator
@@ -5115,11 +5394,18 @@ fn eval_builtin_function_call<G: GraphAccess + ?Sized>(
         // `PathBindings`), which is the honest result for "no path bound in this
         // context". If path bindings ever cross into the pipeline, thread the
         // real `PathBindings` through `Binding` and pass it here.
-        "id" | "type" | "labels" | "properties" | "shortestpath" | "nodes"
-        | "relationships" | "length" => {
+        "id" | "type" | "labels" | "properties" | "shortestpath" | "nodes" | "relationships"
+        | "length" => {
             // Pipeline-context `shortestPath` is not deadline-instrumented
             // (no deadline reaches the pipeline binding evaluator).
-            eval_function_call(name, args, &b.pm, &PathBindings::new(), graph, &DeadlineAbort::none())
+            eval_function_call(
+                name,
+                args,
+                &b.pm,
+                &PathBindings::new(),
+                graph,
+                &DeadlineAbort::none(),
+            )
         }
         _ => GqlValue::Null,
     }
@@ -5295,19 +5581,33 @@ mod tests {
     #[test]
     fn compute_to_lower_lowercases_string() {
         let v = GqlValue::Str("Hello WORLD".to_owned());
-        assert_eq!(compute_to_lower(&v), GqlValue::Str("hello world".to_owned()));
+        assert_eq!(
+            compute_to_lower(&v),
+            GqlValue::Str("hello world".to_owned())
+        );
     }
 
     #[test]
     fn compute_to_upper_uppercases_string() {
         let v = GqlValue::Str("Hello world".to_owned());
-        assert_eq!(compute_to_upper(&v), GqlValue::Str("HELLO WORLD".to_owned()));
+        assert_eq!(
+            compute_to_upper(&v),
+            GqlValue::Str("HELLO WORLD".to_owned())
+        );
     }
 
     #[test]
     fn compute_to_lower_non_string_returns_null() {
-        assert_eq!(compute_to_lower(&GqlValue::Int(7)), GqlValue::Null, "int -> Null");
-        assert_eq!(compute_to_lower(&GqlValue::Null), GqlValue::Null, "Null -> Null");
+        assert_eq!(
+            compute_to_lower(&GqlValue::Int(7)),
+            GqlValue::Null,
+            "int -> Null"
+        );
+        assert_eq!(
+            compute_to_lower(&GqlValue::Null),
+            GqlValue::Null,
+            "Null -> Null"
+        );
     }
 
     #[test]
@@ -5403,7 +5703,10 @@ mod tests {
         let expr = Expr::FunctionCall {
             name: "coalesce".to_owned(),
             args: vec![
-                Expr::PropAccess { var: "n".to_owned(), prop: "missing".to_owned() },
+                Expr::PropAccess {
+                    var: "n".to_owned(),
+                    prop: "missing".to_owned(),
+                },
                 Expr::Literal(Literal::Str("default".to_owned())),
             ],
         };
@@ -5419,7 +5722,8 @@ mod tests {
     fn properties_of_node_returns_map_of_all_props() {
         use crate::{Graph, props};
         let mut g = Graph::new();
-        g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 }).unwrap();
+        g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 })
+            .unwrap();
 
         let query = crate::gql::parse("MATCH (n:Person) RETURN properties(n) AS p").unwrap();
         let result = execute(&g, &query, 0).unwrap();
@@ -5442,7 +5746,10 @@ mod tests {
 
         let query = crate::gql::parse("MATCH (n:Empty) RETURN properties(n) AS p").unwrap();
         let result = execute(&g, &query, 0).unwrap();
-        assert_eq!(result[0].get("p"), Some(&GqlValue::Map(std::collections::HashMap::new())));
+        assert_eq!(
+            result[0].get("p"),
+            Some(&GqlValue::Map(std::collections::HashMap::new()))
+        );
     }
 
     #[test]
@@ -5451,7 +5758,8 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node("N", crate::Properties::new()).unwrap();
         let b = g.add_node("N", crate::Properties::new()).unwrap();
-        g.add_edge("LINKS", a, b, props! { "weight" => 5i64 }).unwrap();
+        g.add_edge("LINKS", a, b, props! { "weight" => 5i64 })
+            .unwrap();
 
         let query =
             crate::gql::parse("MATCH (a:N)-[r:LINKS]->(b:N) RETURN properties(r) AS p").unwrap();
@@ -5474,7 +5782,10 @@ mod tests {
             name: "properties".to_owned(),
             args: vec![Expr::Var("ghost".to_owned())],
         };
-        assert_eq!(eval_expr(&expr, &pm, &PathBindings::new(), &g, &DeadlineAbort::none()), GqlValue::Null);
+        assert_eq!(
+            eval_expr(&expr, &pm, &PathBindings::new(), &g, &DeadlineAbort::none()),
+            GqlValue::Null
+        );
     }
 
     // ── Fase B C3: RETURN n -> struct Node / RETURN r -> Relationship ────────
@@ -5483,7 +5794,8 @@ mod tests {
     fn return_node_yields_node_value_not_int() {
         use crate::{Graph, props};
         let mut g = Graph::new();
-        g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 }).unwrap();
+        g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 })
+            .unwrap();
 
         let query = crate::gql::parse("MATCH (n:Person) RETURN n").unwrap();
         let result = execute(&g, &query, 0).unwrap();
@@ -5491,7 +5803,10 @@ mod tests {
         match result[0].get("n") {
             Some(GqlValue::Node(node)) => {
                 assert_eq!(node.labels, vec!["Person".to_owned()]);
-                assert_eq!(node.props.get("name"), Some(&GqlValue::Str("Alice".to_owned())));
+                assert_eq!(
+                    node.props.get("name"),
+                    Some(&GqlValue::Str("Alice".to_owned()))
+                );
                 assert_eq!(node.props.get("age"), Some(&GqlValue::Int(30)));
             }
             other => panic!("expected GqlValue::Node, got {other:?}"),
@@ -5504,7 +5819,8 @@ mod tests {
         let mut g = Graph::new();
         let a = g.add_node("N", crate::Properties::new()).unwrap();
         let b = g.add_node("N", crate::Properties::new()).unwrap();
-        g.add_edge("LINKS", a, b, props! { "weight" => 5i64 }).unwrap();
+        g.add_edge("LINKS", a, b, props! { "weight" => 5i64 })
+            .unwrap();
 
         let query = crate::gql::parse("MATCH (a:N)-[r:LINKS]->(b:N) RETURN r").unwrap();
         let result = execute(&g, &query, 0).unwrap();
@@ -5752,16 +6068,19 @@ mod tests {
             // allow: test fixture
             #[allow(clippy::cast_possible_wrap)]
             let score = i as i64;
-            g.add_node("Person", props! { "name" => format!("Other{i}"), "score" => score })
-                .unwrap();
+            g.add_node(
+                "Person",
+                props! { "name" => format!("Other{i}"), "score" => score },
+            )
+            .unwrap();
         }
-        g.add_node("Person", props! { "name" => "Target", "score" => 42i64 }).unwrap();
+        g.add_node("Person", props! { "name" => "Target", "score" => 42i64 })
+            .unwrap();
 
         // MATCH (p:Person {name: "Target"}) RETURN p.score
         // The property index narrows candidates to the single node, then
         // node_matches_pattern confirms it; only one result row is produced.
-        let query =
-            crate::gql::parse("MATCH (p:Person {name: 'Target'}) RETURN p.score").unwrap();
+        let query = crate::gql::parse("MATCH (p:Person {name: 'Target'}) RETURN p.score").unwrap();
         let result = execute(&g, &query, 0).unwrap();
         // GqlResult = Vec<GqlRow>
         assert_eq!(result.len(), 1, "expected exactly one result row");
@@ -5804,7 +6123,10 @@ mod tests {
         let rows = execute_const_return(&g, &q, 0, None).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].get("one"), Some(&GqlValue::Int(1)));
-        assert_eq!(rows[0].get("greeting"), Some(&GqlValue::Str("hello".into())));
+        assert_eq!(
+            rows[0].get("greeting"),
+            Some(&GqlValue::Str("hello".into()))
+        );
     }
 
     #[test]
@@ -5884,7 +6206,10 @@ mod tests {
             msg.contains(RESULT_CAP_MSG_PREFIX),
             "error must carry the result-cap marker, got: {msg}"
         );
-        assert!(msg.contains("matched"), "Cap A message mentions matched rows: {msg}");
+        assert!(
+            msg.contains("matched"),
+            "Cap A message mentions matched rows: {msg}"
+        );
     }
 
     #[test]
@@ -5897,7 +6222,11 @@ mod tests {
         }
         let q = crate::gql::parse("MATCH (a:A), (b:B) RETURN a, b").unwrap();
         let rows = execute(&g, &q, 0).expect("cap=0 disables guard");
-        assert_eq!(rows.len(), 9, "all 9 cartesian rows returned when cap disabled");
+        assert_eq!(
+            rows.len(),
+            9,
+            "all 9 cartesian rows returned when cap disabled"
+        );
     }
 
     #[test]
@@ -6011,8 +6340,7 @@ mod tests {
             g.add_node("B", props! { "i" => i }).unwrap();
         }
         let q = crate::gql::parse("MATCH (a:A), (b:B) RETURN a, b").unwrap();
-        let rows = execute_with_deadline(&g, &q, 0, None)
-            .expect("None deadline never aborts");
+        let rows = execute_with_deadline(&g, &q, 0, None).expect("None deadline never aborts");
         assert_eq!(rows.len(), 9, "3×3 cross-join produces 9 rows");
     }
 
@@ -6056,8 +6384,7 @@ mod tests {
             prev = cur;
         }
         let q = crate::gql::parse("MATCH (a:N)-[*1..4]->(b:N) RETURN a, b").unwrap();
-        let rows = execute_with_deadline(&g, &q, 0, None)
-            .expect("None deadline never aborts");
+        let rows = execute_with_deadline(&g, &q, 0, None).expect("None deadline never aborts");
         assert!(!rows.is_empty(), "var-length expansion should produce rows");
     }
 
@@ -6087,10 +6414,22 @@ mod tests {
         let abort = DeadlineAbort::new(Some(expired));
         // counter starts at 0 → first dequeue lands on the check slot and trips.
         let path = shortest_path_bfs_constrained(
-            &g, ids[0], ids[29], Some(40), Some("E"), Direction::Outgoing, &abort,
+            &g,
+            ids[0],
+            ids[29],
+            Some(40),
+            Some("E"),
+            Direction::Outgoing,
+            &abort,
         );
-        assert!(path.is_none(), "expired deadline must abort the BFS (returns None)");
-        assert!(abort.is_aborted(), "the BFS must trip the abort cell on expiry");
+        assert!(
+            path.is_none(),
+            "expired deadline must abort the BFS (returns None)"
+        );
+        assert!(
+            abort.is_aborted(),
+            "the BFS must trip the abort cell on expiry"
+        );
     }
 
     #[test]
@@ -6109,8 +6448,14 @@ mod tests {
         let expired = expired_deadline();
         let abort = DeadlineAbort::new(Some(expired));
         let path = shortest_path_bfs(&g, ids[0], ids[29], &abort);
-        assert!(path.is_none(), "expired deadline must abort the unconstrained BFS");
-        assert!(abort.is_aborted(), "the BFS must trip the abort cell on expiry");
+        assert!(
+            path.is_none(),
+            "expired deadline must abort the unconstrained BFS"
+        );
+        assert!(
+            abort.is_aborted(),
+            "the BFS must trip the abort cell on expiry"
+        );
     }
 
     // `{i:0}` is Cypher inline-property syntax, not a format placeholder.
@@ -6164,8 +6509,7 @@ mod tests {
              RETURN shortestPath((a)-[*1..10]->(b)) AS p",
         )
         .unwrap();
-        let rows = execute_with_deadline(&g, &q, 0, None)
-            .expect("None deadline never aborts");
+        let rows = execute_with_deadline(&g, &q, 0, None).expect("None deadline never aborts");
         assert_eq!(rows.len(), 1);
         assert!(
             matches!(rows[0].get("p"), Some(GqlValue::List(_))),
@@ -6207,9 +6551,12 @@ mod tests {
             g.add_node("A", props! { "i" => i }).unwrap();
         }
         let q = crate::gql::parse("MATCH (a:A) RETURN a").unwrap();
-        let rows = execute_with_deadline(&g, &q, 0, None)
-            .expect("None deadline never aborts");
-        assert_eq!(rows.len(), 50, "all 50 rows materialized when deadline is None");
+        let rows = execute_with_deadline(&g, &q, 0, None).expect("None deadline never aborts");
+        assert_eq!(
+            rows.len(),
+            50,
+            "all 50 rows materialized when deadline is None"
+        );
     }
 
     // ── Cycle 1.1: GqlValue::Map variant ────────────────────────────────────
@@ -6244,11 +6591,13 @@ mod tests {
 
     #[test]
     fn apply_map_to_node_overwrite_replaces_all_props() {
-        use std::collections::HashMap;
         use crate::{Graph, props};
+        use std::collections::HashMap;
 
         let mut g = Graph::new();
-        let id = g.add_node("Person", props! { "name" => "Alice", "age" => 35_i64 }).unwrap();
+        let id = g
+            .add_node("Person", props! { "name" => "Alice", "age" => 35_i64 })
+            .unwrap();
 
         let map = HashMap::from([
             ("name".to_owned(), GqlValue::Str("Bob".into())),
@@ -6257,26 +6606,46 @@ mod tests {
         apply_map_to_node_overwrite(&mut g, id, &map).unwrap();
 
         let node = g.node(id).unwrap();
-        assert!(node.properties().get("age").is_none(), "overwrite must clear old props");
-        assert_eq!(node.properties().get("name"), Some(&crate::property::Property::String("Bob".into())));
-        assert_eq!(node.properties().get("score"), Some(&crate::property::Property::I64(99)));
+        assert!(
+            node.properties().get("age").is_none(),
+            "overwrite must clear old props"
+        );
+        assert_eq!(
+            node.properties().get("name"),
+            Some(&crate::property::Property::String("Bob".into()))
+        );
+        assert_eq!(
+            node.properties().get("score"),
+            Some(&crate::property::Property::I64(99))
+        );
     }
 
     #[test]
     fn apply_map_to_node_merge_preserves_existing_props() {
-        use std::collections::HashMap;
         use crate::{Graph, props};
+        use std::collections::HashMap;
 
         let mut g = Graph::new();
-        let id = g.add_node("Person", props! { "name" => "Alice", "age" => 35_i64 }).unwrap();
+        let id = g
+            .add_node("Person", props! { "name" => "Alice", "age" => 35_i64 })
+            .unwrap();
 
         let map = HashMap::from([("score".to_owned(), GqlValue::Int(42))]);
         apply_map_to_node_merge(&mut g, id, &map).unwrap();
 
         let node = g.node(id).unwrap();
-        assert_eq!(node.properties().get("name"), Some(&crate::property::Property::String("Alice".into())));
-        assert_eq!(node.properties().get("age"), Some(&crate::property::Property::I64(35)));
-        assert_eq!(node.properties().get("score"), Some(&crate::property::Property::I64(42)));
+        assert_eq!(
+            node.properties().get("name"),
+            Some(&crate::property::Property::String("Alice".into()))
+        );
+        assert_eq!(
+            node.properties().get("age"),
+            Some(&crate::property::Property::I64(35))
+        );
+        assert_eq!(
+            node.properties().get("score"),
+            Some(&crate::property::Property::I64(42))
+        );
     }
 
     // ── Cycle 1.2: GqlValue Node/Relationship/Path variants (Fase B C1) ────────
@@ -6284,12 +6653,27 @@ mod tests {
     #[test]
     fn gql_path_holds_nodes_and_rels_with_invariant() {
         use std::collections::HashMap;
-        let n0 = GqlNode { id: 1, labels: vec!["User".to_owned()], props: HashMap::new() };
-        let n1 = GqlNode { id: 2, labels: vec!["Resource".to_owned()], props: HashMap::new() };
-        let r0 = GqlRelationship {
-            id: 10, start_id: 1, end_id: 2, rel_type: "OWNS".to_owned(), props: HashMap::new(),
+        let n0 = GqlNode {
+            id: 1,
+            labels: vec!["User".to_owned()],
+            props: HashMap::new(),
         };
-        let path = GqlPath { nodes: vec![n0, n1], rels: vec![r0] };
+        let n1 = GqlNode {
+            id: 2,
+            labels: vec!["Resource".to_owned()],
+            props: HashMap::new(),
+        };
+        let r0 = GqlRelationship {
+            id: 10,
+            start_id: 1,
+            end_id: 2,
+            rel_type: "OWNS".to_owned(),
+            props: HashMap::new(),
+        };
+        let path = GqlPath {
+            nodes: vec![n0, n1],
+            rels: vec![r0],
+        };
         assert_eq!(path.nodes.len(), path.rels.len() + 1); // Neo4j path invariant
         let v = GqlValue::Path(path);
         assert!(matches!(v, GqlValue::Path(_)));
@@ -6298,7 +6682,11 @@ mod tests {
     #[test]
     fn gql_node_is_a_gqlvalue_variant() {
         use std::collections::HashMap;
-        let v = GqlValue::Node(GqlNode { id: 7, labels: vec![], props: HashMap::new() });
+        let v = GqlValue::Node(GqlNode {
+            id: 7,
+            labels: vec![],
+            props: HashMap::new(),
+        });
         assert!(matches!(v, GqlValue::Node(_)));
     }
 
@@ -6314,13 +6702,15 @@ mod tests {
     /// keyed by `k` so the query can pin endpoints. `b_c_expired` flips the
     /// second link's `expired` flag for the ReBAC-fail case.
     fn seed_two_link_chain(b_c_expired: bool) -> crate::Graph {
-        use crate::{props, Graph};
+        use crate::{Graph, props};
         let mut g = Graph::new();
         let a = g.add_node("N", props! { "k" => "a" }).unwrap();
         let b = g.add_node("N", props! { "k" => "b" }).unwrap();
         let c = g.add_node("N", props! { "k" => "c" }).unwrap();
-        g.add_edge("LINK", a, b, props! { "expired" => false }).unwrap();
-        g.add_edge("LINK", b, c, props! { "expired" => b_c_expired }).unwrap();
+        g.add_edge("LINK", a, b, props! { "expired" => false })
+            .unwrap();
+        g.add_edge("LINK", b, c, props! { "expired" => b_c_expired })
+            .unwrap();
         g
     }
 
@@ -6333,7 +6723,11 @@ mod tests {
         .unwrap();
         let rows = execute(&g, &q, 0).unwrap();
         assert_eq!(rows.len(), 1, "one a→c path");
-        assert_eq!(rows[0].get("len"), Some(&GqlValue::Int(2)), "edges, not nodes");
+        assert_eq!(
+            rows[0].get("len"),
+            Some(&GqlValue::Int(2)),
+            "edges, not nodes"
+        );
     }
 
     #[test]
@@ -6365,10 +6759,9 @@ mod tests {
         // the 0x50 struct. The driver's As<IPath>() is the wire gate; this is
         // the in-process mirror that the value is a Path with the right shape.
         let g = seed_two_link_chain(false);
-        let q = crate::gql::parse(
-            "MATCH p = (a:N {k:'a'})-[:LINK*1..3]->(c:N {k:'c'}) RETURN p AS r",
-        )
-        .unwrap();
+        let q =
+            crate::gql::parse("MATCH p = (a:N {k:'a'})-[:LINK*1..3]->(c:N {k:'c'}) RETURN p AS r")
+                .unwrap();
         let rows = execute(&g, &q, 0).unwrap();
         assert_eq!(rows.len(), 1);
         match rows[0].get("r") {
@@ -6483,7 +6876,8 @@ mod tests {
             "MATCH (a:N {k:'a'}), (b:N {k:'b'}) CREATE (a)-[:LINK {expired:false}]->(b)",
             "MATCH (b:N {k:'b'}), (c:N {k:'c'}) CREATE (b)-[:LINK {expired:true}]->(c)",
         ] {
-            let stmt = crate::gql::parse_statement(q).unwrap_or_else(|e| panic!("parse {q}: {e:?}"));
+            let stmt =
+                crate::gql::parse_statement(q).unwrap_or_else(|e| panic!("parse {q}: {e:?}"));
             assert!(
                 matches!(stmt, crate::gql::GqlStatement::Mutation(_)),
                 "{q} must parse as a mutation, got {stmt:?}",
@@ -6521,8 +6915,7 @@ mod tests {
         let a = g.add_node("Solo", crate::Properties::new()).unwrap();
         let b = g.add_node("Other", crate::Properties::new()).unwrap();
         g.add_edge("KNOWS", a, b, crate::Properties::new()).unwrap();
-        let stmt =
-            crate::gql::parse_statement("MATCH (n:Solo) WITH n DETACH DELETE n").unwrap();
+        let stmt = crate::gql::parse_statement("MATCH (n:Solo) WITH n DETACH DELETE n").unwrap();
         let stats = execute_pipeline_mutation(&mut g, &stmt, None).unwrap();
         assert_eq!(stats.nodes_deleted, 1);
         assert_eq!(stats.edges_deleted, 1);
@@ -6536,8 +6929,7 @@ mod tests {
         let a = g.add_node("A", crate::Properties::new()).unwrap();
         let b = g.add_node("B", crate::Properties::new()).unwrap();
         g.add_edge("KNOWS", a, b, crate::Properties::new()).unwrap();
-        let stmt =
-            crate::gql::parse_statement("MATCH ()-[r:KNOWS]->() WITH r DELETE r").unwrap();
+        let stmt = crate::gql::parse_statement("MATCH ()-[r:KNOWS]->() WITH r DELETE r").unwrap();
         let stats = execute_pipeline_mutation(&mut g, &stmt, None).unwrap();
         assert_eq!(stats.edges_deleted, 1);
         assert_eq!(stats.nodes_deleted, 0);

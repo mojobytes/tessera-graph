@@ -1,9 +1,14 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::{Direction, Graph, Properties, props};
 
 /// Helper: builds a small graph: A --KNOWS--> B --LIKES--> C, B --KNOWS--> A
-fn triangle_graph() -> (Graph, tessera_graph::NodeId, tessera_graph::NodeId, tessera_graph::NodeId) {
+fn triangle_graph() -> (
+    Graph,
+    tessera_graph::NodeId,
+    tessera_graph::NodeId,
+    tessera_graph::NodeId,
+) {
     let mut g = Graph::new();
     let a = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     let b = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
@@ -20,7 +25,11 @@ fn triangle_graph() -> (Graph, tessera_graph::NodeId, tessera_graph::NodeId, tes
 fn neighbors_outgoing_returns_correct_edges() {
     let (g, a, b, _c) = triangle_graph();
 
-    let edges = g.neighbors(a).direction(Direction::Outgoing).collect().unwrap();
+    let edges = g
+        .neighbors(a)
+        .direction(Direction::Outgoing)
+        .collect()
+        .unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].label(), "KNOWS");
     assert_eq!(edges[0].target(), b);
@@ -31,7 +40,11 @@ fn neighbors_incoming_returns_correct_edges() {
     let (g, a, b, _c) = triangle_graph();
 
     // A has one incoming edge: B --KNOWS--> A
-    let edges = g.neighbors(a).direction(Direction::Incoming).collect().unwrap();
+    let edges = g
+        .neighbors(a)
+        .direction(Direction::Incoming)
+        .collect()
+        .unwrap();
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].label(), "KNOWS");
     assert_eq!(edges[0].source(), b);

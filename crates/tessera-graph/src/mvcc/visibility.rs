@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Read visibility: resolve the version of a record a given reader may see.
 
@@ -127,7 +127,12 @@ mod tests {
         let base = node_snapshot(1, "Person");
         let after = node_snapshot(1, "PersonV2");
         let mut chain = DeltaChainHead::new();
-        chain.push(Delta::new(7, Some(base.clone()), Some(after), DeltaOp::Update));
+        chain.push(Delta::new(
+            7,
+            Some(base.clone()),
+            Some(after),
+            DeltaOp::Update,
+        ));
         // Reader is a different txn; delta is uncommitted → base only.
         let visible = apply_deltas_for_read(Some(base.clone()), &chain, 100, Some(999));
         assert_eq!(visible, Some(base));
@@ -182,7 +187,12 @@ mod tests {
         let base = Some(node_snapshot(1, "V0"));
         let mut chain = DeltaChainHead::new();
         // Older committed delta, visible to start_ts=25.
-        let mut older = Delta::new(1, base.clone(), Some(node_snapshot(1, "V1")), DeltaOp::Update);
+        let mut older = Delta::new(
+            1,
+            base.clone(),
+            Some(node_snapshot(1, "V1")),
+            DeltaOp::Update,
+        );
         older.stamp_commit(10);
         chain.push(older);
         // Newer committed delta, committed at 30 — NOT visible to start_ts=25.
@@ -222,7 +232,12 @@ mod tests {
         del.stamp_commit(10);
         chain.push(del);
         let reinserted = node_snapshot(1, "PersonAgain");
-        let mut ins = Delta::new(2, Some(EntitySnapshot::Deleted), Some(reinserted.clone()), DeltaOp::Insert);
+        let mut ins = Delta::new(
+            2,
+            Some(EntitySnapshot::Deleted),
+            Some(reinserted.clone()),
+            DeltaOp::Insert,
+        );
         ins.stamp_commit(20);
         chain.push(ins);
 

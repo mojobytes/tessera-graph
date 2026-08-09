@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Cypher write-path execution, unified in the engine.
 //!
@@ -217,15 +217,15 @@ pub fn execute_bare_mutation(
         MutationClause::Create(create) => {
             for pattern in &create.patterns {
                 match pattern {
-                    CreatePattern::Node { var, label, props, prop_map } => {
-                        let properties = resolve_create_node_props(
-                            props,
-                            prop_map.as_ref(),
-                            params,
-                            &*graph,
-                        )?;
-                        properties_set +=
-                            u64::try_from(properties.len()).unwrap_or(u64::MAX);
+                    CreatePattern::Node {
+                        var,
+                        label,
+                        props,
+                        prop_map,
+                    } => {
+                        let properties =
+                            resolve_create_node_props(props, prop_map.as_ref(), params, &*graph)?;
+                        properties_set += u64::try_from(properties.len()).unwrap_or(u64::MAX);
                         let id = match txn_id {
                             Some(t) => graph.add_node_in_txn(t, label, properties)?,
                             None => graph.add_node(label, properties)?,
@@ -324,7 +324,7 @@ fn apply_one_set_assignment(
     params: &HashMap<String, GqlValue>,
     txn_id: Option<u64>,
 ) -> crate::Result<u64> {
-    use crate::gql::{gql_value_to_property, SetAssignment};
+    use crate::gql::{SetAssignment, gql_value_to_property};
 
     let empty_pm = PatternMatch::empty();
 
@@ -516,10 +516,17 @@ pub fn merge_lookup<G: crate::access::GraphAccess + ?Sized>(
                 Some(prev) => prev.intersection(&ids).copied().collect(),
             });
         }
-        candidates.unwrap_or_default().into_iter().next().map(NodeId::from_raw)
+        candidates
+            .unwrap_or_default()
+            .into_iter()
+            .next()
+            .map(NodeId::from_raw)
     };
 
-    MergeLookup { existing_id, lookup_props }
+    MergeLookup {
+        existing_id,
+        lookup_props,
+    }
 }
 
 /// MERGE phase 2 (write): apply the create-or-match outcome of the lookup.
@@ -541,7 +548,10 @@ pub fn apply_merge_write(
     params: &HashMap<String, GqlValue>,
     txn_id: Option<u64>,
 ) -> crate::Result<(Vec<ResultRow>, GqlMutationResult)> {
-    let MergeLookup { existing_id, lookup_props } = lookup;
+    let MergeLookup {
+        existing_id,
+        lookup_props,
+    } = lookup;
 
     let (merged_id, nodes_created, labels_added, properties_set) = if let Some(id) = existing_id {
         let props = match &merge.on_match {
@@ -703,13 +713,7 @@ pub fn apply_match_mutation_body(
                             &mut stats,
                         )?;
                     } else if let Some(&edge_id) = row.edges.get(var) {
-                        delete_edge_row(
-                            graph,
-                            edge_id,
-                            txn_id,
-                            &mut deleted_edges,
-                            &mut stats,
-                        )?;
+                        delete_edge_row(graph, edge_id, txn_id, &mut deleted_edges, &mut stats)?;
                     } else {
                         return Err(crate::Error::GqlCompileError(format!(
                             "variable '{var}' not bound by MATCH clause"
@@ -851,7 +855,12 @@ fn apply_match_create(
                     nodes_created += 1;
                     labels_added += count_label(label);
                 }
-                CreatePattern::Edge { source_var, rel_label, rel_props, target_var } => {
+                CreatePattern::Edge {
+                    source_var,
+                    rel_label,
+                    rel_props,
+                    target_var,
+                } => {
                     let src = row.nodes.get(source_var).ok_or_else(|| {
                         crate::Error::GqlCompileError(format!(
                             "variable '{source_var}' not bound by MATCH clause"
@@ -939,7 +948,7 @@ pub fn apply_unwind_create_body(
     rows: &[HashMap<String, NodeId>],
     txn_id: Option<u64>,
 ) -> crate::Result<GqlMutationResult> {
-    use crate::gql::{resolve_create_props, CreatePattern};
+    use crate::gql::{CreatePattern, resolve_create_props};
 
     let mut nodes_created: u64 = 0;
     let mut edges_created: u64 = 0;
@@ -956,7 +965,12 @@ pub fn apply_unwind_create_body(
 
             for pattern in &create.patterns {
                 match pattern {
-                    CreatePattern::Node { var, label, props, prop_map } => {
+                    CreatePattern::Node {
+                        var,
+                        label,
+                        props,
+                        prop_map,
+                    } => {
                         // `CREATE (n:Label $map)` (whole-entity map source) is not
                         // supported inside an UNWIND pipeline. Fail explicitly
                         // rather than silently dropping the map.
@@ -980,7 +994,12 @@ pub fn apply_unwind_create_body(
                         nodes_created += 1;
                         labels_added += count_label(label);
                     }
-                    CreatePattern::Edge { source_var, rel_label, rel_props, target_var } => {
+                    CreatePattern::Edge {
+                        source_var,
+                        rel_label,
+                        rel_props,
+                        target_var,
+                    } => {
                         let src = created_nodes
                             .get(source_var)
                             .or_else(|| row.get(source_var))
@@ -1001,8 +1020,13 @@ pub fn apply_unwind_create_body(
                             resolve_create_props(rel_props, &empty_pm, &*graph, unwind_var);
                         properties_set += u64::try_from(properties.len()).unwrap_or(u64::MAX);
                         match txn_id {
-                            Some(t) => graph
-                                .add_edge_in_txn(t, rel_label.as_str(), *src, *tgt, properties)?,
+                            Some(t) => graph.add_edge_in_txn(
+                                t,
+                                rel_label.as_str(),
+                                *src,
+                                *tgt,
+                                properties,
+                            )?,
                             None => graph.add_edge(rel_label.as_str(), *src, *tgt, properties)?,
                         };
                         edges_created += 1;
@@ -1077,9 +1101,7 @@ pub fn execute_unwind_mutation(
         MutationClause::Create(create) => {
             apply_unwind_create_body(graph, unwind, create, &elements, &rows, txn_id)
         }
-        MutationClause::Delete(dc) => {
-            apply_unwind_delete_body(graph, &rows, dc, txn_id)
-        }
+        MutationClause::Delete(dc) => apply_unwind_delete_body(graph, &rows, dc, txn_id),
         // Guarded by the match above; unreachable in practice.
         other => Err(crate::Error::GqlCompileError(format!(
             "mutation clause not yet supported with UNWIND: {other:?}"
@@ -1113,9 +1135,7 @@ pub fn apply_unwind_delete_body(
     for row in rows {
         for var in &dc.vars {
             let node_id = row.get(var).copied().ok_or_else(|| {
-                crate::Error::GqlCompileError(format!(
-                    "variable '{var}' not bound by MATCH clause"
-                ))
+                crate::Error::GqlCompileError(format!("variable '{var}' not bound by MATCH clause"))
             })?;
             delete_node_row(
                 graph,
@@ -1155,7 +1175,10 @@ mod tests {
         // 2 nodes = 4 rows). Dedup must delete each real node exactly once.
         let stmt = parse_mutation("UNWIND [1, 2] AS x MATCH (n:Person) DELETE n");
         let stats = super::execute_unwind_mutation(&mut g, &stmt, None, None).unwrap();
-        assert_eq!(stats.nodes_deleted, 2, "each node deleted once despite 4 rows");
+        assert_eq!(
+            stats.nodes_deleted, 2,
+            "each node deleted once despite 4 rows"
+        );
         assert_eq!(g.node_count(), 0);
     }
 
@@ -1197,8 +1220,7 @@ mod tests {
     fn execute_bare_mutation_autocommit_creates_node() {
         let mut g = Graph::new();
         let stmt = parse_mutation("CREATE (n:Person)");
-        let (rows, stats) =
-            execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
+        let (rows, stats) = execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 1);
         assert_eq!(stats.edges_created, 0);
         assert_eq!(rows.len(), 0);
@@ -1209,8 +1231,7 @@ mod tests {
     fn execute_bare_mutation_return_projects_created_node() {
         let mut g = Graph::new();
         let stmt = parse_mutation("CREATE (n:Person {name: 'Ada'}) RETURN n");
-        let (rows, stats) =
-            execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
+        let (rows, stats) = execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 1);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].contains_key("n"));
@@ -1244,8 +1265,7 @@ mod tests {
     fn execute_bare_mutation_counts_labels_added_for_labeled_node() {
         let mut g = Graph::new();
         let stmt = parse_mutation("CREATE (n:Person {name: 'Alice'})");
-        let (_rows, stats) =
-            execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
+        let (_rows, stats) = execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 1);
         assert_eq!(stats.labels_added, 1);
     }
@@ -1254,8 +1274,7 @@ mod tests {
     fn execute_bare_mutation_counts_labels_added_for_two_labeled_nodes() {
         let mut g = Graph::new();
         let stmt = parse_mutation("CREATE (:Person), (:City)");
-        let (_rows, stats) =
-            execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
+        let (_rows, stats) = execute_bare_mutation(&mut g, &stmt, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 2);
         assert_eq!(stats.labels_added, 2);
     }
@@ -1513,12 +1532,10 @@ mod tests {
         let mut g = Graph::new();
         let m = parse_merge("MERGE (n:Person {id: 1}) ON CREATE SET n.created = true");
         // First run creates.
-        let (_r, stats) =
-            super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
+        let (_r, stats) = super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 1);
         // Second run matches the existing node — nothing created.
-        let (_r2, stats2) =
-            super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
+        let (_r2, stats2) = super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
         assert_eq!(stats2.nodes_created, 0);
         assert_eq!(g.nodes_by_label("Person").len(), 1);
     }
@@ -1527,8 +1544,7 @@ mod tests {
     fn execute_bare_merge_create_branch_counts_labels_added() {
         let mut g = Graph::new();
         let m = parse_merge("MERGE (n:AssetNode {id: 'x'})");
-        let (_r, stats) =
-            super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
+        let (_r, stats) = super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 1);
         assert_eq!(stats.labels_added, 1);
         assert!(stats.contains_updates());
@@ -1541,8 +1557,7 @@ mod tests {
         // First MERGE creates it.
         super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
         // Second MERGE matches the existing node with no ON MATCH SET.
-        let (_r, stats) =
-            super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
+        let (_r, stats) = super::execute_bare_merge(&mut g, &m, &HashMap::new(), None).unwrap();
         assert_eq!(stats.nodes_created, 0);
         assert_eq!(stats.labels_added, 0);
         assert_eq!(stats.properties_set, 0);
@@ -1564,7 +1579,10 @@ mod tests {
         // committed index — so it matches instead of creating a duplicate.
         let (_r2, stats2) =
             super::execute_bare_merge(&mut g, &m, &HashMap::new(), Some(txn)).unwrap();
-        assert_eq!(stats2.nodes_created, 0, "second MERGE must match the txn's own pending node");
+        assert_eq!(
+            stats2.nodes_created, 0,
+            "second MERGE must match the txn's own pending node"
+        );
         // Still invisible to auto-commit before COMMIT.
         assert_eq!(g.nodes_by_label("Person").len(), 0);
         g.commit_txn(txn).unwrap();
@@ -1577,8 +1595,7 @@ mod tests {
     fn execute_unwind_mutation_autocommit_creates_one_node_per_element() {
         let mut g = Graph::new();
         let stmt = parse_mutation("UNWIND [1, 2, 3] AS x CREATE (n:N {v: x})");
-        let stats =
-            super::execute_unwind_mutation(&mut g, &stmt, None, None).unwrap();
+        let stats = super::execute_unwind_mutation(&mut g, &stmt, None, None).unwrap();
         assert_eq!(stats.nodes_created, 3);
         assert_eq!(stats.edges_created, 0);
         assert_eq!(g.nodes_by_label("N").len(), 3);
@@ -1588,8 +1605,7 @@ mod tests {
     fn execute_unwind_mutation_counts_labels_added_per_element() {
         let mut g = Graph::new();
         let stmt = parse_mutation("UNWIND [1, 2, 3] AS x CREATE (:Item {v: x})");
-        let stats =
-            super::execute_unwind_mutation(&mut g, &stmt, None, None).unwrap();
+        let stats = super::execute_unwind_mutation(&mut g, &stmt, None, None).unwrap();
         assert_eq!(stats.nodes_created, 3);
         assert_eq!(stats.labels_added, 3);
     }
@@ -1600,8 +1616,7 @@ mod tests {
         g.enable_mvcc();
         let txn = g.begin_txn().unwrap();
         let stmt = parse_mutation("UNWIND [1, 2] AS x CREATE (n:N {v: x})");
-        let stats =
-            super::execute_unwind_mutation(&mut g, &stmt, None, Some(txn)).unwrap();
+        let stats = super::execute_unwind_mutation(&mut g, &stmt, None, Some(txn)).unwrap();
         assert_eq!(stats.nodes_created, 2);
         // Pending nodes are enumerable within the txn but invisible to auto-commit.
         assert_eq!(g.nodes_by_label_in_txn(txn, "N").unwrap().len(), 2);

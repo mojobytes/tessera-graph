@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Conversion helpers between Python `dict[str, Any]` and Rust `Properties`.
 
@@ -10,7 +10,7 @@ use tessera_graph::{Properties, Property};
 pub fn to_py_dict<'py>(py: Python<'py>, props: &Properties) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
     for (key, val) in props {
-        let py_val: PyObject = match val {
+        let py_val: Py<PyAny> = match val {
             Property::String(s) => s.into_pyobject(py)?.into_any().unbind(),
             Property::I64(v) => v.into_pyobject(py)?.into_any().unbind(),
             Property::F64(v) => v.into_pyobject(py)?.into_any().unbind(),

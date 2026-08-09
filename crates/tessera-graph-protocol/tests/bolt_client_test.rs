@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Integration tests for `BoltClient::run_query` error handling.
 
@@ -99,8 +99,9 @@ async fn run_query_returns_error_when_run_is_ignored() {
         vec![], // no PULL expected — client should bail after RUN IGNORED
     ));
 
-    let mut client =
-        tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1").await;
@@ -131,13 +132,17 @@ async fn run_query_returns_error_when_pull_is_ignored() {
         vec![BoltResponse::Ignored],
     ));
 
-    let mut client =
-        tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1 AS x").await;
 
-    assert!(result.is_err(), "run_query should fail when PULL is IGNORED");
+    assert!(
+        result.is_err(),
+        "run_query should fail when PULL is IGNORED"
+    );
     assert!(
         matches!(result.unwrap_err(), ProtocolError::BoltConnectionIgnored),
         "expected BoltConnectionIgnored"
@@ -158,13 +163,17 @@ async fn run_query_returns_error_when_run_gets_unexpected_record() {
         vec![],
     ));
 
-    let mut client =
-        tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1").await;
 
-    assert!(result.is_err(), "run_query should fail on unexpected RECORD to RUN");
+    assert!(
+        result.is_err(),
+        "run_query should fail on unexpected RECORD to RUN"
+    );
     let err = result.unwrap_err();
     match &err {
         ProtocolError::BoltQueryFailure { message } => {
@@ -199,8 +208,9 @@ async fn run_query_success_still_works() {
         ],
     ));
 
-    let mut client =
-        tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1 AS n").await.unwrap();
@@ -235,7 +245,9 @@ async fn reset_returns_ok_on_success() {
         BoltResponse::Success { metadata: vec![] },
     ));
 
-    let mut client = tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     assert!(client.reset().await.is_ok());
@@ -257,7 +269,9 @@ async fn reset_returns_error_on_failure() {
         },
     ));
 
-    let mut client = tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.reset().await;
@@ -276,12 +290,11 @@ async fn reset_returns_error_on_failure() {
 async fn reset_returns_error_on_ignored() {
     let (client_stream, server_stream) = tokio::io::duplex(8192);
 
-    let server = tokio::spawn(mock_server_reset(
-        server_stream,
-        BoltResponse::Ignored,
-    ));
+    let server = tokio::spawn(mock_server_reset(server_stream, BoltResponse::Ignored));
 
-    let mut client = tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.reset().await;
@@ -320,17 +333,17 @@ async fn run_ignored_does_not_send_pull() {
         )
         .await;
 
-        // Either timeout (Ok(Err(..))) or EOF (Err(..)) is acceptable —
-        // receiving data means the client sent PULL, which is a bug.
-        match read {
-            Err(_elapsed) => {}    // timeout — no data sent, correct
-            Ok(Err(_io)) => {}     // EOF / broken pipe — client dropped, correct
-            Ok(Ok(_)) => panic!("client sent unexpected data after RUN IGNORED (likely a PULL)"),
-        }
+        // Timeout or EOF is acceptable. A successful read proves that the
+        // client sent another Bolt message after RUN was ignored.
+        assert!(
+            !matches!(read, Ok(Ok(_))),
+            "client sent unexpected data after RUN IGNORED (likely a PULL)"
+        );
     });
 
-    let mut client =
-        tessera_graph_protocol::connect(client_stream).await.unwrap();
+    let mut client = tessera_graph_protocol::connect(client_stream)
+        .await
+        .unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1").await;
@@ -362,7 +375,9 @@ async fn connect_rejects_unsupported_version_from_server() {
     });
 
     let result = tessera_graph_protocol::connect(client_stream).await;
-    let err = result.err().expect("connect should fail with unsupported version");
+    let err = result
+        .err()
+        .expect("connect should fail with unsupported version");
     match err {
         ProtocolError::BoltInvalidHandshake { reason } => {
             assert!(
@@ -390,7 +405,10 @@ async fn connect_accepts_exact_supported_version() {
     });
 
     let result = tessera_graph_protocol::connect(client_stream).await;
-    assert!(result.is_ok(), "connect should succeed with matching version");
+    assert!(
+        result.is_ok(),
+        "connect should succeed with matching version"
+    );
 
     server.await.unwrap();
 }
@@ -407,8 +425,8 @@ async fn handshake_round_trip_negotiate_then_connect() {
         let mut handshake = [0u8; 20];
         stream.read_exact(&mut handshake).await.unwrap();
 
-        let negotiated = negotiate_version(&handshake)
-            .expect("server should accept the client's proposal");
+        let negotiated =
+            negotiate_version(&handshake).expect("server should accept the client's proposal");
         assert_eq!(negotiated, SUPPORTED_VERSION);
 
         let response = encode_version_response(Some(negotiated));

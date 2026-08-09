@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -8,7 +8,7 @@ use super::node_id::PyNodeId;
 use super::properties;
 
 /// A directed edge (relationship) snapshot from the graph.
-#[pyclass(name = "Edge", frozen)]
+#[pyclass(name = "Edge", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyEdge {
     pub(crate) inner: tessera_graph::Edge,

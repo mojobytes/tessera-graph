@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! `TxnView`: a [`GraphAccess`](crate::access::GraphAccess) adapter that binds a
 //! `&mut Graph` to a specific explicit-transaction `txn_id`.
@@ -92,7 +92,9 @@ macro_rules! txn_read_methods {
         }
 
         fn nodes_by_label(&self, label: &str) -> Vec<NodeId> {
-            self.graph.nodes_by_label_in_txn(self.txn_id, label).unwrap_or_default()
+            self.graph
+                .nodes_by_label_in_txn(self.txn_id, label)
+                .unwrap_or_default()
         }
 
         fn node(&self, id: NodeId) -> Result<Node> {
@@ -151,11 +153,13 @@ macro_rules! txn_read_methods {
         }
 
         fn outgoing_edges_by_label(&self, node: NodeId, label: &str) -> Result<Vec<Edge>> {
-            self.graph.outgoing_edges_by_label_in_txn(self.txn_id, node, label)
+            self.graph
+                .outgoing_edges_by_label_in_txn(self.txn_id, node, label)
         }
 
         fn incoming_edges_by_label(&self, node: NodeId, label: &str) -> Result<Vec<Edge>> {
-            self.graph.incoming_edges_by_label_in_txn(self.txn_id, node, label)
+            self.graph
+                .incoming_edges_by_label_in_txn(self.txn_id, node, label)
         }
     };
 }
@@ -237,7 +241,8 @@ impl GraphAccess for TxnView<'_> {
         target: NodeId,
         properties: Properties,
     ) -> Result<EdgeId> {
-        self.graph.add_edge_in_txn(self.txn_id, label, source, target, properties)
+        self.graph
+            .add_edge_in_txn(self.txn_id, label, source, target, properties)
     }
 
     fn update_edge(&mut self, id: EdgeId, edge: &Edge) -> Result<()> {
@@ -289,7 +294,10 @@ mod tests {
             assert_eq!(view.node_ids(), vec![id]);
         }
         // Auto-commit reader (no commit yet): NOT visible.
-        assert!(g.node(id).is_err(), "uncommitted txn write must be invisible to auto-commit");
+        assert!(
+            g.node(id).is_err(),
+            "uncommitted txn write must be invisible to auto-commit"
+        );
         assert!(!g.node_visible(id));
     }
 
@@ -301,12 +309,17 @@ mod tests {
         let committed = g.add_node("Base", Properties::new()).unwrap();
         // A separate txn writes an uncommitted node.
         let other = g.begin_txn().unwrap();
-        let hidden = g.add_node_in_txn(other, "Hidden", Properties::new()).unwrap();
+        let hidden = g
+            .add_node_in_txn(other, "Hidden", Properties::new())
+            .unwrap();
         // Our txn (started after) sees the committed base but not the other's pending node.
         let reader = g.begin_txn().unwrap();
         let view = TxnView::new(&mut g, reader);
         assert!(view.node(committed).is_ok());
-        assert!(view.node(hidden).is_err(), "must not see another txn's uncommitted node");
+        assert!(
+            view.node(hidden).is_err(),
+            "must not see another txn's uncommitted node"
+        );
         g.rollback_txn(other).unwrap();
         g.rollback_txn(reader).unwrap();
     }
@@ -338,7 +351,8 @@ mod tests {
         {
             let mut view = TxnView::new(&mut g, txn);
             let mut n = view.node(id).unwrap();
-            n.properties_mut().insert("k".into(), Property::String("v".into()));
+            n.properties_mut()
+                .insert("k".into(), Property::String("v".into()));
             view.update_node(id, &n).unwrap();
             assert_eq!(
                 view.node(id).unwrap().properties().get("k"),
@@ -406,7 +420,10 @@ mod tests {
             Some(txn),
         )
         .unwrap();
-        assert_eq!(stats.nodes_created, 1, "CREATE must produce one pending node");
+        assert_eq!(
+            stats.nodes_created, 1,
+            "CREATE must produce one pending node"
+        );
 
         // Read phase: a parsed MATCH … RETURN executed over the TxnView must see
         // the txn's own uncommitted node (read-your-writes).
@@ -454,7 +471,9 @@ mod tests {
         g.enable_mvcc();
         let committed = g.add_node("Base", Properties::new()).unwrap();
         let txn = g.begin_txn().unwrap();
-        let pending = g.add_node_in_txn(txn, "Persona", Properties::new()).unwrap();
+        let pending = g
+            .add_node_in_txn(txn, "Persona", Properties::new())
+            .unwrap();
 
         // Build the read-only view over a *shared* borrow — the borrow a read
         // lock yields. This must compile (no `&mut`) and must enumerate the
@@ -486,7 +505,8 @@ mod tests {
         let mut g = Graph::new();
         g.enable_mvcc();
         let txn = g.begin_txn().unwrap();
-        g.add_node_in_txn(txn, "Persona", Properties::new()).unwrap();
+        g.add_node_in_txn(txn, "Persona", Properties::new())
+            .unwrap();
 
         // The engine's generic MATCH compiler runs over the shared read-only
         // view and sees the txn's own uncommitted write — the exact lookup a

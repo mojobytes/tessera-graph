@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 #![allow(clippy::significant_drop_tightening)]
 
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tessera_graph::{props, Graph, SharedGraph};
+use tessera_graph::{Graph, SharedGraph, props};
 
 #[test]
 fn two_writers_do_not_corrupt_graph() {
@@ -30,10 +30,7 @@ fn two_writers_do_not_corrupt_graph() {
         h.join().unwrap();
     }
 
-    assert_eq!(
-        graph.read().node_count(),
-        n_threads * ops_per_thread
-    );
+    assert_eq!(graph.read().node_count(), n_threads * ops_per_thread);
 }
 
 #[test]

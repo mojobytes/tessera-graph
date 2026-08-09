@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Unit tests for auth primitives. Renewed for Fase 1a — the previous
 //! single-password `PasswordAuthProvider` is gone; multi-user via the

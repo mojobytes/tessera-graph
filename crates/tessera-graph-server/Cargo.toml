@@ -4,14 +4,12 @@ description = "Bolt 4.4 server for TesseraGraph — standalone graph database"
 version.workspace      = true
 edition.workspace      = true
 authors.workspace      = true
-# Community/Enterprise split: the Community server is source-available under
-# the Business Source License 1.1 (protects against a cloud reselling it as a
-# hosted service until the Change Date). BSL is not an OSI/SPDX identifier, so
-# it is declared via license-file, not `license`. This crate is NOT published
-# to crates.io (only the engine is), so the SPDX-validity requirement of
-# crates.io does not apply here.
+# Community is source-available under BSL 1.1. Production use is permitted for
+# internal business purposes; DBaaS, OEM redistribution and competing products
+# require a commercial agreement until the Change Date.
 license-file      = "LICENSE"
 rust-version.workspace = true
+publish = false
 
 [lib]
 name = "tessera_graph_server"
@@ -42,7 +40,6 @@ tessera-graph-config   = { workspace = true }
 tessera-graph-cypher   = { workspace = true }
 tokio        = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
 tokio-rustls      = { workspace = true }
-rustls-pemfile    = "2"
 thiserror         = { workspace = true }
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
@@ -77,7 +74,6 @@ tokio           = { workspace = true, features = ["rt", "macros", "io-util", "ne
 tokio-rustls    = { workspace = true }
 tempfile        = "3"
 rcgen           = "0.13"
-rustls-pemfile  = "2"
 serde_json      = { workspace = true }
 fs2             = { workspace = true }
 # Async HTTP client for the metrics endpoint scrape tests.

@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! The sharded delta table: maps each record to its in-memory delta chain.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::RwLock;
 
@@ -135,12 +135,7 @@ impl DeltaTable {
     pub fn chain_count(&self) -> usize {
         self.shards
             .iter()
-            .map(|shard| {
-                shard
-                    .read()
-                    .expect("delta table shard lock poisoned")
-                    .len()
-            })
+            .map(|shard| shard.read().expect("delta table shard lock poisoned").len())
             .sum()
     }
 
@@ -204,7 +199,7 @@ fn shard_index(key: EntityKey, len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{shard_index, DeltaTable, EntityKey};
+    use super::{DeltaTable, EntityKey, shard_index};
     use crate::error::{EdgeId, NodeId};
     use crate::mvcc::delta::{Delta, DeltaOp};
 
@@ -298,7 +293,10 @@ mod tests {
         table.push_delta(key, committed_node_delta(6, 7, "TooNew")); // commit_ts == watermark
 
         let drained = table.drain_vacuumable(Some(6));
-        assert!(drained.is_empty(), "chain with commit_ts >= watermark must be kept");
+        assert!(
+            drained.is_empty(),
+            "chain with commit_ts >= watermark must be kept"
+        );
         assert!(table.chain_for(key).is_some());
     }
 
@@ -314,7 +312,10 @@ mod tests {
         );
 
         let drained = table.drain_vacuumable(None);
-        assert!(drained.is_empty(), "an uncommitted delta blocks vacuum of the chain");
+        assert!(
+            drained.is_empty(),
+            "an uncommitted delta blocks vacuum of the chain"
+        );
         assert!(table.chain_for(key).is_some());
     }
 

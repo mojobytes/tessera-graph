@@ -1,13 +1,13 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 
-use crate::errors::to_py_err;
 use super::edge::PyEdge;
 use super::node::PyNode;
+use crate::errors::to_py_err;
 
 /// A single match result from a pattern query, with named node/edge bindings.
-#[pyclass(name = "PatternMatch", frozen)]
+#[pyclass(name = "PatternMatch", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyPatternMatch {
     pub(crate) inner: tessera_graph::PatternMatch,
@@ -30,7 +30,9 @@ impl PyPatternMatch {
     }
 
     fn __repr__(&self) -> String {
-        let mut vars: Vec<&str> = self.node_vars.iter()
+        let mut vars: Vec<&str> = self
+            .node_vars
+            .iter()
             .chain(self.edge_vars.iter())
             .map(String::as_str)
             .collect();

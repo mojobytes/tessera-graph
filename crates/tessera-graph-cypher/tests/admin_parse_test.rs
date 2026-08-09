@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Admin-statement parser tests. Verifies the top-level prefix detection
 //! for `CREATE USER` / `DROP USER` / `ALTER USER ...` / `SHOW USERS`,
@@ -162,9 +162,7 @@ fn parse_create_database_with_options() {
         "CREATE DATABASE plantA WITH OPTIONS { max_size_bytes: 1073741824, max_connections: 50 }",
     );
     match stmt {
-        GqlStatement::Admin(AdminStatement::CreateDatabase {
-            name, options, ..
-        }) => {
+        GqlStatement::Admin(AdminStatement::CreateDatabase { name, options, .. }) => {
             assert_eq!(name, "plantA");
             assert_eq!(options.max_size_bytes, Some(1_073_741_824));
             assert_eq!(options.max_connections, Some(50));
@@ -175,9 +173,7 @@ fn parse_create_database_with_options() {
 
 #[test]
 fn parse_create_database_if_not_exists_with_options() {
-    let stmt = parse(
-        "CREATE DATABASE plantA IF NOT EXISTS WITH OPTIONS { max_connections: 8 }",
-    );
+    let stmt = parse("CREATE DATABASE plantA IF NOT EXISTS WITH OPTIONS { max_connections: 8 }");
     match stmt {
         GqlStatement::Admin(AdminStatement::CreateDatabase {
             name,
@@ -443,7 +439,8 @@ fn parse_show_grants_rejects_trailing_garbage() {
     let err = parse_err("SHOW GRANTS FOR alice and bob");
     let msg = format!("{err}");
     assert!(
-        msg.to_ascii_lowercase().contains("trailing") || msg.to_ascii_lowercase().contains("unexpected"),
+        msg.to_ascii_lowercase().contains("trailing")
+            || msg.to_ascii_lowercase().contains("unexpected"),
         "expected trailing/unexpected in error, got: {msg}"
     );
 }

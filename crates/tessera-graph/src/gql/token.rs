@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Token types for the GQL lexer.
 //!
@@ -310,14 +310,24 @@ mod tests {
 
     #[test]
     fn span_positions() {
-        let s = Span { start: 0, end: 5, line: 1, col: 1 };
+        let s = Span {
+            start: 0,
+            end: 5,
+            line: 1,
+            col: 1,
+        };
         assert_eq!(s.len(), 5);
         assert!(!s.is_empty());
     }
 
     #[test]
     fn span_empty() {
-        let s = Span { start: 3, end: 3, line: 1, col: 4 };
+        let s = Span {
+            start: 3,
+            end: 3,
+            line: 1,
+            col: 4,
+        };
         assert!(s.is_empty());
         assert_eq!(s.len(), 0);
     }
@@ -325,7 +335,12 @@ mod tests {
     #[test]
     fn span_is_hashable() {
         use std::collections::HashSet;
-        let s = Span { start: 0, end: 5, line: 1, col: 1 };
+        let s = Span {
+            start: 0,
+            end: 5,
+            line: 1,
+            col: 1,
+        };
         let mut set = HashSet::new();
         set.insert(s);
         assert!(set.contains(&s));

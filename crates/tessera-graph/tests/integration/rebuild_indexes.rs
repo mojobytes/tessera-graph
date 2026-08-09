@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tempfile::TempDir;
 use tessera_graph::{Graph, GraphConfig, Properties};
@@ -23,7 +23,9 @@ fn rebuild_indexes_repopulates_after_flush() {
         let mut g = Graph::open(tmp.path(), &config).unwrap();
         nid_a = g.add_node("Person", Properties::new()).unwrap();
         nid_b = g.add_node("City", Properties::new()).unwrap();
-        eid = g.add_edge("LIVES_IN", nid_a, nid_b, Properties::new()).unwrap();
+        eid = g
+            .add_edge("LIVES_IN", nid_a, nid_b, Properties::new())
+            .unwrap();
         g.flush().unwrap();
 
         // Rebuild indexes — should produce the same state.
@@ -76,7 +78,9 @@ fn rebuild_indexes_after_wal_recovery() {
         let mut g = Graph::open(tmp.path(), &config).unwrap();
         nid_a = g.add_node("Person", Properties::new()).unwrap();
         nid_b = g.add_node("City", Properties::new()).unwrap();
-        eid = g.add_edge("LIVES_IN", nid_a, nid_b, Properties::new()).unwrap();
+        eid = g
+            .add_edge("LIVES_IN", nid_a, nid_b, Properties::new())
+            .unwrap();
         drop(g); // crash — no flush
     }
 

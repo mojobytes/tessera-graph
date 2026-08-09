@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -209,10 +209,7 @@ impl<'g, W: Fn(&Edge) -> f64> WeightedPathQuery<'g, W> {
     }
 
     /// Returns filtered neighbors with their edge weights.
-    fn filtered_neighbors_weighted(
-        &self,
-        node: NodeId,
-    ) -> Result<Vec<(NodeId, EdgeId, f64)>> {
+    fn filtered_neighbors_weighted(&self, node: NodeId) -> Result<Vec<(NodeId, EdgeId, f64)>> {
         let edges = self
             .graph
             .neighbors(node)

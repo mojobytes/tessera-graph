@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! `tessera-graph-cli admin users …` — offline user management.
 //!
@@ -18,9 +18,7 @@
 //!   the system-graph lock. The operator must stop the server before
 //!   running offline admin commands.
 
-use tessera_graph_server::auth::{
-    AuthStoreError, SecretString, SystemGraphAuthStore, UserStore,
-};
+use tessera_graph_server::auth::{AuthStoreError, SecretString, SystemGraphAuthStore, UserStore};
 
 use crate::admin::{AdminResult, open_locked_store};
 use crate::cli::{UserMutArgs, UsersArgs, UsersSub};
@@ -86,10 +84,7 @@ pub async fn run(args: UsersArgs) -> AdminResult {
 }
 
 async fn list(store: &SystemGraphAuthStore) -> AdminResult {
-    let users = store
-        .list_users()
-        .await
-        .map_err(|e| map_store_error(&e))?;
+    let users = store.list_users().await.map_err(|e| map_store_error(&e))?;
     for u in users {
         println!(
             "{}\t{}\t{}\t{}",

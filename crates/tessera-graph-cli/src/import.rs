@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 use std::io::BufRead as _;
 
@@ -80,8 +80,7 @@ pub fn stream_gql_import<R: std::io::Read>(
     let mut in_string = false;
 
     for line_result in reader.lines() {
-        let line =
-            line_result.map_err(|e| CliError::ImportExport(format!("read error: {e}")))?;
+        let line = line_result.map_err(|e| CliError::ImportExport(format!("read error: {e}")))?;
 
         // When inside an open string literal, the line is part of the
         // current statement regardless of content — don't trim or skip.
@@ -364,8 +363,7 @@ pub fn stream_csv_import<R: std::io::Read>(
     let mut count = 0usize;
 
     for result in csv_reader.records() {
-        let record =
-            result.map_err(|e| CliError::ImportExport(format!("invalid CSV row: {e}")))?;
+        let record = result.map_err(|e| CliError::ImportExport(format!("invalid CSV row: {e}")))?;
 
         let label = record.get(0).filter(|s| !s.is_empty()).ok_or_else(|| {
             CliError::ImportExport(format!("empty {label_col} (label) in CSV row"))
@@ -607,9 +605,7 @@ pub fn stream_json_import<R: std::io::Read>(
     .map_err(|e| CliError::ImportExport(format!("invalid JSON: {e}")))?;
 
     if !found_any {
-        return Err(CliError::ImportExport(
-            "no nodes or edges in JSON".into(),
-        ));
+        return Err(CliError::ImportExport("no nodes or edges in JSON".into()));
     }
 
     Ok(count)
@@ -746,20 +742,13 @@ fn write_endpoint_match(
     let ep = edge
         .get(endpoint_key)
         .and_then(|v| v.as_object())
-        .ok_or_else(|| {
-            CliError::ImportExport(format!("edge missing '{endpoint_key}' object"))
-        })?;
+        .ok_or_else(|| CliError::ImportExport(format!("edge missing '{endpoint_key}' object")))?;
 
     let label = ep.get("label").and_then(|v| v.as_str());
 
-    let match_obj =
-        ep.get("match")
-            .and_then(|v| v.as_object())
-            .ok_or_else(|| {
-                CliError::ImportExport(format!(
-                    "edge {endpoint_key} missing 'match' object"
-                ))
-            })?;
+    let match_obj = ep.get("match").and_then(|v| v.as_object()).ok_or_else(|| {
+        CliError::ImportExport(format!("edge {endpoint_key} missing 'match' object"))
+    })?;
 
     if match_obj.len() != 1 {
         return Err(CliError::ImportExport(format!(
@@ -1080,7 +1069,10 @@ mod tests {
         let edge_stmt = &stmts[2];
         assert!(edge_stmt.starts_with("MATCH (a:Person"), "got: {edge_stmt}");
         assert!(edge_stmt.contains("), (b:Person"), "got: {edge_stmt}");
-        assert!(edge_stmt.contains("CREATE (a)-[:KNOWS]->(b)"), "got: {edge_stmt}");
+        assert!(
+            edge_stmt.contains("CREATE (a)-[:KNOWS]->(b)"),
+            "got: {edge_stmt}"
+        );
     }
 
     #[test]
@@ -1290,7 +1282,11 @@ mod tests {
     fn json_property_key_with_spaces_uses_delimited() {
         let json = r#"{"nodes": [{"label": "X", "properties": {"Average Pyranometer": "val"}}], "edges": []}"#;
         let stmts = json_to_gql_statements(json).unwrap(); // OK: test
-        assert!(stmts[0].contains("\"Average Pyranometer\": 'val'"), "got: {}", stmts[0]);
+        assert!(
+            stmts[0].contains("\"Average Pyranometer\": 'val'"),
+            "got: {}",
+            stmts[0]
+        );
     }
 
     #[test]
@@ -1445,9 +1441,7 @@ mod tests {
     #[test]
     fn stream_gql_callback_error_propagates() {
         let input = std::io::Cursor::new("CREATE (:A);\nCREATE (:B);");
-        let result = stream_gql_import(input, |_| {
-            Err(CliError::ImportExport("stop".into()))
-        });
+        let result = stream_gql_import(input, |_| Err(CliError::ImportExport("stop".into())));
         assert!(result.is_err());
     }
 
@@ -1469,12 +1463,11 @@ mod tests {
         ";
         let batch = split_gql_statements(corpus);
         let mut streaming = Vec::new();
-        let count =
-            stream_gql_import(std::io::Cursor::new(corpus), |s| {
-                streaming.push(s);
-                Ok(())
-            })
-            .unwrap(); // OK: test
+        let count = stream_gql_import(std::io::Cursor::new(corpus), |s| {
+            streaming.push(s);
+            Ok(())
+        })
+        .unwrap(); // OK: test
         assert_eq!(count, batch.len());
         assert_eq!(streaming, batch);
     }
@@ -1559,7 +1552,10 @@ mod tests {
             result.is_err(),
             "late error (row 3) must propagate; count was {count}"
         );
-        assert_eq!(count, 2, "first 2 rows should have been emitted before error");
+        assert_eq!(
+            count, 2,
+            "first 2 rows should have been emitted before error"
+        );
     }
 
     #[test]
@@ -1748,7 +1744,8 @@ mod tests {
     fn throughput_stream_gql_10k() {
         let mut input = String::new();
         for i in 0..THROUGHPUT_ELEMENT_COUNT {
-            writeln!(input, "CREATE (:Node {{id: {i}, name: 'node_{i}'}});").expect("write to String"); // OK: test
+            writeln!(input, "CREATE (:Node {{id: {i}, name: 'node_{i}'}});")
+                .expect("write to String"); // OK: test
         }
         let start = std::time::Instant::now();
         let mut count = 0usize;

@@ -25,7 +25,15 @@ pub struct LatencyStats {
 impl LatencyStats {
     /// The all-zero stats returned when there are no samples.
     const fn zeroed() -> Self {
-        Self { p50: 0.0, p95: 0.0, p99: 0.0, mean: 0.0, min: 0.0, max: 0.0, count: 0 }
+        Self {
+            p50: 0.0,
+            p95: 0.0,
+            p99: 0.0,
+            mean: 0.0,
+            min: 0.0,
+            max: 0.0,
+            count: 0,
+        }
     }
 }
 
@@ -69,7 +77,9 @@ pub struct LatencyTracker {
 impl LatencyTracker {
     #[must_use]
     pub fn new() -> Self {
-        Self { samples: Vec::new() }
+        Self {
+            samples: Vec::new(),
+        }
     }
 
     /// Records one latency sample.

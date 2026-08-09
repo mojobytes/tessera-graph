@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 
@@ -6,7 +6,7 @@ use super::edge_id::PyEdgeId;
 use super::node_id::PyNodeId;
 
 /// An ordered sequence of nodes and edges forming a path in the graph.
-#[pyclass(name = "Path", frozen)]
+#[pyclass(name = "Path", frozen, from_py_object)]
 #[derive(Clone)]
 pub struct PyPath {
     pub(crate) inner: tessera_graph::Path,
@@ -16,12 +16,22 @@ pub struct PyPath {
 impl PyPath {
     /// Returns node IDs in path order.
     fn nodes(&self) -> Vec<PyNodeId> {
-        self.inner.nodes().iter().copied().map(PyNodeId::from).collect()
+        self.inner
+            .nodes()
+            .iter()
+            .copied()
+            .map(PyNodeId::from)
+            .collect()
     }
 
     /// Returns edge IDs in path order.
     fn edges(&self) -> Vec<PyEdgeId> {
-        self.inner.edges().iter().copied().map(PyEdgeId::from).collect()
+        self.inner
+            .edges()
+            .iter()
+            .copied()
+            .map(PyEdgeId::from)
+            .collect()
     }
 
     /// Returns the first node, or `None` if empty.
@@ -54,13 +64,23 @@ impl PyPath {
     /// Iterates over node IDs in the path.
     fn __iter__(&self) -> PyPathIter {
         PyPathIter {
-            nodes: self.inner.nodes().iter().copied().map(PyNodeId::from).collect(),
+            nodes: self
+                .inner
+                .nodes()
+                .iter()
+                .copied()
+                .map(PyNodeId::from)
+                .collect(),
             index: 0,
         }
     }
 
     fn __repr__(&self) -> String {
-        format!("Path(nodes={}, edges={})", self.inner.nodes().len(), self.inner.edges().len())
+        format!(
+            "Path(nodes={}, edges={})",
+            self.inner.nodes().len(),
+            self.inner.edges().len()
+        )
     }
 }
 

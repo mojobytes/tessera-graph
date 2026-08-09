@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! GQL (ISO/IEC 39075:2024) query language — read-only and mutation subsets.
 //!
@@ -33,22 +33,22 @@
 //! [`Error::GqlUnsupported`]: crate::Error::GqlUnsupported
 //! [`Error::GqlSyntaxError`]: crate::Error::GqlSyntaxError
 
-#[doc(hidden)]
-pub mod token;
+pub(crate) mod ast;
+pub(crate) mod compiler;
 #[doc(hidden)]
 pub mod lexer;
-pub(crate) mod ast;
-pub(crate) mod parser;
-pub(crate) mod compiler;
-pub(crate) mod path_materialization;
 pub mod mutation_exec;
-pub mod txn_view;
 pub mod param_substitution;
+pub(crate) mod parser;
+pub(crate) mod path_materialization;
+#[doc(hidden)]
+pub mod token;
+pub mod txn_view;
 
 pub use mutation_exec::{
-    apply_match_mutation_body, apply_merge_write, apply_unwind_create_body,
+    MergeLookup, ResultRow, apply_match_mutation_body, apply_merge_write, apply_unwind_create_body,
     apply_unwind_delete_body, eval_unwind_and_match, execute_bare_merge, execute_bare_mutation,
-    execute_unwind_mutation, merge_lookup, MergeLookup, ResultRow,
+    execute_unwind_mutation, merge_lookup,
 };
 
 pub use txn_view::{TxnReadView, TxnView};
@@ -56,23 +56,22 @@ pub use txn_view::{TxnReadView, TxnView};
 pub use ast::{
     AccessLevelAst, AdminStatement, AggFunc, BinOp, CallStatement, ConstReturnQuery, CreateClause,
     CreatePattern, DatabaseOptions, DdlStatement, DeleteClause, EdgeLength, Expr, GqlQuery,
-    GqlStatement,
-    GrantTargetAst, GroupByClause, ListPredKind, Literal, MatchClause, MergeClause,
+    GqlStatement, GrantTargetAst, GroupByClause, ListPredKind, Literal, MatchClause, MergeClause,
     MutationClause, MutationStatement, OrderByClause, ParamRef, PipelineQuery, PipelineStage,
     PipelineTerminal, ReturnClause, ReturnItem, SecretPlainPassword, SetAssignment, SetClause,
     SkipClause, UnwindClause, WhereClause, WithClause,
 };
 pub use compiler::{
-    execute, execute_call_result, execute_const_return, execute_expr, expr_surface_name,
     GqlMutationResult, GqlNode, GqlPath, GqlRelationship, GqlResult, GqlRow, GqlValue,
-    RESULT_CAP_MSG_PREFIX, TIMEOUT_MSG_PREFIX,
+    RESULT_CAP_MSG_PREFIX, TIMEOUT_MSG_PREFIX, execute, execute_call_result, execute_const_return,
+    execute_expr, expr_surface_name,
 };
 
 pub use compiler::{
-    apply_map_to_node_merge, apply_map_to_node_overwrite, compile_match_bindings,
+    MatchRow, apply_map_to_node_merge, apply_map_to_node_overwrite, compile_match_bindings,
     compile_match_for_mutation, compile_match_rows, execute_pipeline, execute_pipeline_mutation,
     execute_pipeline_with_deadline, execute_with_deadline, gql_value_from_property,
-    gql_value_to_property, resolve_create_props, MatchRow,
+    gql_value_to_property, resolve_create_props,
 };
 
 // Deprecated literal-only SET helper. Kept for API compatibility with

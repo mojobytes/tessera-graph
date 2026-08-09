@@ -1,6 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
-use tessera_graph::{Direction, Graph, GraphAccess, NeighborQuery, PatternBuilder, Properties, SubgraphQuery, TraversalBuilder, props};
+use tessera_graph::{
+    Direction, Graph, GraphAccess, NeighborQuery, PatternBuilder, Properties, SubgraphQuery,
+    TraversalBuilder, props,
+};
 
 use crate::helpers::mock_graph::DelegatingGraph;
 
@@ -128,14 +131,23 @@ fn subgraph_query_works_with_delegating_graph() {
 #[test]
 fn pattern_builder_works_with_delegating_graph() {
     let mut proxy = DelegatingGraph::new();
-    let alice = proxy.add_node("Person", props! { "name" => "Alice" }).unwrap();
-    let bob = proxy.add_node("Person", props! { "name" => "Bob" }).unwrap();
-    proxy.add_edge("KNOWS", alice, bob, Properties::new()).unwrap();
+    let alice = proxy
+        .add_node("Person", props! { "name" => "Alice" })
+        .unwrap();
+    let bob = proxy
+        .add_node("Person", props! { "name" => "Bob" })
+        .unwrap();
+    proxy
+        .add_edge("KNOWS", alice, bob, Properties::new())
+        .unwrap();
 
     let results: Vec<_> = PatternBuilder::new(&proxy)
-        .node("a").label("Person")
-        .edge(Direction::Outgoing).label("KNOWS")
-        .node("b").label("Person")
+        .node("a")
+        .label("Person")
+        .edge(Direction::Outgoing)
+        .label("KNOWS")
+        .node("b")
+        .label("Person")
         .execute()
         .unwrap()
         .collect::<tessera_graph::Result<Vec<_>>>()
@@ -150,7 +162,9 @@ fn pattern_builder_works_with_delegating_graph() {
 fn delegating_graph_node_projected_via_trait() {
     use tessera_graph::GraphAccess;
     let mut proxy = DelegatingGraph::new();
-    let id = proxy.add_node("P", props! { "x" => 1_i64, "y" => 2_i64 }).unwrap();
+    let id = proxy
+        .add_node("P", props! { "x" => 1_i64, "y" => 2_i64 })
+        .unwrap();
 
     let node = GraphAccess::node_projected(&proxy, id, &["x"]).unwrap();
     assert_eq!(node.properties().len(), 1);
@@ -161,7 +175,9 @@ fn delegating_graph_node_projected_via_trait() {
 #[test]
 fn gql_compiler_works_with_delegating_graph() {
     let mut proxy = DelegatingGraph::new();
-    proxy.add_node("Person", props! { "name" => "Alice" }).unwrap();
+    proxy
+        .add_node("Person", props! { "name" => "Alice" })
+        .unwrap();
 
     let query = tessera_graph::gql::parse("MATCH (a:Person) RETURN a.name").unwrap();
     let result = tessera_graph::gql::execute(&proxy, &query, 0).unwrap();
@@ -192,26 +208,42 @@ fn dyn_graph_access_works() {
 fn existing_graph_sugar_api_unchanged() {
     // Verifies that the existing public API on Graph works without any changes.
     let mut g = Graph::new();
-    let a = g.add_node("A", Properties::new()).unwrap();          // impl Into<String> sugar
+    let a = g.add_node("A", Properties::new()).unwrap(); // impl Into<String> sugar
     let b = g.add_node("B", Properties::new()).unwrap();
-    g.add_edge("KNOWS", a, b, Properties::new()).unwrap();        // impl Into<String> sugar
+    g.add_edge("KNOWS", a, b, Properties::new()).unwrap(); // impl Into<String> sugar
 
     // NeighborQuery via Graph sugar
-    let edges = g.neighbors(a).direction(Direction::Outgoing).collect().unwrap();
+    let edges = g
+        .neighbors(a)
+        .direction(Direction::Outgoing)
+        .collect()
+        .unwrap();
     assert_eq!(edges.len(), 1);
 
     // TraversalBuilder via Graph sugar
-    let visited = g.traverse(a).direction(Direction::Outgoing).bfs().collect().unwrap();
+    let visited = g
+        .traverse(a)
+        .direction(Direction::Outgoing)
+        .bfs()
+        .collect()
+        .unwrap();
     assert_eq!(visited, vec![a, b]);
 
     // SubgraphQuery via Graph sugar
-    let sub = g.subgraph(a).direction(Direction::Outgoing).extract().unwrap();
+    let sub = g
+        .subgraph(a)
+        .direction(Direction::Outgoing)
+        .extract()
+        .unwrap();
     assert_eq!(sub.node_count(), 2);
 
     // PatternBuilder via Graph sugar
-    let matches: Vec<_> = g.pattern()
-        .node("x").label("A")
-        .edge(Direction::Outgoing).label("KNOWS")
+    let matches: Vec<_> = g
+        .pattern()
+        .node("x")
+        .label("A")
+        .edge(Direction::Outgoing)
+        .label("KNOWS")
         .node("y")
         .execute()
         .unwrap()
@@ -234,9 +266,7 @@ fn gql_two_anonymous_nodes_do_not_collide() {
     let bob = g.add_node("Person", props! { "name" => "Bob" }).unwrap();
     g.add_edge("KNOWS", alice, bob, Properties::new()).unwrap();
 
-    let query = tessera_graph::gql::parse(
-        "MATCH (:Person)-[:KNOWS]->(:Person) RETURN 1"
-    ).unwrap();
+    let query = tessera_graph::gql::parse("MATCH (:Person)-[:KNOWS]->(:Person) RETURN 1").unwrap();
     let result = tessera_graph::gql::execute(&g, &query, 0).unwrap();
     // Should find exactly one match (alice->bob), not zero or an error.
     assert_eq!(result.len(), 1);

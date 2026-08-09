@@ -13,10 +13,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use tessera_graph::gql::{self, GqlValue};
 use tessera_graph::Graph;
+use tessera_graph::gql::{self, GqlValue};
 
-use tessera_graph::gql::{apply_match_mutation_body, ResultRow};
+use tessera_graph::gql::{ResultRow, apply_match_mutation_body};
 
 /// Runs a `MATCH … CREATE/SET` mutation under a SINGLE write lock held across
 /// both the MATCH binding phase and the write phase (the Option-A discipline).
@@ -42,10 +42,11 @@ pub fn execute_match_mutation_single_lock(
     })?;
 
     // Single write lock held across BOTH phases — the Option-A discipline.
-    let mut graph = shared.write().map_err(|_| "graph lock poisoned".to_owned())?;
+    let mut graph = shared
+        .write()
+        .map_err(|_| "graph lock poisoned".to_owned())?;
 
-    let rows = gql::compile_match_rows(&*graph, match_clause, None)
-        .map_err(|e| e.to_string())?;
+    let rows = gql::compile_match_rows(&*graph, match_clause, None).map_err(|e| e.to_string())?;
     if rows.is_empty() {
         return Ok((Vec::new(), gql::GqlMutationResult::default()));
     }
@@ -63,12 +64,10 @@ mod tests {
         let m = parse_mutation("MATCH (n:BenchNode) CREATE (x:Tagged)");
 
         let two_lock = seeded_shared(10);
-        let (_r1, s1) =
-            execute_match_mutation(&two_lock, &m, &HashMap::new(), None).unwrap();
+        let (_r1, s1) = execute_match_mutation(&two_lock, &m, &HashMap::new(), None).unwrap();
 
         let single = seeded_shared(10);
-        let (_r2, s2) =
-            execute_match_mutation_single_lock(&single, &m, &HashMap::new()).unwrap();
+        let (_r2, s2) = execute_match_mutation_single_lock(&single, &m, &HashMap::new()).unwrap();
 
         assert_eq!(
             (s1.nodes_created, s1.edges_created),
@@ -90,7 +89,8 @@ mod tests {
         let err_prod = execute_match_mutation(&two_lock, &m, &HashMap::new(), None).unwrap_err();
 
         let single = seeded_shared(3);
-        let err_shim = execute_match_mutation_single_lock(&single, &m, &HashMap::new()).unwrap_err();
+        let err_shim =
+            execute_match_mutation_single_lock(&single, &m, &HashMap::new()).unwrap_err();
 
         assert_eq!(err_prod, err_shim, "same error from the same shared body");
     }

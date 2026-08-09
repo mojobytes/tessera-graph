@@ -24,13 +24,14 @@ use std::time::Duration;
 
 use base64::Engine;
 use tokio::sync::{oneshot, watch};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 
 use tessera_graph::Graph;
 
 use crate::audit::AuditSink;
 use crate::auth::{
-    AuthProvider, NoAuthProvider, SecretString,
-    SystemGraphAuthProvider, SystemGraphAuthStore, UserStore,
+    AuthProvider, NoAuthProvider, SecretString, SystemGraphAuthProvider, SystemGraphAuthStore,
+    UserStore,
 };
 use crate::config::{AuditSinkKind, ServerConfig};
 use crate::error::{Result, ServerError};
@@ -224,15 +225,11 @@ impl std::fmt::Debug for ServerHandle {
         f.debug_struct("ServerHandle")
             .field("addr", &self.addr)
             .field("metrics_addr", &self.metrics_addr)
-            .field(
-                "registry_strong_count",
-                &Arc::strong_count(&self.registry),
-            )
+            .field("registry_strong_count", &Arc::strong_count(&self.registry))
             .field("multi_tenant", &self.multi_tenant.is_some())
             .finish()
     }
 }
-
 
 /// Factory for the single-database manager. **Community edition.**
 ///
@@ -297,9 +294,7 @@ pub fn single_database_factory() -> RegistryFactory {
                 // El asa se descarta a propósito: la tarea vive mientras
                 // alguien conserve el gestor, y termina sola en cuanto se
                 // suelta la última referencia. Igual que en el multi-base.
-                drop(manager.spawn_vacuum(Duration::from_secs(
-                    config.vacuum_interval_seconds,
-                )));
+                drop(manager.spawn_vacuum(Duration::from_secs(config.vacuum_interval_seconds)));
             }
 
             Ok(RegistryBundle {
@@ -309,7 +304,6 @@ pub fn single_database_factory() -> RegistryFactory {
         })
     })
 }
-
 
 /// Start the server on a caller-supplied database manager.
 ///
@@ -335,7 +329,6 @@ pub async fn start_server_with_registry(
 ) -> Result<ServerHandle> {
     start_server_inner(config, shutdown, ready_tx, factory, paid).await
 }
-
 
 #[cfg(feature = "plain-tcp")]
 async fn start_server_inner(
@@ -664,7 +657,6 @@ fn ensure_data_dir_prepared(data_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-
 async fn build_runtime(
     config: &ServerConfig,
     shutdown: watch::Receiver<bool>,
@@ -744,7 +736,9 @@ async fn build_runtime(
         // The local provider now depends only on the user-management surface
         // (`UserStore`), not the full identity store. `from_store` is generic,
         // so the concrete `Arc<SystemGraphAuthStore>` passes directly.
-        Arc::new(SystemGraphAuthProvider::from_store(Arc::clone(&system_store)))
+        Arc::new(SystemGraphAuthProvider::from_store(Arc::clone(
+            &system_store,
+        )))
     };
     // What the runtime keeps is the **user-management** surface: that is all
     // the connection handler needs (listing users to resolve the caller's
@@ -770,15 +764,11 @@ async fn build_runtime(
     })
 }
 
-
 /// Construct the audit sink declared by the config. `File` requires
 /// either an explicit [`ServerConfig::audit_file`] or a `data_dir` to
 /// derive `audit.log` from — a missing destination is a hard error so
 /// that audit is never silently disabled.
-fn build_audit_sink(
-    config: &ServerConfig,
-    shutdown: watch::Receiver<bool>,
-) -> Result<AuditSink> {
+fn build_audit_sink(config: &ServerConfig, shutdown: watch::Receiver<bool>) -> Result<AuditSink> {
     match config.audit_sink {
         AuditSinkKind::Off => {
             tracing::warn!(
@@ -897,8 +887,7 @@ fn enforce_system_dir_perms(_dir: &Path) -> Result<()> {
 #[cfg(unix)]
 fn tighten_system_dir_perms(dir: &Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-        .map_err(ServerError::Io)
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(ServerError::Io)
 }
 
 #[cfg(not(unix))]
@@ -972,9 +961,7 @@ fn generate_random_password() -> Result<String> {
 }
 
 /// Build TLS server config from cert/key paths.
-fn build_tls(
-    config: &ServerConfig,
-) -> Result<Arc<tokio_rustls::rustls::ServerConfig>> {
+fn build_tls(config: &ServerConfig) -> Result<Arc<tokio_rustls::rustls::ServerConfig>> {
     let cert_path = config.tls_cert.as_ref().ok_or_else(|| {
         ServerError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -991,15 +978,19 @@ fn build_tls(
     let cert_pem = std::fs::read(cert_path).map_err(ServerError::Io)?;
     let key_pem = std::fs::read(key_path).map_err(ServerError::Io)?;
 
-    let certs: Vec<_> = rustls_pemfile::certs(&mut cert_pem.as_slice())
+    let certs: Vec<_> = tokio_rustls::rustls::pki_types::CertificateDer::pem_slice_iter(&cert_pem)
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(ServerError::Io)?;
-    let key = rustls_pemfile::private_key(&mut key_pem.as_slice())
-        .map_err(ServerError::Io)?
-        .ok_or_else(|| {
+        .map_err(|e| {
             ServerError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "no private key found in PEM file",
+                format!("invalid certificate PEM: {e}"),
+            ))
+        })?;
+    let key =
+        tokio_rustls::rustls::pki_types::PrivateKeyDer::from_pem_slice(&key_pem).map_err(|e| {
+            ServerError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid private key PEM: {e}"),
             ))
         })?;
 

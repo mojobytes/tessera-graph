@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Shared adjacency slab codec (issue #54, Block A).
 //!
@@ -91,13 +91,13 @@
 //!   in-memory payload slice** wherever possible, to keep the Ciclo 3/4 logic
 //!   testable without a backend round-trip on every assertion.
 
+use crate::Error;
 use crate::error::Result;
 use crate::storage::backend::{DataFile, PageId, StorageBackend};
 use crate::storage::codec::adjacency_codec::AdjDirection;
 use crate::storage::page::{
-    finalize_page, magic, new_page_buf, PageHeader, PageType, PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE,
+    PAGE_HEADER_SIZE, PAGE_PAYLOAD_SIZE, PageHeader, PageType, finalize_page, magic, new_page_buf,
 };
-use crate::Error;
 
 /// Slab page format version stamped in the page header's `version` field.
 /// Distinct number space from `adjacency_codec::ADJ_FORMAT_V1`/`V2` — a slab
@@ -192,7 +192,10 @@ const fn directory_area_end(total_entries: u16) -> usize {
 fn read_dir_total_count(page_id: PageId, payload: &[u8]) -> Result<u16> {
     let count = u16::from_le_bytes(payload[0..2].try_into().unwrap());
     if directory_area_end(count) > PAGE_PAYLOAD_SIZE {
-        return Err(corrupt(page_id, "slab directory_count exceeds page capacity"));
+        return Err(corrupt(
+            page_id,
+            "slab directory_count exceeds page capacity",
+        ));
     }
     Ok(count)
 }
@@ -218,7 +221,10 @@ fn validate_subblock_range(page_id: PageId, offset: u16, edge_count: u16) -> Res
         .checked_add(byte_len)
         .ok_or_else(|| corrupt(page_id, "slab sub-block offset+len overflow"))?;
     if end > PAGE_PAYLOAD_SIZE {
-        return Err(corrupt(page_id, "slab sub-block range exceeds page capacity"));
+        return Err(corrupt(
+            page_id,
+            "slab sub-block range exceeds page capacity",
+        ));
     }
     Ok(())
 }
@@ -243,7 +249,12 @@ fn validate_subblock_range(page_id: PageId, offset: u16, edge_count: u16) -> Res
 /// Returns [`Error::CorruptPage`] if the entry's direction byte is neither a
 /// valid direction nor the freed sentinel, or if its offset/`edge_count`
 /// describe an out-of-bounds sub-block range.
-fn read_dir_entry(page_id: PageId, payload: &[u8], idx: u16, total_count: u16) -> Result<Option<(u8, DirEntry)>> {
+fn read_dir_entry(
+    page_id: PageId,
+    payload: &[u8],
+    idx: u16,
+    total_count: u16,
+) -> Result<Option<(u8, DirEntry)>> {
     if idx >= total_count {
         return Ok(None);
     }
@@ -265,7 +276,15 @@ fn read_dir_entry(page_id: PageId, payload: &[u8], idx: u16, total_count: u16) -
         )));
     }
     let direction = direction_from_u8(page_id, direction_byte)?;
-    Ok(Some((direction_byte, DirEntry { node_id, direction, offset, edge_count })))
+    Ok(Some((
+        direction_byte,
+        DirEntry {
+            node_id,
+            direction,
+            offset,
+            edge_count,
+        },
+    )))
 }
 
 fn write_dir_entry(payload: &mut [u8], idx: u16, entry: &DirEntry) {
@@ -293,7 +312,12 @@ fn mark_dir_entry_freed(payload: &mut [u8], idx: u16) {
 /// make an unrelated valid entry further down look like "not found" instead
 /// of exposing the real problem) or propagated as a bare index-out-of-range
 /// panic.
-fn find_live_entry(page_id: PageId, payload: &[u8], node_id: u64, direction: AdjDirection) -> Result<Option<(u16, DirEntry)>> {
+fn find_live_entry(
+    page_id: PageId,
+    payload: &[u8],
+    node_id: u64,
+    direction: AdjDirection,
+) -> Result<Option<(u16, DirEntry)>> {
     let total = read_dir_total_count(page_id, payload)?;
     let want_direction = direction_to_u8(direction);
     for idx in 0..total {
@@ -419,7 +443,12 @@ fn slab_free_space(page_id: PageId, page: &crate::storage::page::PageBuf) -> Res
     PAGE_PAYLOAD_SIZE
         .checked_sub(dir_bytes)
         .and_then(|v| v.checked_sub(sub_bytes))
-        .ok_or_else(|| corrupt(page_id, "slab directory + sub-block usage exceeds page capacity"))
+        .ok_or_else(|| {
+            corrupt(
+                page_id,
+                "slab directory + sub-block usage exceeds page capacity",
+            )
+        })
 }
 
 /// Allocates and finalizes an empty slab page (zero directory entries),
@@ -498,12 +527,18 @@ pub fn write_subblock(
     let payload = &buf[PAGE_HEADER_SIZE..];
 
     if find_live_entry(page_id, payload, node_id, direction)?.is_some() {
-        return Err(corrupt(page_id, "slab sub-block already exists for (node_id, direction)"));
+        return Err(corrupt(
+            page_id,
+            "slab sub-block already exists for (node_id, direction)",
+        ));
     }
 
     let needed_bytes = DIR_ENTRY_SIZE + edge_ids.len() * EDGE_SIZE;
     if slab_free_space(page_id, &buf)? < needed_bytes {
-        return Err(corrupt(page_id, "slab page has insufficient free space for new sub-block"));
+        return Err(corrupt(
+            page_id,
+            "slab page has insufficient free space for new sub-block",
+        ));
     }
 
     let payload_mut = &mut buf[PAGE_HEADER_SIZE..];
@@ -533,7 +568,10 @@ pub fn write_subblock(
     // sub-blocks) overrun the packed area and hand out an offset inside the
     // directory.
     if directory_area_end(total_plus_one) > new_abs_offset {
-        return Err(corrupt(page_id, "slab directory has no room for a new entry"));
+        return Err(corrupt(
+            page_id,
+            "slab directory has no room for a new entry",
+        ));
     }
 
     write_dir_entry(
@@ -589,7 +627,9 @@ pub fn read_subblock(
     let mut edges = Vec::with_capacity(entry.edge_count as usize);
     let mut off = entry.offset as usize;
     for _ in 0..entry.edge_count {
-        edges.push(u64::from_le_bytes(payload[off..off + EDGE_SIZE].try_into().unwrap()));
+        edges.push(u64::from_le_bytes(
+            payload[off..off + EDGE_SIZE].try_into().unwrap(),
+        ));
         off += EDGE_SIZE;
     }
     Ok(edges)
@@ -651,8 +691,8 @@ pub fn append_subblock_edges(
     let old_edge_count = entry.edge_count as usize;
     let old_bytes = old_edge_count * EDGE_SIZE;
     let new_edge_count = old_edge_count + new_edge_ids.len();
-    let new_edge_count_u16 =
-        u16::try_from(new_edge_count).map_err(|_| corrupt(page_id, "slab sub-block edge_count overflow"))?;
+    let new_edge_count_u16 = u16::try_from(new_edge_count)
+        .map_err(|_| corrupt(page_id, "slab sub-block edge_count overflow"))?;
     // entry.offset is validated (>= 0, <= PAGE_PAYLOAD_SIZE) but a corrupted
     // directory could still make needed_bytes exceed it — checked_sub turns
     // that into CorruptPage instead of a wrapped (huge) usize that would then
@@ -660,8 +700,8 @@ pub fn append_subblock_edges(
     let new_offset = (entry.offset as usize)
         .checked_sub(needed_bytes)
         .ok_or_else(|| corrupt(page_id, "slab sub-block offset underflow on append"))?;
-    let new_offset_u16 =
-        u16::try_from(new_offset).map_err(|_| corrupt(page_id, "slab sub-block offset overflow"))?;
+    let new_offset_u16 = u16::try_from(new_offset)
+        .map_err(|_| corrupt(page_id, "slab sub-block offset overflow"))?;
 
     // Growing moves this sub-block's data LEFT, toward the directory growing right
     // from the payload start. `slab_free_space` reports the gap between the two
@@ -687,7 +727,10 @@ pub fn append_subblock_edges(
         .checked_add(u16::try_from(old_bytes).unwrap_or(u16::MAX))
         .map_or(usize::MAX, |v| v as usize);
     if old_range_end > PAGE_PAYLOAD_SIZE {
-        return Err(corrupt(page_id, "slab sub-block copy source range exceeds page capacity"));
+        return Err(corrupt(
+            page_id,
+            "slab sub-block copy source range exceeds page capacity",
+        ));
     }
 
     let payload_mut = &mut buf[PAGE_HEADER_SIZE..];
@@ -699,7 +742,10 @@ pub fn append_subblock_edges(
     // and the new edges are appended right after them — so logical order
     // (existing edges, then newly appended ones) is preserved even though
     // the physical start address moved left.
-    payload_mut.copy_within(entry.offset as usize..entry.offset as usize + old_bytes, new_offset);
+    payload_mut.copy_within(
+        entry.offset as usize..entry.offset as usize + old_bytes,
+        new_offset,
+    );
     let mut off = new_offset + old_bytes;
     for &eid in new_edge_ids {
         payload_mut[off..off + EDGE_SIZE].copy_from_slice(&eid.to_le_bytes());
@@ -710,7 +756,12 @@ pub fn append_subblock_edges(
     write_dir_entry(
         payload_mut,
         idx,
-        &DirEntry { node_id, direction, offset: new_offset_u16, edge_count: new_edge_count_u16 },
+        &DirEntry {
+            node_id,
+            direction,
+            offset: new_offset_u16,
+            edge_count: new_edge_count_u16,
+        },
     );
 
     finalize_slab_buf(&mut buf);
@@ -819,7 +870,12 @@ pub fn rewrite_subblock_edges(
     write_dir_entry(
         payload_mut,
         idx,
-        &DirEntry { node_id, direction, offset: entry.offset, edge_count: new_count },
+        &DirEntry {
+            node_id,
+            direction,
+            offset: entry.offset,
+            edge_count: new_count,
+        },
     );
 
     finalize_slab_buf(&mut buf);
@@ -843,7 +899,11 @@ mod tests {
     /// test below (hallazgo #15's tests all funnel through this helper so a
     /// mismatch reports the real `page_id`/variant it saw, not just "assertion
     /// failed").
-    fn assert_corrupt_page<T: std::fmt::Debug>(result: Result<T>, expected_page_id: PageId, context: &str) {
+    fn assert_corrupt_page<T: std::fmt::Debug>(
+        result: Result<T>,
+        expected_page_id: PageId,
+        context: &str,
+    ) {
         match result {
             Err(Error::CorruptPage { page_id, .. }) => {
                 assert_eq!(
@@ -851,7 +911,9 @@ mod tests {
                     "{context}: CorruptPage carried page_id {page_id}, expected {expected_page_id}"
                 );
             }
-            Err(other) => panic!("{context}: expected Error::CorruptPage, got a different error: {other:?}"),
+            Err(other) => {
+                panic!("{context}: expected Error::CorruptPage, got a different error: {other:?}")
+            }
             Ok(value) => panic!("{context}: expected Error::CorruptPage, got Ok({value:?})"),
         }
     }
@@ -867,7 +929,9 @@ mod tests {
         let mut buf = backend.read_page(DataFile::Adjacency, page_id).unwrap();
         buf[PAGE_HEADER_SIZE..PAGE_HEADER_SIZE + 2].copy_from_slice(&raw_count.to_le_bytes());
         finalize_slab_buf(&mut buf);
-        backend.write_page(DataFile::Adjacency, page_id, &buf).unwrap();
+        backend
+            .write_page(DataFile::Adjacency, page_id, &buf)
+            .unwrap();
     }
 
     /// Directly overwrites directory entry `idx`'s raw bytes (`node_id`,
@@ -893,7 +957,9 @@ mod tests {
         payload[base + 10..base + 12].copy_from_slice(&offset.to_le_bytes());
         payload[base + 12..base + 14].copy_from_slice(&edge_count.to_le_bytes());
         finalize_slab_buf(&mut buf);
-        backend.write_page(DataFile::Adjacency, page_id, &buf).unwrap();
+        backend
+            .write_page(DataFile::Adjacency, page_id, &buf)
+            .unwrap();
     }
 
     // --- Ciclo 1 ---
@@ -901,22 +967,35 @@ mod tests {
     #[test]
     fn slab_write_read_single_subblock_roundtrip() {
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
 
-        write_subblock(&mut backend, page_id, 7, AdjDirection::Outgoing, &[100, 200, 300])
-            .expect("writing the first sub-block on a fresh page must succeed");
+        write_subblock(
+            &mut backend,
+            page_id,
+            7,
+            AdjDirection::Outgoing,
+            &[100, 200, 300],
+        )
+        .expect("writing the first sub-block on a fresh page must succeed");
 
         let edges = read_subblock(&backend, page_id, 7, AdjDirection::Outgoing)
             .expect("reading back the sub-block just written must succeed");
-        assert_eq!(edges, vec![100, 200, 300], "round-tripped edge IDs must match exactly what was written");
+        assert_eq!(
+            edges,
+            vec![100, 200, 300],
+            "round-tripped edge IDs must match exactly what was written"
+        );
 
         // Page format is slab, not a dedicated chain.
         assert!(
-            is_slab_page(&backend, page_id).expect("is_slab_page must succeed on a page this module allocated"),
+            is_slab_page(&backend, page_id)
+                .expect("is_slab_page must succeed on a page this module allocated"),
             "allocate_slab_page must stamp PageType::AdjacencySlab, not a dedicated-chain adjacency page"
         );
         assert_eq!(
-            backend.page_count(DataFile::Adjacency), 1,
+            backend.page_count(DataFile::Adjacency),
+            1,
             "a single sub-block must fit on the one page allocate_slab_page created, no extra pages"
         );
     }
@@ -926,11 +1005,21 @@ mod tests {
     #[test]
     fn slab_multiple_subblocks_share_one_page() {
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
 
-        write_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing, &[11]).expect("sub-block 1 write");
-        write_subblock(&mut backend, page_id, 2, AdjDirection::Outgoing, &[21, 22, 23]).expect("sub-block 2 write");
-        write_subblock(&mut backend, page_id, 3, AdjDirection::Outgoing, &[31]).expect("sub-block 3 write");
+        write_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing, &[11])
+            .expect("sub-block 1 write");
+        write_subblock(
+            &mut backend,
+            page_id,
+            2,
+            AdjDirection::Outgoing,
+            &[21, 22, 23],
+        )
+        .expect("sub-block 2 write");
+        write_subblock(&mut backend, page_id, 3, AdjDirection::Outgoing, &[31])
+            .expect("sub-block 3 write");
 
         assert_eq!(
             read_subblock(&backend, page_id, 1, AdjDirection::Outgoing).expect("read sub-block 1"),
@@ -950,7 +1039,8 @@ mod tests {
 
         // Central assertion of Pieza 2: all three share ONE physical page.
         assert_eq!(
-            backend.page_count(DataFile::Adjacency), 1,
+            backend.page_count(DataFile::Adjacency),
+            1,
             "3 small sub-blocks must share ONE slab page, not allocate one page per node"
         );
     }
@@ -958,10 +1048,13 @@ mod tests {
     #[test]
     fn slab_free_space_shrinks_as_subblocks_are_added() {
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
-        let buf_empty = backend.read_page(DataFile::Adjacency, page_id).expect("read fresh page");
-        let free_empty =
-            slab_free_space(page_id, &buf_empty).expect("slab_free_space on a freshly allocated page must succeed");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        let buf_empty = backend
+            .read_page(DataFile::Adjacency, page_id)
+            .expect("read fresh page");
+        let free_empty = slab_free_space(page_id, &buf_empty)
+            .expect("slab_free_space on a freshly allocated page must succeed");
         assert_eq!(
             free_empty, PAGE_PAYLOAD_SIZE,
             "a freshly allocated slab page must report its entire payload as free"
@@ -969,15 +1062,18 @@ mod tests {
 
         write_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing, &[11, 12])
             .expect("writing a 2-edge sub-block must succeed with a full page of free space");
-        let buf_after = backend.read_page(DataFile::Adjacency, page_id).expect("read page after write");
-        let free_after =
-            slab_free_space(page_id, &buf_after).expect("slab_free_space after one write must succeed");
+        let buf_after = backend
+            .read_page(DataFile::Adjacency, page_id)
+            .expect("read page after write");
+        let free_after = slab_free_space(page_id, &buf_after)
+            .expect("slab_free_space after one write must succeed");
 
         // Derived from the module's own size constants, not a hardcoded magic
         // number, so this test stays correct if DIR_ENTRY_SIZE/EDGE_SIZE change.
         let expected_used = DIR_ENTRY_SIZE + 2 * EDGE_SIZE;
         assert_eq!(
-            free_empty - free_after, expected_used,
+            free_empty - free_after,
+            expected_used,
             "free space must shrink by exactly one directory entry ({DIR_ENTRY_SIZE} bytes) plus 2 edge IDs ({EDGE_SIZE} bytes each)"
         );
     }
@@ -990,11 +1086,18 @@ mod tests {
         // it would need a fresh directory slot and fail here (the no-compaction rule
         // means freeing reclaims no bytes unless the block is last).
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
 
         // The node under test, deliberately NOT the last sub-block.
-        write_subblock(&mut backend, page_id, 5, AdjDirection::Outgoing, &[10, 20, 30])
-            .expect("write node 5");
+        write_subblock(
+            &mut backend,
+            page_id,
+            5,
+            AdjDirection::Outgoing,
+            &[10, 20, 30],
+        )
+        .expect("write node 5");
 
         // Fill the rest of the page so nothing new could ever be inserted.
         let mut filler = 100u64;
@@ -1003,8 +1106,14 @@ mod tests {
             if !slab_can_fit_subblock(page_id, &page, 1).unwrap() {
                 break;
             }
-            write_subblock(&mut backend, page_id, filler, AdjDirection::Outgoing, &[filler])
-                .expect("filler sub-block");
+            write_subblock(
+                &mut backend,
+                page_id,
+                filler,
+                AdjDirection::Outgoing,
+                &[filler],
+            )
+            .expect("filler sub-block");
             filler += 1;
         }
 
@@ -1037,8 +1146,9 @@ mod tests {
         let page_id = allocate_slab_page(&mut backend).unwrap();
         write_subblock(&mut backend, page_id, 5, AdjDirection::Outgoing, &[1, 2]).unwrap();
 
-        let err = rewrite_subblock_edges(&mut backend, page_id, 5, AdjDirection::Outgoing, &[1, 2, 3])
-            .unwrap_err();
+        let err =
+            rewrite_subblock_edges(&mut backend, page_id, 5, AdjDirection::Outgoing, &[1, 2, 3])
+                .unwrap_err();
 
         assert!(
             matches!(err, Error::CorruptPage { .. }),
@@ -1051,45 +1161,69 @@ mod tests {
     #[test]
     fn slab_append_to_existing_subblock_grows_in_place() {
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
 
-        write_subblock(&mut backend, page_id, 5, AdjDirection::Outgoing, &[1, 2]).expect("write node 5");
+        write_subblock(&mut backend, page_id, 5, AdjDirection::Outgoing, &[1, 2])
+            .expect("write node 5");
         // A second sub-block that stays untouched, to prove isolation.
-        write_subblock(&mut backend, page_id, 6, AdjDirection::Outgoing, &[900]).expect("write node 6");
+        write_subblock(&mut backend, page_id, 6, AdjDirection::Outgoing, &[900])
+            .expect("write node 6");
 
         // Append to node 5 — NOT the last sub-block anymore (node 6 is last) ->
         // must be NoRoom per this codec's no-displacement rule.
-        let outcome_blocked =
-            append_subblock_edges(&mut backend, page_id, 5, AdjDirection::Outgoing, &[3, 4, 5])
-                .expect("append_subblock_edges must return Ok(NoRoom), not an error, for a non-last sub-block");
+        let outcome_blocked = append_subblock_edges(
+            &mut backend,
+            page_id,
+            5,
+            AdjDirection::Outgoing,
+            &[3, 4, 5],
+        )
+        .expect(
+            "append_subblock_edges must return Ok(NoRoom), not an error, for a non-last sub-block",
+        );
         assert_eq!(
-            outcome_blocked, AppendOutcome::NoRoom,
+            outcome_blocked,
+            AppendOutcome::NoRoom,
             "node 5 is not the last-written sub-block (node 6 is) -> the no-displacement rule must reject in-place growth"
         );
         // Node 5's data must be untouched by the rejected append.
         assert_eq!(
-            read_subblock(&backend, page_id, 5, AdjDirection::Outgoing).expect("read node 5 after rejected append"),
+            read_subblock(&backend, page_id, 5, AdjDirection::Outgoing)
+                .expect("read node 5 after rejected append"),
             vec![1, 2],
             "a NoRoom append must not mutate the target sub-block's stored edges"
         );
 
         // Appending to node 6 (the actual last sub-block) grows in place.
-        let outcome_ok =
-            append_subblock_edges(&mut backend, page_id, 6, AdjDirection::Outgoing, &[901, 902])
-                .expect("append_subblock_edges on the true last sub-block must succeed");
+        let outcome_ok = append_subblock_edges(
+            &mut backend,
+            page_id,
+            6,
+            AdjDirection::Outgoing,
+            &[901, 902],
+        )
+        .expect("append_subblock_edges on the true last sub-block must succeed");
         assert_eq!(
-            outcome_ok, AppendOutcome::InPlace,
+            outcome_ok,
+            AppendOutcome::InPlace,
             "node 6 IS the last-written sub-block -> in-place growth must be allowed"
         );
-        assert_eq!(backend.page_count(DataFile::Adjacency), 1, "in-place append must reuse the same page_id, no reallocation");
         assert_eq!(
-            read_subblock(&backend, page_id, 6, AdjDirection::Outgoing).expect("read node 6 after append"),
+            backend.page_count(DataFile::Adjacency),
+            1,
+            "in-place append must reuse the same page_id, no reallocation"
+        );
+        assert_eq!(
+            read_subblock(&backend, page_id, 6, AdjDirection::Outgoing)
+                .expect("read node 6 after append"),
             vec![900, 901, 902],
             "node 6's edges must be the original edge followed by the newly appended ones, in order"
         );
         // Node 5 (untouched entry) still reads back correctly.
         assert_eq!(
-            read_subblock(&backend, page_id, 5, AdjDirection::Outgoing).expect("read node 5 after node 6's append"),
+            read_subblock(&backend, page_id, 5, AdjDirection::Outgoing)
+                .expect("read node 5 after node 6's append"),
             vec![1, 2],
             "growing node 6 in place must not disturb node 5's unrelated sub-block"
         );
@@ -1100,40 +1234,61 @@ mod tests {
         // A single sub-block is trivially "the last one" -> in-place append
         // must succeed with no other entries to disturb.
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
-        write_subblock(&mut backend, page_id, 42, AdjDirection::Incoming, &[1, 2]).expect("write node 42");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        write_subblock(&mut backend, page_id, 42, AdjDirection::Incoming, &[1, 2])
+            .expect("write node 42");
 
-        let outcome =
-            append_subblock_edges(&mut backend, page_id, 42, AdjDirection::Incoming, &[3, 4, 5])
-                .expect("appending to the sole sub-block on a page must always succeed in place");
+        let outcome = append_subblock_edges(
+            &mut backend,
+            page_id,
+            42,
+            AdjDirection::Incoming,
+            &[3, 4, 5],
+        )
+        .expect("appending to the sole sub-block on a page must always succeed in place");
         assert_eq!(
-            outcome, AppendOutcome::InPlace,
+            outcome,
+            AppendOutcome::InPlace,
             "the only sub-block on the page is trivially the 'last' one -> must grow in place"
         );
         assert_eq!(
-            read_subblock(&backend, page_id, 42, AdjDirection::Incoming).expect("read node 42 after append"),
+            read_subblock(&backend, page_id, 42, AdjDirection::Incoming)
+                .expect("read node 42 after append"),
             vec![1, 2, 3, 4, 5],
             "appended edges must follow the original ones in insertion order"
         );
-        assert_eq!(backend.page_count(DataFile::Adjacency), 1, "in-place append must not allocate a new page");
+        assert_eq!(
+            backend.page_count(DataFile::Adjacency),
+            1,
+            "in-place append must not allocate a new page"
+        );
     }
 
     // --- Ciclo 4 ---
 
-
     #[test]
     fn slab_free_subblock_then_reuse_slot() {
         let mut backend = make_backend();
-        let page_id = allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
-        write_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing, &[10, 20]).expect("write node 1");
+        let page_id =
+            allocate_slab_page(&mut backend).expect("allocating a fresh slab page must succeed");
+        write_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing, &[10, 20])
+            .expect("write node 1");
 
-        let buf_before = backend.read_page(DataFile::Adjacency, page_id).expect("read page before free");
-        let free_before = slab_free_space(page_id, &buf_before).expect("slab_free_space before free must succeed");
+        let buf_before = backend
+            .read_page(DataFile::Adjacency, page_id)
+            .expect("read page before free");
+        let free_before = slab_free_space(page_id, &buf_before)
+            .expect("slab_free_space before free must succeed");
 
-        free_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing).expect("freeing node 1's sub-block must succeed");
+        free_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing)
+            .expect("freeing node 1's sub-block must succeed");
 
-        let buf_after = backend.read_page(DataFile::Adjacency, page_id).expect("read page after free");
-        let free_after = slab_free_space(page_id, &buf_after).expect("slab_free_space after free must succeed");
+        let buf_after = backend
+            .read_page(DataFile::Adjacency, page_id)
+            .expect("read page after free");
+        let free_after =
+            slab_free_space(page_id, &buf_after).expect("slab_free_space after free must succeed");
         assert!(
             free_after > free_before,
             "freeing the trailing (last-written) sub-block must reclaim its edge bytes (before={free_before}, after={free_after})"
@@ -1142,11 +1297,15 @@ mod tests {
         // A new write for a DIFFERENT node still works and the freed node_id
         // is no longer readable.
         let read_freed = read_subblock(&backend, page_id, 1, AdjDirection::Outgoing);
-        assert!(read_freed.is_err(), "a freed (node_id, direction) must no longer be readable, got Ok: {read_freed:?}");
+        assert!(
+            read_freed.is_err(),
+            "a freed (node_id, direction) must no longer be readable, got Ok: {read_freed:?}"
+        );
         write_subblock(&mut backend, page_id, 2, AdjDirection::Outgoing, &[30])
             .expect("a different node_id must be able to reuse the reclaimed directory slot");
         assert_eq!(
-            read_subblock(&backend, page_id, 2, AdjDirection::Outgoing).expect("read node 2 after reuse"),
+            read_subblock(&backend, page_id, 2, AdjDirection::Outgoing)
+                .expect("read node 2 after reuse"),
             vec![30],
             "the new sub-block written into the reclaimed slot must round-trip correctly"
         );
@@ -1172,7 +1331,11 @@ mod tests {
         corrupt_directory_count(&mut backend, page_id, u16::MAX);
 
         let result = read_subblock(&backend, page_id, 1, AdjDirection::Outgoing);
-        assert_corrupt_page(result, page_id, "read_subblock with directory_count = u16::MAX");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "read_subblock with directory_count = u16::MAX",
+        );
     }
 
     #[test]
@@ -1188,7 +1351,11 @@ mod tests {
         corrupt_directory_count(&mut backend, page_id, max_valid_count + 1);
 
         let result = read_subblock(&backend, page_id, 1, AdjDirection::Outgoing);
-        assert_corrupt_page(result, page_id, "read_subblock with directory_count one past the max that fits the page");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "read_subblock with directory_count one past the max that fits the page",
+        );
     }
 
     #[test]
@@ -1201,9 +1368,15 @@ mod tests {
         let page_id = allocate_slab_page(&mut backend).expect("allocate slab page");
         corrupt_directory_count(&mut backend, page_id, u16::MAX);
 
-        let buf = backend.read_page(DataFile::Adjacency, page_id).expect("read corrupted page");
+        let buf = backend
+            .read_page(DataFile::Adjacency, page_id)
+            .expect("read corrupted page");
         let result = slab_free_space(page_id, &buf);
-        assert_corrupt_page(result, page_id, "slab_free_space with directory_count = u16::MAX");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "slab_free_space with directory_count = u16::MAX",
+        );
     }
 
     #[test]
@@ -1218,7 +1391,11 @@ mod tests {
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 7, 0, 4075, 3);
 
         let result = read_subblock(&backend, page_id, 7, AdjDirection::Outgoing);
-        assert_corrupt_page(result, page_id, "read_subblock with an out-of-range (offset, edge_count)");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "read_subblock with an out-of-range (offset, edge_count)",
+        );
     }
 
     #[test]
@@ -1234,7 +1411,11 @@ mod tests {
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 7, 0, 0, u16::MAX);
 
         let result = read_subblock(&backend, page_id, 7, AdjDirection::Outgoing);
-        assert_corrupt_page(result, page_id, "read_subblock with edge_count = u16::MAX (byte_len far exceeds page capacity)");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "read_subblock with edge_count = u16::MAX (byte_len far exceeds page capacity)",
+        );
     }
 
     #[test]
@@ -1248,7 +1429,11 @@ mod tests {
         corrupt_directory_count(&mut backend, page_id, u16::MAX);
 
         let result = write_subblock(&mut backend, page_id, 1, AdjDirection::Outgoing, &[1, 2, 3]);
-        assert_corrupt_page(result, page_id, "write_subblock on a page with a corrupt directory_count");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "write_subblock on a page with a corrupt directory_count",
+        );
     }
 
     #[test]
@@ -1264,7 +1449,11 @@ mod tests {
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 7, 0, 4075, 3);
 
         let result = append_subblock_edges(&mut backend, page_id, 7, AdjDirection::Outgoing, &[99]);
-        assert_corrupt_page(result, page_id, "append_subblock_edges on an out-of-range target entry");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "append_subblock_edges on an out-of-range target entry",
+        );
     }
 
     #[test]
@@ -1279,7 +1468,11 @@ mod tests {
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 7, 0, 4075, 3);
 
         let result = free_subblock(&mut backend, page_id, 7, AdjDirection::Outgoing);
-        assert_corrupt_page(result, page_id, "free_subblock on an out-of-range target entry");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "free_subblock on an out-of-range target entry",
+        );
     }
 
     #[test]
@@ -1296,7 +1489,11 @@ mod tests {
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 7, 0x02, 4000, 1);
 
         let result = read_subblock(&backend, page_id, 7, AdjDirection::Outgoing);
-        assert_corrupt_page(result, page_id, "read_subblock with an invalid direction byte (0x02)");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "read_subblock with an invalid direction byte (0x02)",
+        );
     }
 
     #[test]
@@ -1317,7 +1514,8 @@ mod tests {
 
         let result = read_subblock(&backend, page_id, 7, AdjDirection::Outgoing);
         assert_corrupt_page(
-            result, page_id,
+            result,
+            page_id,
             "a corrupt entry earlier in the directory must abort the scan even though a later entry would have matched",
         );
     }
@@ -1338,9 +1536,15 @@ mod tests {
         // out-of-range instead of the zeroed values free_subblock would write.
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 1, DIR_ENTRY_FREED, 4075, 3);
 
-        let buf = backend.read_page(DataFile::Adjacency, page_id).expect("read corrupted page");
+        let buf = backend
+            .read_page(DataFile::Adjacency, page_id)
+            .expect("read corrupted page");
         let result = subblocks_bytes_used(page_id, &buf[PAGE_HEADER_SIZE..]);
-        assert_corrupt_page(result, page_id, "subblocks_bytes_used with a freed entry carrying a non-zeroed out-of-range offset/edge_count");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "subblocks_bytes_used with a freed entry carrying a non-zeroed out-of-range offset/edge_count",
+        );
     }
 
     #[test]
@@ -1363,7 +1567,11 @@ mod tests {
 
         let edges = read_subblock(&backend, page_id, 1, AdjDirection::Outgoing)
             .expect("a live entry with edge_count == 0 must be found and read back as an empty Vec, not treated as freed/missing");
-        assert_eq!(edges, Vec::<u64>::new(), "a live zero-edge sub-block must read back as an empty edge list");
+        assert_eq!(
+            edges,
+            Vec::<u64>::new(),
+            "a live zero-edge sub-block must read back as an empty edge list"
+        );
     }
 
     #[test]
@@ -1385,7 +1593,8 @@ mod tests {
 
         let result = write_subblock(&mut backend, page_id, 123, AdjDirection::Outgoing, &[1]);
         assert_corrupt_page(
-            result, page_id,
+            result,
+            page_id,
             "write_subblock must refuse to grow the directory past what fits in PAGE_PAYLOAD_SIZE, not overflow/wrap",
         );
     }
@@ -1408,7 +1617,11 @@ mod tests {
         corrupt_raw_dir_entry(&mut backend, page_id, 0, 1, 0, 4072, u16::MAX);
 
         let result = append_subblock_edges(&mut backend, page_id, 1, AdjDirection::Outgoing, &[20]);
-        assert_corrupt_page(result, page_id, "append_subblock_edges with a corrupted edge_count that would overflow the copy source range");
+        assert_corrupt_page(
+            result,
+            page_id,
+            "append_subblock_edges with a corrupted edge_count that would overflow the copy source range",
+        );
     }
 }
 

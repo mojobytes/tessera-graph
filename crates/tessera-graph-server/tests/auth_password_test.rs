@@ -1,10 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! argon2id roundtrip and policy tests.
 
 use tessera_graph_server::auth::{
-    MAX_PASSWORD_LEN, MIN_PASSWORD_LEN, PasswordError, SecretString, hash_password,
-    verify_password,
+    MAX_PASSWORD_LEN, MIN_PASSWORD_LEN, PasswordError, SecretString, hash_password, verify_password,
 };
 
 #[test]

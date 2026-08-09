@@ -26,8 +26,9 @@ const DEFAULT_CONFIG_PATH: &str = "/etc/tessera/tessera.toml";
 /// ajuste aceptado y no aplicado — y estaba en el camino que usa cualquier
 /// despliegue de verdad.
 fn paid_config_from_file(path: &str, env: &HashMap<String, String>) -> ServerConfig {
-    ServerConfig::from_file_and_env(path, env)
-        .with_paid_settings(parse_paid_settings(&ServerConfig::merged_env_map(path, env)))
+    ServerConfig::from_file_and_env(path, env).with_paid_settings(parse_paid_settings(
+        &ServerConfig::merged_env_map(path, env),
+    ))
 }
 
 /// Build the [`ServerConfig`], merging an optional TOML file with the
@@ -97,9 +98,7 @@ fn init_tracing() {
             .with_env_filter(env_filter)
             .init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 }
 

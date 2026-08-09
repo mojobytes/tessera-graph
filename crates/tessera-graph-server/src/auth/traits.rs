@@ -89,7 +89,6 @@ impl AccessLevel {
     }
 }
 
-
 /// Non-sensitive summary of a stored user. Never exposes the password hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserSummary {

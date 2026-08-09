@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 mod direction;
 pub mod neighbor;
-pub mod pattern;
 mod path;
+pub mod pattern;
 pub mod shortest_path;
 pub mod subgraph;
 pub mod traversal;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! `PyWeightedPathQuery` — Python wrapper for `WeightedPathQuery`.
 //!
@@ -23,7 +23,7 @@ pub struct PyWeightedPathQuery {
     to: PyNodeId,
     direction: PyDirection,
     label_filter: Option<String>,
-    weight_fn: Option<PyObject>,
+    weight_fn: Option<Py<PyAny>>,
 }
 
 impl PyWeightedPathQuery {
@@ -54,7 +54,7 @@ impl PyWeightedPathQuery {
     }
 
     /// Sets the weight function. Accepts any `Callable[[Edge], float]`.
-    fn weight(mut slf: PyRefMut<'_, Self>, callable: PyObject) -> Py<Self> {
+    fn weight(mut slf: PyRefMut<'_, Self>, callable: Py<PyAny>) -> Py<Self> {
         slf.weight_fn = Some(callable);
         slf.into()
     }
@@ -67,7 +67,7 @@ impl PyWeightedPathQuery {
 
         if let Some(ref callable) = self.weight_fn {
             // Build with Python callable as weight function.
-            // The GIL is already held via `py` — no need for `Python::with_gil`.
+            // The GIL is already held via `py` — no need for `Python::attach`.
             let callable = callable.clone_ref(py);
             let weight_fn = |edge: &tessera_graph::Edge| -> f64 {
                 let py_edge = PyEdge::from(edge.clone());

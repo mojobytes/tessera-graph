@@ -77,11 +77,25 @@ mod tests {
     use crate::bench_support::test_helpers::sample_point;
 
     fn sample_stats(p50: f64) -> LatencyStats {
-        LatencyStats { p50, p95: p50, p99: p50, mean: p50, min: p50, max: p50, count: 1 }
+        LatencyStats {
+            p50,
+            p95: p50,
+            p99: p50,
+            mean: p50,
+            min: p50,
+            max: p50,
+            count: 1,
+        }
     }
 
     fn sample_report() -> BenchReport {
-        BenchReport::new(sample_point(), sample_stats(0.001), sample_stats(0.002), 40, 10)
+        BenchReport::new(
+            sample_point(),
+            sample_stats(0.001),
+            sample_stats(0.002),
+            40,
+            10,
+        )
     }
 
     #[test]
@@ -106,7 +120,10 @@ mod tests {
         let json = serde_json::to_string(&report).unwrap();
         let back: BenchReport = serde_json::from_str(&json).unwrap();
         assert_eq!(report, back, "full roundtrip equality");
-        assert_eq!(back.schema_version, REPORT_SCHEMA_VERSION, "version survives roundtrip");
+        assert_eq!(
+            back.schema_version, REPORT_SCHEMA_VERSION,
+            "version survives roundtrip"
+        );
     }
 
     #[test]

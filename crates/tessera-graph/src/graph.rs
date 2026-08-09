@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -7,6 +7,8 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::adj_cache::AdjCache;
 use crate::edge::Edge;
 use crate::error::{BatchLimitKind, EdgeId, Error, NodeId, Result};
+use crate::index::codec as index_codec;
+use crate::index::{LabelIndex, PropertyIndex};
 use crate::node::Node;
 use crate::property::Properties;
 use crate::storage::backend::{DataFile, PageId, StorageBackend};
@@ -16,18 +18,16 @@ use crate::storage::codec::adjacency_codec::{
 };
 use crate::storage::codec::edge_codec::{self, EDGE_SLOT_SIZE};
 use crate::storage::codec::node_codec::{
-    self, NODE_SLOT_SIZE, SLOTS_PER_PAGE, SLOT_LIVE, SLOT_TOMBSTONE,
+    self, NODE_SLOT_SIZE, SLOT_LIVE, SLOT_TOMBSTONE, SLOTS_PER_PAGE,
 };
 use crate::storage::codec::overflow_codec;
 use crate::storage::codec::prop_slab_codec;
-use crate::index::codec as index_codec;
-use crate::index::{LabelIndex, PropertyIndex};
 use crate::storage::codec::string_codec::StringHeap;
 pub use crate::storage::file::GraphConfig;
 
 use crate::storage::file::FileBackend;
 use crate::storage::memory::MemoryBackend;
-use crate::storage::page::{finalize_page, magic, PageHeader, PageType, PAGE_HEADER_SIZE};
+use crate::storage::page::{PAGE_HEADER_SIZE, PageHeader, PageType, finalize_page, magic};
 use crate::wal::record::WalRecord;
 
 /// Default adjacency cache capacity for in-memory graphs.
@@ -114,7 +114,10 @@ impl SlotLayout {
 /// Estimated memory a delta retains: the `new` snapshot it stores plus the
 /// `prior` snapshot it holds for rollback. Both are live in the delta chain
 /// until commit/vacuum, so the per-transaction memory cap charges both.
-fn delta_bytes(prior: Option<&crate::mvcc::EntitySnapshot>, new: &crate::mvcc::EntitySnapshot) -> u64 {
+fn delta_bytes(
+    prior: Option<&crate::mvcc::EntitySnapshot>,
+    new: &crate::mvcc::EntitySnapshot,
+) -> u64 {
     prior.map_or(0, crate::mvcc::EntitySnapshot::approx_size) + new.approx_size()
 }
 
@@ -674,12 +677,8 @@ impl Graph {
     #[cfg(test)]
     pub(crate) fn test_only_push_raw_delta_for_append_only_node(&self, txn_id: u64, id: NodeId) {
         let snapshot = crate::mvcc::EntitySnapshot::Node(Node::new(id, "Event", Properties::new()));
-        let delta = crate::mvcc::Delta::new(
-            txn_id,
-            None,
-            Some(snapshot),
-            crate::mvcc::DeltaOp::Update,
-        );
+        let delta =
+            crate::mvcc::Delta::new(txn_id, None, Some(snapshot), crate::mvcc::DeltaOp::Update);
         let _ = self.push_txn_delta(txn_id, crate::mvcc::EntityKey::Node(id), delta);
     }
 
@@ -759,7 +758,11 @@ impl Graph {
             if used_bytes > cap_bytes {
                 // Over cap: abort the whole transaction, not just this operation.
                 self.rollback_txn(txn_id)?;
-                return Err(Error::TxnMemoryCapExceeded { txn_id, used_bytes, cap_bytes });
+                return Err(Error::TxnMemoryCapExceeded {
+                    txn_id,
+                    used_bytes,
+                    cap_bytes,
+                });
             }
         }
         Ok(())
@@ -1155,7 +1158,10 @@ impl Graph {
         // older than any commit. With NO chain, the id must be page-resident, so
         // a read error is a real inconsistency and propagates.
         let committed_base = match (&chain, self.node_exists.contains(&id.0)) {
-            (Some(_), true) => self.read_node(id.0).ok().map(crate::mvcc::EntitySnapshot::Node),
+            (Some(_), true) => self
+                .read_node(id.0)
+                .ok()
+                .map(crate::mvcc::EntitySnapshot::Node),
             (None, true) => Some(crate::mvcc::EntitySnapshot::Node(self.read_node(id.0)?)),
             (_, false) => None,
         };
@@ -1188,7 +1194,10 @@ impl Graph {
         // (the committed edge may not be materialized yet); with no chain the
         // edge must be page-resident.
         let committed_base = match (&chain, self.edge_exists.contains(&id.0)) {
-            (Some(_), true) => self.read_edge(id.0).ok().map(crate::mvcc::EntitySnapshot::Edge),
+            (Some(_), true) => self
+                .read_edge(id.0)
+                .ok()
+                .map(crate::mvcc::EntitySnapshot::Edge),
             (None, true) => Some(crate::mvcc::EntitySnapshot::Edge(self.read_edge(id.0)?)),
             (_, false) => None,
         };
@@ -1260,7 +1269,11 @@ impl Graph {
         }
         self.node_exists
             .contains(&id.0)
-            .then(|| self.read_node(id.0).ok().map(crate::mvcc::EntitySnapshot::Node))
+            .then(|| {
+                self.read_node(id.0)
+                    .ok()
+                    .map(crate::mvcc::EntitySnapshot::Node)
+            })
             .flatten()
     }
 
@@ -1278,7 +1291,11 @@ impl Graph {
         }
         self.edge_exists
             .contains(&id.0)
-            .then(|| self.read_edge(id.0).ok().map(crate::mvcc::EntitySnapshot::Edge))
+            .then(|| {
+                self.read_edge(id.0)
+                    .ok()
+                    .map(crate::mvcc::EntitySnapshot::Edge)
+            })
             .flatten()
     }
 
@@ -1779,7 +1796,8 @@ impl Graph {
                         .expect("slice is NODE_SLOT_SIZE bytes");
                     let label = if node_codec::slot_needs_label_resolve(&slot_bytes) {
                         let overflow_ref = node_codec::slot_label_overflow_ref(&slot_bytes);
-                        self.string_heap.resolve(self.storage.as_mut(), overflow_ref)?
+                        self.string_heap
+                            .resolve(self.storage.as_mut(), overflow_ref)?
                     } else {
                         node_codec::slot_inline_label(&slot_bytes, page_idx)?
                     };
@@ -1789,7 +1807,8 @@ impl Graph {
                     // decode here because properties are not stored in the
                     // slot header (they may be in overflow pages).
                     let node = self.read_node(id)?;
-                    self.node_property_index.insert_node(node.label(), node.properties(), id);
+                    self.node_property_index
+                        .insert_node(node.label(), node.properties(), id);
                     // Issue #43: reuse the decode we already paid for to
                     // restore the append-only fast-path set. Issue #61: only
                     // nodes at or above the declaration's lower bound, so a
@@ -1847,7 +1866,10 @@ impl Graph {
                         .try_into()
                         .expect("4 bytes for label hash"),
                 );
-                self.edge_pair_index.entry((src, tgt, hash)).or_default().push(id);
+                self.edge_pair_index
+                    .entry((src, tgt, hash))
+                    .or_default()
+                    .push(id);
 
                 if include_labels {
                     let slot_bytes: [u8; EDGE_SLOT_SIZE] = page[offset..offset + EDGE_SLOT_SIZE]
@@ -1855,7 +1877,8 @@ impl Graph {
                         .expect("slice is EDGE_SLOT_SIZE bytes");
                     let label = if edge_codec::edge_slot_needs_label_resolve(&slot_bytes) {
                         let overflow_ref = edge_codec::edge_slot_label_overflow_ref(&slot_bytes);
-                        self.string_heap.resolve(self.storage.as_mut(), overflow_ref)?
+                        self.string_heap
+                            .resolve(self.storage.as_mut(), overflow_ref)?
                     } else {
                         edge_codec::edge_slot_inline_label(&slot_bytes, page_idx)?
                     };
@@ -1899,7 +1922,9 @@ impl Graph {
                     continue; // isolated node, nothing to cache
                 }
                 let node_id = u64::from_le_bytes(
-                    page[offset + 1..offset + 9].try_into().expect("8 bytes for node id"),
+                    page[offset + 1..offset + 9]
+                        .try_into()
+                        .expect("8 bytes for node id"),
                 );
                 let entry = AdjacencyPointer {
                     outgoing_page: (out != node_codec::ADJ_PAGE_ID_SENTINEL).then_some(out),
@@ -1960,7 +1985,8 @@ impl Graph {
         let live_ids: Vec<u64> = self.node_exists.iter().copied().collect();
         for id in live_ids {
             let node = self.read_node(id)?;
-            self.node_property_index.insert_node(node.label(), node.properties(), id);
+            self.node_property_index
+                .insert_node(node.label(), node.properties(), id);
             // Issue #43: same decode also restores the append-only fast-path
             // set. Issue #61: bounded by the declaration's lower node id, so a
             // node freed by a withdrawal stays free across the reopen.
@@ -2273,7 +2299,8 @@ impl Graph {
         // Task 15 C': pre-mutation quota check.
         self.check_quota()?;
         // Issue #37: count this op against the open batch's caps (no-op outside a batch).
-        let batch_bytes = Self::estimate_entity_bytes(size_of::<Node>(), node.label(), node.properties());
+        let batch_bytes =
+            Self::estimate_entity_bytes(size_of::<Node>(), node.label(), node.properties());
         self.charge_batch_op(batch_bytes)?;
 
         if !self.node_exists.contains(&id.0) {
@@ -2320,12 +2347,18 @@ impl Graph {
 
         if let Some(ptr) = self.resolve_adj_pointer(id.0)? {
             if let Some(out_page) = ptr.outgoing_page {
-                edge_ids_to_remove
-                    .extend(self.read_adj_edge_ids(out_page, id.0, AdjDirection::Outgoing)?);
+                edge_ids_to_remove.extend(self.read_adj_edge_ids(
+                    out_page,
+                    id.0,
+                    AdjDirection::Outgoing,
+                )?);
             }
             if let Some(in_page) = ptr.incoming_page {
-                edge_ids_to_remove
-                    .extend(self.read_adj_edge_ids(in_page, id.0, AdjDirection::Incoming)?);
+                edge_ids_to_remove.extend(self.read_adj_edge_ids(
+                    in_page,
+                    id.0,
+                    AdjDirection::Incoming,
+                )?);
             }
         }
 
@@ -2366,7 +2399,8 @@ impl Graph {
         if !self.mvcc_enabled() {
             return self.node_exists.contains(&id.0);
         }
-        self.resolve_node_visible(id, self.auto_commit_start_ts(), None).is_ok()
+        self.resolve_node_visible(id, self.auto_commit_start_ts(), None)
+            .is_ok()
     }
 
     /// Whether node `id` is visible to transaction `txn_id`'s snapshot — the
@@ -2378,7 +2412,8 @@ impl Graph {
         let Ok(start_ts) = self.txn_start_ts(txn_id) else {
             return false;
         };
-        self.resolve_node_visible(id, start_ts, Some(txn_id)).is_ok()
+        self.resolve_node_visible(id, start_ts, Some(txn_id))
+            .is_ok()
     }
 
     /// Returns all node IDs currently in the graph.
@@ -2574,7 +2609,8 @@ impl Graph {
     /// Returns [`Error::EdgeNotFound`] if the id does not exist.
     pub fn update_edge(&mut self, id: EdgeId, edge: &Edge) -> Result<()> {
         // Issue #37: count this op against the open batch's caps (no-op outside a batch).
-        let batch_bytes = Self::estimate_entity_bytes(size_of::<Edge>(), edge.label(), edge.properties());
+        let batch_bytes =
+            Self::estimate_entity_bytes(size_of::<Edge>(), edge.label(), edge.properties());
         self.charge_batch_op(batch_bytes)?;
         if !self.edge_exists.contains(&id.0) {
             return Err(Error::EdgeNotFound(id));
@@ -2692,7 +2728,11 @@ impl Graph {
         if !self.node_exists.contains(&node.0) {
             return Err(Error::NodeNotFound(node));
         }
-        let start_ts = if self.mvcc_enabled() { self.auto_commit_start_ts() } else { 0 };
+        let start_ts = if self.mvcc_enabled() {
+            self.auto_commit_start_ts()
+        } else {
+            0
+        };
         self.edges_for_direction(node.0, AdjDirection::Outgoing, start_ts, None)
     }
 
@@ -2705,7 +2745,11 @@ impl Graph {
         if !self.node_exists.contains(&node.0) {
             return Err(Error::NodeNotFound(node));
         }
-        let start_ts = if self.mvcc_enabled() { self.auto_commit_start_ts() } else { 0 };
+        let start_ts = if self.mvcc_enabled() {
+            self.auto_commit_start_ts()
+        } else {
+            0
+        };
         self.edges_for_direction(node.0, AdjDirection::Incoming, start_ts, None)
     }
 
@@ -2759,7 +2803,11 @@ impl Graph {
         if !self.node_exists.contains(&node.0) {
             return Err(Error::NodeNotFound(node));
         }
-        let start_ts = if self.mvcc_enabled() { self.auto_commit_start_ts() } else { 0 };
+        let start_ts = if self.mvcc_enabled() {
+            self.auto_commit_start_ts()
+        } else {
+            0
+        };
         self.edges_for_direction_by_label(node.0, AdjDirection::Outgoing, label, start_ts, None)
     }
 
@@ -2767,13 +2815,24 @@ impl Graph {
     ///
     /// # Errors
     /// See [`Graph::outgoing_edges_in_txn`].
-    pub fn outgoing_edges_by_label_in_txn(&self, txn_id: u64, node: NodeId, label: &str) -> Result<Vec<Edge>> {
+    pub fn outgoing_edges_by_label_in_txn(
+        &self,
+        txn_id: u64,
+        node: NodeId,
+        label: &str,
+    ) -> Result<Vec<Edge>> {
         // See `outgoing_edges_in_txn`: validate against txn visibility.
         if !self.node_visible_in_txn(txn_id, node) {
             return Err(Error::NodeNotFound(node));
         }
         let start_ts = self.txn_start_ts(txn_id)?;
-        self.edges_for_direction_by_label(node.0, AdjDirection::Outgoing, label, start_ts, Some(txn_id))
+        self.edges_for_direction_by_label(
+            node.0,
+            AdjDirection::Outgoing,
+            label,
+            start_ts,
+            Some(txn_id),
+        )
     }
 
     /// Returns every edge from `from` to `to` carrying the given `label`.
@@ -2799,7 +2858,11 @@ impl Graph {
             return Ok(Vec::new());
         };
 
-        let start_ts = if self.mvcc_enabled() { self.auto_commit_start_ts() } else { 0 };
+        let start_ts = if self.mvcc_enabled() {
+            self.auto_commit_start_ts()
+        } else {
+            0
+        };
         let mut edges = Vec::new();
         for &eid in edge_ids {
             // Under MVCC the pair-index is a committed-reconciled superset: an id
@@ -2846,7 +2909,11 @@ impl Graph {
             return Ok(false);
         };
 
-        let start_ts = if self.mvcc_enabled() { self.auto_commit_start_ts() } else { 0 };
+        let start_ts = if self.mvcc_enabled() {
+            self.auto_commit_start_ts()
+        } else {
+            0
+        };
         for &eid in edge_ids {
             // See `edges_between`: resolve each superset id through the delta
             // chain under MVCC, skipping ids not visible to this reader.
@@ -2881,7 +2948,11 @@ impl Graph {
         if !self.node_exists.contains(&node.0) {
             return Err(Error::NodeNotFound(node));
         }
-        let start_ts = if self.mvcc_enabled() { self.auto_commit_start_ts() } else { 0 };
+        let start_ts = if self.mvcc_enabled() {
+            self.auto_commit_start_ts()
+        } else {
+            0
+        };
         self.edges_for_direction_by_label(node.0, AdjDirection::Incoming, label, start_ts, None)
     }
 
@@ -2889,12 +2960,23 @@ impl Graph {
     ///
     /// # Errors
     /// See [`Graph::outgoing_edges_in_txn`].
-    pub fn incoming_edges_by_label_in_txn(&self, txn_id: u64, node: NodeId, label: &str) -> Result<Vec<Edge>> {
+    pub fn incoming_edges_by_label_in_txn(
+        &self,
+        txn_id: u64,
+        node: NodeId,
+        label: &str,
+    ) -> Result<Vec<Edge>> {
         if !self.node_exists.contains(&node.0) {
             return Err(Error::NodeNotFound(node));
         }
         let start_ts = self.txn_start_ts(txn_id)?;
-        self.edges_for_direction_by_label(node.0, AdjDirection::Incoming, label, start_ts, Some(txn_id))
+        self.edges_for_direction_by_label(
+            node.0,
+            AdjDirection::Incoming,
+            label,
+            start_ts,
+            Some(txn_id),
+        )
     }
 
     /// Returns a [`NeighborQuery`](crate::query::neighbor::NeighborQuery) builder
@@ -2944,7 +3026,10 @@ impl Graph {
     /// assert_eq!(visited, vec![a, b]);
     /// ```
     #[must_use]
-    pub const fn traverse(&self, start: NodeId) -> crate::query::traversal::TraversalBuilder<'_, Self> {
+    pub const fn traverse(
+        &self,
+        start: NodeId,
+    ) -> crate::query::traversal::TraversalBuilder<'_, Self> {
         crate::query::traversal::TraversalBuilder::new(self, start)
     }
 
@@ -3210,7 +3295,9 @@ impl Graph {
             // resolve_adj_pointer, which reads both heads from the node slot —
             // necessary to preserve preexisting edges for nodes whose cache entry
             // was evicted. That cost only applies to evicted entries.
-            let ptr = latest_ptr.get(&node_id).copied()
+            let ptr = latest_ptr
+                .get(&node_id)
+                .copied()
                 .or_else(|| self.adj_cache.get(node_id))
                 .or_else(|| self.resolve_adj_pointer(node_id).ok().flatten())
                 .unwrap_or(AdjacencyPointer {
@@ -3336,7 +3423,10 @@ impl Graph {
         let prop_overflow_ref = node_codec::slot_prop_overflow_ref(&slot);
 
         let resolved_label = if node_codec::slot_needs_label_resolve(&slot) {
-            Some(self.string_heap.resolve(self.storage.as_ref(), label_overflow_ref)?)
+            Some(
+                self.string_heap
+                    .resolve(self.storage.as_ref(), label_overflow_ref)?,
+            )
         } else {
             None
         };
@@ -3353,16 +3443,20 @@ impl Graph {
         let node = node_codec::decode_node_slot(
             &slot,
             page_idx,
-            |_| resolved_label.clone().ok_or(Error::CorruptPage {
-                file: "nodes.db",
-                page_id: page_idx,
-                reason: "label resolver called but label was not pre-resolved",
-            }),
-            |_| resolved_props.clone().ok_or(Error::CorruptPage {
-                file: "nodes.db",
-                page_id: page_idx,
-                reason: "props resolver called but props were not pre-resolved",
-            }),
+            |_| {
+                resolved_label.clone().ok_or(Error::CorruptPage {
+                    file: "nodes.db",
+                    page_id: page_idx,
+                    reason: "label resolver called but label was not pre-resolved",
+                })
+            },
+            |_| {
+                resolved_props.clone().ok_or(Error::CorruptPage {
+                    file: "nodes.db",
+                    page_id: page_idx,
+                    reason: "props resolver called but props were not pre-resolved",
+                })
+            },
         )?;
 
         node.ok_or(Error::NodeNotFound(NodeId(id)))
@@ -3379,7 +3473,10 @@ impl Graph {
         let label_overflow_ref = node_codec::slot_label_overflow_ref(&slot);
 
         let resolved_label = if node_codec::slot_needs_label_resolve(&slot) {
-            Some(self.string_heap.resolve(self.storage.as_ref(), label_overflow_ref)?)
+            Some(
+                self.string_heap
+                    .resolve(self.storage.as_ref(), label_overflow_ref)?,
+            )
         } else {
             None
         };
@@ -3399,16 +3496,20 @@ impl Graph {
         let node = node_codec::decode_node_slot_projected(
             &slot,
             page_idx,
-            |_| resolved_label.clone().ok_or(Error::CorruptPage {
-                file: "nodes.db",
-                page_id: page_idx,
-                reason: "label resolver called but label was not pre-resolved",
-            }),
-            |_| resolved_props.clone().ok_or(Error::CorruptPage {
-                file: "nodes.db",
-                page_id: page_idx,
-                reason: "props resolver called but props were not pre-resolved",
-            }),
+            |_| {
+                resolved_label.clone().ok_or(Error::CorruptPage {
+                    file: "nodes.db",
+                    page_id: page_idx,
+                    reason: "label resolver called but label was not pre-resolved",
+                })
+            },
+            |_| {
+                resolved_props.clone().ok_or(Error::CorruptPage {
+                    file: "nodes.db",
+                    page_id: page_idx,
+                    reason: "props resolver called but props were not pre-resolved",
+                })
+            },
             keys,
         )?;
 
@@ -3426,7 +3527,8 @@ impl Graph {
 
         if node_codec::slot_needs_label_resolve(&slot) {
             let label_overflow_ref = node_codec::slot_label_overflow_ref(&slot);
-            self.string_heap.resolve(self.storage.as_ref(), label_overflow_ref)
+            self.string_heap
+                .resolve(self.storage.as_ref(), label_overflow_ref)
         } else {
             node_codec::slot_inline_label(&slot, page_idx)
         }
@@ -3489,7 +3591,10 @@ impl Graph {
         let prop_overflow_ref = edge_codec::edge_slot_prop_overflow_ref(&slot);
 
         let resolved_label = if edge_codec::edge_slot_needs_label_resolve(&slot) {
-            Some(self.string_heap.resolve(self.storage.as_ref(), label_overflow_ref)?)
+            Some(
+                self.string_heap
+                    .resolve(self.storage.as_ref(), label_overflow_ref)?,
+            )
         } else {
             None
         };
@@ -3506,16 +3611,20 @@ impl Graph {
         let edge = edge_codec::decode_edge_slot(
             &slot,
             page_idx,
-            |_| resolved_label.clone().ok_or(Error::CorruptPage {
-                file: "edges.db",
-                page_id: page_idx,
-                reason: "label resolver called but label was not pre-resolved",
-            }),
-            |_| resolved_props.clone().ok_or(Error::CorruptPage {
-                file: "edges.db",
-                page_id: page_idx,
-                reason: "props resolver called but props were not pre-resolved",
-            }),
+            |_| {
+                resolved_label.clone().ok_or(Error::CorruptPage {
+                    file: "edges.db",
+                    page_id: page_idx,
+                    reason: "label resolver called but label was not pre-resolved",
+                })
+            },
+            |_| {
+                resolved_props.clone().ok_or(Error::CorruptPage {
+                    file: "edges.db",
+                    page_id: page_idx,
+                    reason: "props resolver called but props were not pre-resolved",
+                })
+            },
         )?;
 
         edge.ok_or(Error::EdgeNotFound(EdgeId(id)))
@@ -3589,10 +3698,12 @@ impl Graph {
         direction: AdjDirection,
         edge_id: u64,
     ) -> Result<()> {
-        let ptr = self.resolve_adj_pointer(node_id)?.unwrap_or(AdjacencyPointer {
-            outgoing_page: None,
-            incoming_page: None,
-        });
+        let ptr = self
+            .resolve_adj_pointer(node_id)?
+            .unwrap_or(AdjacencyPointer {
+                outgoing_page: None,
+                incoming_page: None,
+            });
         // Persist the pointer the append returns, not one re-read from adj_cache:
         // the cache evicts, so a re-read can miss and leave the slot at the
         // sentinel — the head lost, the chain unreachable (see flush_adj_pending).
@@ -3651,11 +3762,10 @@ impl Graph {
                         self.wal_log_adj_page(slab_page)?;
                         slab_page
                     }
-                    adj_slab_codec::AppendOutcome::NoRoom => {
-                        self.migrate_subblock_to_dedicated_chain(
+                    adj_slab_codec::AppendOutcome::NoRoom => self
+                        .migrate_subblock_to_dedicated_chain(
                             node_id, direction, slab_page, edge_ids,
-                        )?
-                    }
+                        )?,
                 }
             }
             // First edges in this direction, and too many to ever fit a slab page:
@@ -3701,7 +3811,12 @@ impl Graph {
     /// This is the read-side counterpart of [`Graph::append_and_update_caches`]; both
     /// formats share `DataFile::Adjacency` and the `TGAD` magic, so reading a head
     /// without checking its page type would parse one format as the other.
-    fn read_adj_edge_ids(&self, head: PageId, node_id: u64, direction: AdjDirection) -> Result<Vec<u64>> {
+    fn read_adj_edge_ids(
+        &self,
+        head: PageId,
+        node_id: u64,
+        direction: AdjDirection,
+    ) -> Result<Vec<u64>> {
         if adj_slab_codec::is_slab_page(self.storage.as_ref(), head)? {
             adj_slab_codec::read_subblock(self.storage.as_ref(), head, node_id, direction)
         } else {
@@ -3747,11 +3862,7 @@ impl Graph {
     /// The caller's write must not fail for lack of space, so the requested size is
     /// checked here rather than assumed — `write_subblock` treats "does not fit" as
     /// a corrupt-page error, not as a signal to allocate.
-    fn open_slab_page_for(
-        &mut self,
-        direction: AdjDirection,
-        edge_count: usize,
-    ) -> Result<PageId> {
+    fn open_slab_page_for(&mut self, direction: AdjDirection, edge_count: usize) -> Result<PageId> {
         let idx = direction as usize;
         if let Some(page_id) = self.open_slab[idx] {
             let page = self.storage.read_page(DataFile::Adjacency, page_id)?;
@@ -3810,11 +3921,7 @@ impl Graph {
     /// fan-in hot path pays no property re-serialization per edge). Reuses the
     /// auto-commit slot-write path so the page checksum and WAL log stay
     /// consistent.
-    fn persist_adj_pointer_to_slot(
-        &mut self,
-        node_id: u64,
-        ptr: AdjacencyPointer,
-    ) -> Result<()> {
+    fn persist_adj_pointer_to_slot(&mut self, node_id: u64, ptr: AdjacencyPointer) -> Result<()> {
         let (page_idx, slot_idx) = Self::page_and_slot(node_id);
         // The node's page may not be materialized yet: under MVCC, committing a
         // transaction reconciles a new edge's adjacency (this path) before the
@@ -3963,7 +4070,11 @@ impl Graph {
             )?;
             pid
         } else {
-            let record = AdjacencyRecord { node_id, direction, edge_ids };
+            let record = AdjacencyRecord {
+                node_id,
+                direction,
+                edge_ids,
+            };
             adjacency_codec::write_adjacency(self.storage.as_mut(), &record)?
         };
         self.wal_log_adj_page(new_page)?;
@@ -4323,10 +4434,13 @@ impl Graph {
     ) -> Result<Vec<u8>> {
         let (entity_id, kind) = entity;
         if prop_slab_codec::is_slab_page(self.storage.as_ref(), page_id).unwrap_or(false) {
-            return Ok(
-                prop_slab_codec::read_blob(self.storage.as_ref(), page_id, entity_id, kind)?
-                    .unwrap_or_default(),
-            );
+            return Ok(prop_slab_codec::read_blob(
+                self.storage.as_ref(),
+                page_id,
+                entity_id,
+                kind,
+            )?
+            .unwrap_or_default());
         }
         overflow_codec::read_overflow(self.storage.as_ref(), page_id)
     }
@@ -4359,7 +4473,13 @@ impl Graph {
         // Try the page last known to have room.
         if let Some(page_id) = self.prop_slab_open_page {
             if self.slab_page_has_room(page_id, bytes.len()) {
-                prop_slab_codec::write_blob(self.storage.as_mut(), page_id, entity_id, kind, bytes)?;
+                prop_slab_codec::write_blob(
+                    self.storage.as_mut(),
+                    page_id,
+                    entity_id,
+                    kind,
+                    bytes,
+                )?;
                 return Ok(page_id);
             }
         }
@@ -4577,7 +4697,9 @@ impl Graph {
             .delta_table
             .as_ref()
             .and_then(|t| t.oldest_delta_of_txn(key, txn_id));
-        let net_op = oldest.as_ref().map_or_else(|| delta.op(), crate::mvcc::Delta::op);
+        let net_op = oldest
+            .as_ref()
+            .map_or_else(|| delta.op(), crate::mvcc::Delta::op);
 
         match (key, net_op, delta.new_state()) {
             (EntityKey::Node(_), DeltaOp::Insert, Some(EntitySnapshot::Node(node))) => {
@@ -4646,7 +4768,12 @@ impl Graph {
         layout: SlotLayout,
         log_wal: bool,
     ) -> Result<()> {
-        let SlotLayout { slot_size, file, magic_bytes, page_type } = layout;
+        let SlotLayout {
+            slot_size,
+            file,
+            magic_bytes,
+            page_type,
+        } = layout;
         let (page_idx, slot_idx) = Self::page_and_slot(id);
 
         while self.storage.page_count(file) <= page_idx {
@@ -4699,7 +4826,12 @@ impl Graph {
         log_wal: bool,
         may_release: bool,
     ) -> Result<()> {
-        let SlotLayout { slot_size, file, magic_bytes, page_type } = layout;
+        let SlotLayout {
+            slot_size,
+            file,
+            magic_bytes,
+            page_type,
+        } = layout;
         if log_wal {
             self.wal_log_tombstone(file, id)?;
         }
@@ -4800,8 +4932,16 @@ impl Graph {
             return Ok(());
         }
         let record = match file {
-            DataFile::Nodes => WalRecord::TombstoneNode { lsn: 0, node_id: id, txn_id: None },
-            DataFile::Edges => WalRecord::TombstoneEdge { lsn: 0, edge_id: id, txn_id: None },
+            DataFile::Nodes => WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: id,
+                txn_id: None,
+            },
+            DataFile::Edges => WalRecord::TombstoneEdge {
+                lsn: 0,
+                edge_id: id,
+                txn_id: None,
+            },
             _ => return Ok(()),
         };
         self.storage.wal_append(record)
@@ -4960,7 +5100,10 @@ impl Graph {
         }
     }
 
-    fn count_used_slots_on_page(page: &[u8; crate::storage::page::PAGE_SIZE], slot_size: usize) -> u16 {
+    fn count_used_slots_on_page(
+        page: &[u8; crate::storage::page::PAGE_SIZE],
+        slot_size: usize,
+    ) -> u16 {
         let mut count: u16 = 0;
         for i in 0..SLOTS_PER_PAGE {
             let offset = PAGE_HEADER_SIZE + i * slot_size;
@@ -5031,8 +5174,8 @@ impl SharedGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::props;
     use crate::property::Property;
+    use crate::props;
     // Used by the WalObserver tests at the end of this module
     // (C1 of v0.6.0 Fase 2 Task 2). `Arc` is already re-exported via
     // `super::*` at module level; `Mutex` is not.
@@ -5137,7 +5280,11 @@ mod tests {
         let err = g.add_node("N", Properties::new()).unwrap_err();
         assert!(matches!(
             err,
-            Error::BatchLimitExceeded { kind: BatchLimitKind::Operations, current: 3, limit: 2 }
+            Error::BatchLimitExceeded {
+                kind: BatchLimitKind::Operations,
+                current: 3,
+                limit: 2
+            }
         ));
         g.end_batch().unwrap();
     }
@@ -5182,7 +5329,10 @@ mod tests {
         let err = g.add_node("N", Properties::new()).unwrap_err();
         assert!(matches!(
             err,
-            Error::BatchLimitExceeded { kind: BatchLimitKind::Bytes, .. }
+            Error::BatchLimitExceeded {
+                kind: BatchLimitKind::Bytes,
+                ..
+            }
         ));
         g.end_batch().unwrap();
     }
@@ -5193,7 +5343,13 @@ mod tests {
         g.set_batch_limits(None, Some(1)); // 1 byte: even the first add_node breaches it
         g.begin_batch();
         let err = g.add_node("N", Properties::new()).unwrap_err();
-        assert!(matches!(err, Error::BatchLimitExceeded { kind: BatchLimitKind::Bytes, .. }));
+        assert!(matches!(
+            err,
+            Error::BatchLimitExceeded {
+                kind: BatchLimitKind::Bytes,
+                ..
+            }
+        ));
         assert_eq!(g.node_count(), 0);
         assert_eq!(g.batch_byte_count, 0);
         // the op counter must not advance either when a byte rejection fires
@@ -5210,7 +5366,13 @@ mod tests {
         g.begin_batch();
         g.add_node("N", Properties::new()).unwrap();
         let err = g.add_node("N", Properties::new()).unwrap_err();
-        assert!(matches!(err, Error::BatchLimitExceeded { kind: BatchLimitKind::Operations, .. }));
+        assert!(matches!(
+            err,
+            Error::BatchLimitExceeded {
+                kind: BatchLimitKind::Operations,
+                ..
+            }
+        ));
         g.end_batch().unwrap();
     }
 
@@ -5504,7 +5666,8 @@ mod tests {
 
         let src = g.add_node("Src", props! {}).unwrap();
         let dst = g.add_node("Dst", props! {}).unwrap();
-        g.add_edge_in_txn(txn_a, "REL", src, dst, props! {}).unwrap();
+        g.add_edge_in_txn(txn_a, "REL", src, dst, props! {})
+            .unwrap();
         assert_eq!(g.outgoing_edges_in_txn(txn_a, src).unwrap().len(), 1);
         assert_eq!(g.outgoing_edges_in_txn(txn_b, src).unwrap().len(), 0);
     }
@@ -5533,13 +5696,19 @@ mod tests {
         let txn1 = g.begin_txn().unwrap();
         let committed = g.add_node_in_txn(txn1, "N", props! {}).unwrap();
         g.commit_txn(txn1).unwrap();
-        assert!(matches!(g.node_ids_in_txn(txn1), Err(Error::TxnNotActive(_))));
+        assert!(matches!(
+            g.node_ids_in_txn(txn1),
+            Err(Error::TxnNotActive(_))
+        ));
 
         // txn2 rolls back: its node must NOT survive anywhere.
         let txn2 = g.begin_txn().unwrap();
         let rolled_back = g.add_node_in_txn(txn2, "N2", props! {}).unwrap();
         g.rollback_txn(txn2).unwrap();
-        assert!(matches!(g.node_ids_in_txn(txn2), Err(Error::TxnNotActive(_))));
+        assert!(matches!(
+            g.node_ids_in_txn(txn2),
+            Err(Error::TxnNotActive(_))
+        ));
 
         // txn3 sees the committed node but never the rolled-back one, and no
         // stale overlay leaks from txn1/txn2 into it.
@@ -5570,7 +5739,10 @@ mod tests {
         g.enable_mvcc();
         let txn = g.begin_txn().unwrap();
         g.commit_txn(txn).unwrap();
-        assert!(matches!(g.node_ids_in_txn(txn), Err(Error::TxnNotActive(_))));
+        assert!(matches!(
+            g.node_ids_in_txn(txn),
+            Err(Error::TxnNotActive(_))
+        ));
     }
 
     #[test]
@@ -5621,7 +5793,10 @@ mod tests {
         let id = g.add_node("Person", props! {}).unwrap();
         let txn = g.begin_txn().unwrap();
         g.remove_node_in_txn(txn, id).unwrap();
-        assert!(matches!(g.node_in_txn(txn, id), Err(Error::NodeNotFound(_))));
+        assert!(matches!(
+            g.node_in_txn(txn, id),
+            Err(Error::NodeNotFound(_))
+        ));
         // Another (auto-commit) reader still sees it.
         assert!(g.node(id).is_ok());
     }
@@ -5675,9 +5850,7 @@ mod tests {
         let a = g.add_node_in_txn(txn, "A", props! {}).unwrap();
         let b = g.add_node_in_txn(txn, "B", props! {}).unwrap();
         // Endpoints exist only in this txn's uncommitted deltas.
-        let e = g
-            .add_edge_in_txn(txn, "LINK", a, b, props! {})
-            .unwrap();
+        let e = g.add_edge_in_txn(txn, "LINK", a, b, props! {}).unwrap();
         let edge = g.edge_in_txn(txn, e).unwrap();
         assert_eq!(edge.source(), a);
         assert_eq!(edge.target(), b);
@@ -5706,7 +5879,9 @@ mod tests {
         let e = g.add_edge("LINK", a, b, props! {"w" => 1i64}).unwrap();
         let txn = g.begin_txn().unwrap();
         let mut updated = g.edge(e).unwrap();
-        updated.properties_mut().insert("w".into(), Property::I64(2));
+        updated
+            .properties_mut()
+            .insert("w".into(), Property::I64(2));
         g.update_edge_in_txn(txn, e, &updated).unwrap();
 
         // Author sees the new weight; an auto-commit reader still sees the old.
@@ -5770,7 +5945,10 @@ mod tests {
         assert_eq!(g.node_label(id).unwrap(), "Person");
         assert_eq!(g.node_projected(id, &["name"]).unwrap().label(), "Person");
         assert_eq!(
-            g.node_projected(id, &["name"]).unwrap().properties().get("name"),
+            g.node_projected(id, &["name"])
+                .unwrap()
+                .properties()
+                .get("name"),
             Some(&Property::String("Alice".into()))
         );
     }
@@ -5900,14 +6078,20 @@ mod tests {
         g.remove_node_in_txn(t, id).unwrap();
         g.commit_txn(t).unwrap();
         assert!(g.node(id).is_err());
-        assert!(!g.node_exists(id), "insert+delete in one txn must not leave category B");
+        assert!(
+            !g.node_exists(id),
+            "insert+delete in one txn must not leave category B"
+        );
     }
 
     #[test]
     fn commit_txn_inactive_errors() {
         let mut g = Graph::new();
         g.enable_mvcc();
-        assert!(matches!(g.commit_txn(999).unwrap_err(), Error::TxnNotActive(999)));
+        assert!(matches!(
+            g.commit_txn(999).unwrap_err(),
+            Error::TxnNotActive(999)
+        ));
     }
 
     // ── QR Phase 4 fix #2/#3: commit durability across a crash ──────────
@@ -5990,7 +6174,9 @@ mod tests {
             g.enable_mvcc();
             let txn = g.begin_txn().unwrap();
             let mut updated = g.node_in_txn(txn, src).unwrap();
-            updated.properties_mut().insert("touched".to_owned(), Property::I64(1));
+            updated
+                .properties_mut()
+                .insert("touched".to_owned(), Property::I64(1));
             g.update_node_in_txn(txn, src, &updated).unwrap();
             g.commit_txn(txn).unwrap();
             (src, dst, ptr)
@@ -6074,7 +6260,12 @@ mod tests {
         fn read_page(&self, file: DataFile, page_id: u32) -> Result<crate::storage::page::PageBuf> {
             self.inner.read_page(file, page_id)
         }
-        fn write_page(&mut self, file: DataFile, page_id: u32, data: &crate::storage::page::PageBuf) -> Result<()> {
+        fn write_page(
+            &mut self,
+            file: DataFile,
+            page_id: u32,
+            data: &crate::storage::page::PageBuf,
+        ) -> Result<()> {
             self.inner.write_page(file, page_id, data)
         }
         fn allocate_page(&mut self, file: DataFile) -> Result<u32> {
@@ -6179,7 +6370,10 @@ mod tests {
         assert!(matches!(err, Error::WalCorrupt(_)));
         // The delta was NOT made visible (no split-brain: nothing durable, so
         // nothing visible), and the transaction is still active for retry/rollback.
-        assert!(g.txn_is_active(txn), "failed commit must keep the txn active");
+        assert!(
+            g.txn_is_active(txn),
+            "failed commit must keep the txn active"
+        );
         assert!(
             g.node(id).is_err(),
             "failed commit must not make the delta visible to auto-commit readers"
@@ -6281,7 +6475,10 @@ mod tests {
         assert_eq!(freed, 0);
         // old_reader still sees its snapshot "Alice".
         assert_eq!(
-            g.node_in_txn(old_reader, id).unwrap().properties().get("name"),
+            g.node_in_txn(old_reader, id)
+                .unwrap()
+                .properties()
+                .get("name"),
             Some(&Property::String("Alice".into()))
         );
         g.rollback_txn(old_reader).unwrap();
@@ -6292,7 +6489,9 @@ mod tests {
         let mut g = Graph::new();
         g.enable_mvcc();
         let txn = g.begin_txn().unwrap();
-        let id = g.add_node_in_txn(txn, "City", props! {"name" => "Paris"}).unwrap();
+        let id = g
+            .add_node_in_txn(txn, "City", props! {"name" => "Paris"})
+            .unwrap();
         g.commit_txn(txn).unwrap();
         assert_eq!(g.node_count(), 1, "committed insert counts once visible");
 
@@ -6356,10 +6555,16 @@ mod tests {
         // is a plain set operation on the results.
         let mut g = Graph::new();
         // scope A events at various valid_from.
-        let a1 = g.add_node("Event", props! {"scope" => 1i64, "vf" => 100i64}).unwrap();
-        let a2 = g.add_node("Event", props! {"scope" => 1i64, "vf" => 250i64}).unwrap();
+        let a1 = g
+            .add_node("Event", props! {"scope" => 1i64, "vf" => 100i64})
+            .unwrap();
+        let a2 = g
+            .add_node("Event", props! {"scope" => 1i64, "vf" => 250i64})
+            .unwrap();
         // scope B event inside the same vf range — must be excluded by the scope.
-        let _b = g.add_node("Event", props! {"scope" => 2i64, "vf" => 120i64}).unwrap();
+        let _b = g
+            .add_node("Event", props! {"scope" => 2i64, "vf" => 120i64})
+            .unwrap();
 
         let in_scope: std::collections::HashSet<NodeId> = g
             .nodes_by_label_and_property("Event", "scope", &Property::I64(1))
@@ -6379,7 +6584,9 @@ mod tests {
         let mut g = Graph::new();
         // "open" events have no valid_to; "closed" events have one.
         let open = g.add_node("Event", props! {"vf" => 10i64}).unwrap();
-        let _closed = g.add_node("Event", props! {"vf" => 20i64, "valid_to" => 99i64}).unwrap();
+        let _closed = g
+            .add_node("Event", props! {"vf" => 20i64, "valid_to" => 99i64})
+            .unwrap();
         assert_eq!(
             g.nodes_by_label_without_property("Event", "valid_to"),
             vec![open],
@@ -6390,7 +6597,10 @@ mod tests {
     #[test]
     fn nodes_without_property_empty_label_is_empty() {
         let g = Graph::new();
-        assert!(g.nodes_by_label_without_property("Event", "valid_to").is_empty());
+        assert!(
+            g.nodes_by_label_without_property("Event", "valid_to")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -6403,7 +6613,10 @@ mod tests {
         g.remove_node_in_txn(t, gone).unwrap();
         g.commit_txn(t).unwrap();
         // `gone` had no valid_to, but it's committed-deleted → must not appear.
-        assert_eq!(g.nodes_by_label_without_property("Event", "valid_to"), vec![keep]);
+        assert_eq!(
+            g.nodes_by_label_without_property("Event", "valid_to"),
+            vec![keep]
+        );
     }
 
     #[test]
@@ -6417,7 +6630,9 @@ mod tests {
         // Open event, started after T → not valid at T.
         let _open_after = g.add_node("Event", props! {"vf" => 900i64}).unwrap();
         // Closed event (has valid_to) → not in the "open" arm.
-        let _closed = g.add_node("Event", props! {"vf" => 50i64, "valid_to" => 400i64}).unwrap();
+        let _closed = g
+            .add_node("Event", props! {"vf" => 50i64, "valid_to" => 400i64})
+            .unwrap();
 
         let t = 500;
         let started_by_t: std::collections::HashSet<NodeId> = g
@@ -6450,8 +6665,13 @@ mod tests {
 
         // Range: both must return the same set.
         let mut idx_range = g.nodes_by_label_and_property_range("Event", "seq", Some(10), Some(60));
-        let mut def_range =
-            GraphAccess::nodes_by_label_and_property_range(&view, "Event", "seq", Some(10), Some(60));
+        let mut def_range = GraphAccess::nodes_by_label_and_property_range(
+            &view,
+            "Event",
+            "seq",
+            Some(10),
+            Some(60),
+        );
         idx_range.sort_unstable_by_key(|n| n.0);
         def_range.sort_unstable_by_key(|n| n.0);
         assert_eq!(idx_range, def_range);
@@ -6563,9 +6783,12 @@ mod tests {
         let mut g = Graph::new();
         g.enable_mvcc();
         let t = g.begin_txn().unwrap();
-        let id = g.add_node_in_txn(t, "Event", props! {"seq" => 42i64}).unwrap();
+        let id = g
+            .add_node_in_txn(t, "Event", props! {"seq" => 42i64})
+            .unwrap();
         assert!(
-            g.nodes_by_label_and_property_range("Event", "seq", None, None).is_empty(),
+            g.nodes_by_label_and_property_range("Event", "seq", None, None)
+                .is_empty(),
             "pending txn insert must not appear before commit"
         );
         g.commit_txn(t).unwrap();
@@ -6611,16 +6834,19 @@ mod tests {
             .insert("name".into(), Property::String("Bob".into()));
         g.update_node_in_txn(t, id, &n).unwrap();
         g.commit_txn(t).unwrap();
-        assert!(g
-            .nodes_by_label_and_property("Person", "name", &Property::String("Bob".into()))
-            .contains(&id));
+        assert!(
+            g.nodes_by_label_and_property("Person", "name", &Property::String("Bob".into()))
+                .contains(&id)
+        );
         g.vacuum_once().unwrap();
-        assert!(!g
-            .nodes_by_label_and_property("Person", "name", &Property::String("Alice".into()))
-            .contains(&id));
-        assert!(g
-            .nodes_by_label_and_property("Person", "name", &Property::String("Bob".into()))
-            .contains(&id));
+        assert!(
+            !g.nodes_by_label_and_property("Person", "name", &Property::String("Alice".into()))
+                .contains(&id)
+        );
+        assert!(
+            g.nodes_by_label_and_property("Person", "name", &Property::String("Bob".into()))
+                .contains(&id)
+        );
     }
 
     #[test]
@@ -6773,7 +6999,8 @@ mod tests {
         let id = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
         let mut node = g.node(id).unwrap();
         // Modifying the returned node should NOT affect the graph
-        node.properties_mut().insert("age".into(), Property::I64(30));
+        node.properties_mut()
+            .insert("age".into(), Property::I64(30));
         let node2 = g.node(id).unwrap();
         assert!(!node2.properties().contains_key("age"));
     }
@@ -6783,7 +7010,8 @@ mod tests {
         let mut g = Graph::new();
         let id = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
         let mut node = g.node(id).unwrap();
-        node.properties_mut().insert("age".into(), Property::I64(30));
+        node.properties_mut()
+            .insert("age".into(), Property::I64(30));
         g.update_node(id, &node).unwrap();
         let updated = g.node(id).unwrap();
         assert_eq!(updated.properties().get("age"), Some(&Property::I64(30)));
@@ -6809,11 +7037,15 @@ mod tests {
         let eid = g.add_edge("R", a, b, props! {}).unwrap();
 
         let mut edge = g.edge(eid).unwrap();
-        edge.properties_mut().insert("weight".into(), Property::F64(1.5));
+        edge.properties_mut()
+            .insert("weight".into(), Property::F64(1.5));
         g.update_edge(eid, &edge).unwrap();
 
         let updated = g.edge(eid).unwrap();
-        assert_eq!(updated.properties().get("weight"), Some(&Property::F64(1.5)));
+        assert_eq!(
+            updated.properties().get("weight"),
+            Some(&Property::F64(1.5))
+        );
     }
 
     #[test]
@@ -6835,7 +7067,10 @@ mod tests {
         let removed = g.remove_node(id).unwrap();
         assert_eq!(removed.id(), id);
         assert_eq!(removed.label(), "Person");
-        assert_eq!(removed.properties().get("name"), Some(&Property::String("Alice".into())));
+        assert_eq!(
+            removed.properties().get("name"),
+            Some(&Property::String("Alice".into()))
+        );
     }
 
     #[test]
@@ -6905,7 +7140,10 @@ mod tests {
         assert_eq!(g.node_count(), 35);
         for (i, id) in ids.iter().enumerate() {
             let node = g.node(*id).unwrap();
-            assert_eq!(node.properties().get("i"), Some(&Property::I64(i64::try_from(i).unwrap())));
+            assert_eq!(
+                node.properties().get("i"),
+                Some(&Property::I64(i64::try_from(i).unwrap()))
+            );
         }
     }
 
@@ -6922,7 +7160,10 @@ mod tests {
         assert_eq!(g.edge_count(), 35);
         for (i, eid) in ids.iter().enumerate() {
             let edge = g.edge(*eid).unwrap();
-            assert_eq!(edge.properties().get("i"), Some(&Property::I64(i64::try_from(i).unwrap())));
+            assert_eq!(
+                edge.properties().get("i"),
+                Some(&Property::I64(i64::try_from(i).unwrap()))
+            );
         }
     }
 
@@ -6993,7 +7234,6 @@ mod tests {
 
     #[test]
     fn rebuild_respects_header_slot_count() {
-
         // Create a MemoryBackend with one node page
         let mut backend = crate::storage::memory::MemoryBackend::new();
         backend.allocate_page(DataFile::Nodes).unwrap();
@@ -7068,13 +7308,10 @@ mod tests {
     }
 
     impl StorageBackend for AdjReadCountingBackend {
-        fn read_page(
-            &self,
-            file: DataFile,
-            page_id: u32,
-        ) -> Result<crate::storage::page::PageBuf> {
+        fn read_page(&self, file: DataFile, page_id: u32) -> Result<crate::storage::page::PageBuf> {
             if file == DataFile::Adjacency {
-                self.adj_reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.adj_reads
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             self.inner.read_page(file, page_id)
         }
@@ -7085,7 +7322,8 @@ mod tests {
             data: &crate::storage::page::PageBuf,
         ) -> Result<()> {
             if file == DataFile::Nodes {
-                self.node_writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                self.node_writes
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             self.inner.write_page(file, page_id, data)
         }
@@ -7229,7 +7467,12 @@ mod tests {
             let t = g.add_node("T", Properties::default()).unwrap();
             expected.push(g.add_edge("R", hub, t, Properties::default()).unwrap().0);
         }
-        let slab_head = g.resolve_adj_pointer(hub.0).unwrap().unwrap().outgoing_page.unwrap();
+        let slab_head = g
+            .resolve_adj_pointer(hub.0)
+            .unwrap()
+            .unwrap()
+            .outgoing_page
+            .unwrap();
         assert!(
             adj_slab_codec::is_slab_page(g.storage.as_ref(), slab_head).unwrap(),
             "a degree-2 node must start out packed into a slab"
@@ -7238,7 +7481,11 @@ mod tests {
         // Grow it edge by edge until it no longer fits the slab.
         while adj_slab_codec::is_slab_page(
             g.storage.as_ref(),
-            g.resolve_adj_pointer(hub.0).unwrap().unwrap().outgoing_page.unwrap(),
+            g.resolve_adj_pointer(hub.0)
+                .unwrap()
+                .unwrap()
+                .outgoing_page
+                .unwrap(),
         )
         .unwrap()
         {
@@ -7247,14 +7494,24 @@ mod tests {
             assert!(expected.len() < 10_000, "node never migrated off the slab");
         }
 
-        let head = g.resolve_adj_pointer(hub.0).unwrap().unwrap().outgoing_page.unwrap();
+        let head = g
+            .resolve_adj_pointer(hub.0)
+            .unwrap()
+            .unwrap()
+            .outgoing_page
+            .unwrap();
         assert!(
             !adj_slab_codec::is_slab_page(g.storage.as_ref(), head).unwrap(),
             "a node that outgrew the slab must now be on a dedicated chain"
         );
 
         // Every edge survived the move, oldest first.
-        let edge_ids: Vec<u64> = g.outgoing_edges(hub).unwrap().iter().map(|e| e.id.0).collect();
+        let edge_ids: Vec<u64> = g
+            .outgoing_edges(hub)
+            .unwrap()
+            .iter()
+            .map(|e| e.id.0)
+            .collect();
         assert_eq!(
             edge_ids, expected,
             "migration must preserve all edges in order, pre-migration ones first"
@@ -7262,8 +7519,13 @@ mod tests {
 
         // The vacated sub-block is gone from the origin slab, which stays a slab.
         assert!(
-            adj_slab_codec::read_subblock(g.storage.as_ref(), slab_head, hub.0, AdjDirection::Outgoing)
-                .is_err(),
+            adj_slab_codec::read_subblock(
+                g.storage.as_ref(),
+                slab_head,
+                hub.0,
+                AdjDirection::Outgoing
+            )
+            .is_err(),
             "the migrated node's sub-block must no longer be listed on the slab"
         );
         assert!(
@@ -7302,7 +7564,10 @@ mod tests {
         // tracks the product rather than a number frozen in a test.
         let cfg = GraphConfig::default();
         let pool_pages = cfg.memory_limit_bytes / PAGE_SIZE;
-        assert_eq!(pool_pages, 16_384, "guard assumes the documented default pool");
+        assert_eq!(
+            pool_pages, 16_384,
+            "guard assumes the documented default pool"
+        );
 
         let dir = TempDir::new().unwrap();
         let mut g = Graph::open(dir.path(), &cfg).unwrap();
@@ -7313,7 +7578,8 @@ mod tests {
         g.begin_batch();
         for i in 0..N {
             let src = g.add_node("Src", Properties::default()).unwrap();
-            g.add_edge("rel", src, sinks[i % SINKS], Properties::default()).unwrap();
+            g.add_edge("rel", src, sinks[i % SINKS], Properties::default())
+                .unwrap();
         }
         g.end_batch().unwrap();
 
@@ -7368,7 +7634,8 @@ mod tests {
             .collect();
         for i in 0..N {
             let src = g.add_node("Src", Properties::default()).unwrap();
-            g.add_edge("rel", src, sinks[i % SINKS], Properties::default()).unwrap();
+            g.add_edge("rel", src, sinks[i % SINKS], Properties::default())
+                .unwrap();
         }
 
         let adj_pages = g.storage.page_count(DataFile::Adjacency) as usize;
@@ -7380,12 +7647,23 @@ mod tests {
 
         // Density is worthless if it loses edges: the sinks together must account
         // for all N.
-        let total: usize = sinks.iter().map(|&s| g.incoming_edges(s).unwrap().len()).sum();
-        assert_eq!(total, N, "every edge must survive the packing and the migrations");
+        let total: usize = sinks
+            .iter()
+            .map(|&s| g.incoming_edges(s).unwrap().len())
+            .sum();
+        assert_eq!(
+            total, N,
+            "every edge must survive the packing and the migrations"
+        );
 
         // The sinks are high-degree, so each must have left the slab.
         for &sink in &sinks {
-            let head = g.resolve_adj_pointer(sink.0).unwrap().unwrap().incoming_page.unwrap();
+            let head = g
+                .resolve_adj_pointer(sink.0)
+                .unwrap()
+                .unwrap()
+                .incoming_page
+                .unwrap();
             assert!(
                 !adj_slab_codec::is_slab_page(g.storage.as_ref(), head).unwrap(),
                 "a sink holding {} edges must have migrated to a dedicated chain",
@@ -7503,14 +7781,26 @@ mod tests {
             let mut ids = Vec::new();
             for _ in 0..20 {
                 let tgt = g.add_node("T", Properties::default()).unwrap();
-                ids.push(g.add_edge("KNOWS", src, tgt, Properties::default()).unwrap().0);
+                ids.push(
+                    g.add_edge("KNOWS", src, tgt, Properties::default())
+                        .unwrap()
+                        .0,
+                );
             }
             expected.push((src, ids));
         }
 
         for (src, ids) in expected {
-            let got: Vec<u64> = g.outgoing_edges(src).unwrap().iter().map(|e| e.id.0).collect();
-            assert_eq!(got, ids, "every degree-20 node must read back all its edges, in order");
+            let got: Vec<u64> = g
+                .outgoing_edges(src)
+                .unwrap()
+                .iter()
+                .map(|e| e.id.0)
+                .collect();
+            assert_eq!(
+                got, ids,
+                "every degree-20 node must read back all its edges, in order"
+            );
         }
     }
 
@@ -7655,7 +7945,10 @@ mod tests {
         let mut g = Graph::new();
         g.add_node("Person", Properties::default()).unwrap();
         let adj_pages = g.storage.page_count(DataFile::Adjacency);
-        assert_eq!(adj_pages, 0, "add_node must not pre-allocate adjacency pages");
+        assert_eq!(
+            adj_pages, 0,
+            "add_node must not pre-allocate adjacency pages"
+        );
     }
 
     #[test]
@@ -7751,9 +8044,7 @@ mod tests {
         let n = 10_000_u64;
         let start = Instant::now();
         for _ in 0..n {
-            g.write()
-                .add_node("N", Properties::default())
-                .unwrap();
+            g.write().add_node("N", Properties::default()).unwrap();
         }
         let elapsed = start.elapsed();
         #[allow(clippy::cast_precision_loss)]
@@ -7876,7 +8167,11 @@ mod tests {
         );
         g.adj_cache.remove(a.0);
         g.adj_cache.remove(b.0);
-        assert_eq!(g.outgoing_edges(a).unwrap().len(), 1, "edge reachable from slot after vacuum");
+        assert_eq!(
+            g.outgoing_edges(a).unwrap().len(),
+            1,
+            "edge reachable from slot after vacuum"
+        );
         assert_eq!(g.incoming_edges(b).unwrap().len(), 1);
     }
 
@@ -7909,8 +8204,14 @@ mod tests {
 
         let out = g.resolve_adj_pointer(src.0).unwrap();
         let inc = g.resolve_adj_pointer(dst.0).unwrap();
-        assert!(out.unwrap().outgoing_page.is_some(), "source has an outgoing head");
-        assert!(inc.unwrap().incoming_page.is_some(), "destination has an incoming head");
+        assert!(
+            out.unwrap().outgoing_page.is_some(),
+            "source has an outgoing head"
+        );
+        assert!(
+            inc.unwrap().incoming_page.is_some(),
+            "destination has an incoming head"
+        );
 
         assert_eq!(
             adj_reads.load(Relaxed),
@@ -8003,7 +8304,10 @@ mod tests {
         let b = g.add_node("B", Properties::default()).unwrap();
         g.add_edge("R", a, b, Properties::default()).unwrap();
         let ptr = g.adj_pointer(a).unwrap();
-        assert!(ptr.is_some(), "node with edges must have an adjacency pointer");
+        assert!(
+            ptr.is_some(),
+            "node with edges must have an adjacency pointer"
+        );
         assert!(ptr.unwrap().outgoing_page.is_some());
     }
 
@@ -8117,7 +8421,10 @@ mod tests {
         // a stale tail state that a later append would trust.
         g.set_adj_pointer(
             a,
-            AdjacencyPointer { outgoing_page: Some(123), incoming_page: None },
+            AdjacencyPointer {
+                outgoing_page: Some(123),
+                incoming_page: None,
+            },
         );
         assert!(
             g.adj_tail_cache.get(a.0, AdjDirection::Outgoing).is_none(),
@@ -8159,8 +8466,11 @@ mod tests {
     #[test]
     fn property_index_populated_on_add_node() {
         let mut g = Graph::new();
-        let id = g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 }).unwrap();
-        let ids = g.nodes_by_label_and_property("Person", "name", &Property::String("Alice".into()));
+        let id = g
+            .add_node("Person", props! { "name" => "Alice", "age" => 30i64 })
+            .unwrap();
+        let ids =
+            g.nodes_by_label_and_property("Person", "name", &Property::String("Alice".into()));
         assert_eq!(ids, vec![id]);
         let ids2 = g.nodes_by_label_and_property("Person", "age", &Property::I64(30));
         assert_eq!(ids2, vec![id]);
@@ -8178,7 +8488,9 @@ mod tests {
     #[test]
     fn property_index_updated_on_update_node() {
         let mut g = Graph::new();
-        let id = g.add_node("Person", props! { "status" => "junior" }).unwrap();
+        let id = g
+            .add_node("Person", props! { "status" => "junior" })
+            .unwrap();
 
         // Verify initial state
         assert_eq!(
@@ -8219,18 +8531,15 @@ mod tests {
         // Reopen — property index must be rebuilt from disk.
         let g2 = Graph::open(dir.path(), &config).unwrap();
 
-        let by_serial = g2.nodes_by_label_and_property(
-            "Device",
-            "serial",
-            &Property::String("SN-001".into()),
+        let by_serial =
+            g2.nodes_by_label_and_property("Device", "serial", &Property::String("SN-001".into()));
+        assert_eq!(
+            by_serial,
+            vec![node_id],
+            "property index must survive reopen"
         );
-        assert_eq!(by_serial, vec![node_id], "property index must survive reopen");
 
-        let by_active = g2.nodes_by_label_and_property(
-            "Device",
-            "active",
-            &Property::Bool(true),
-        );
+        let by_active = g2.nodes_by_label_and_property("Device", "active", &Property::Bool(true));
         assert_eq!(by_active, vec![node_id]);
     }
 
@@ -8365,12 +8674,8 @@ mod tests {
         let obs: WalObserver = Box::new(move |_c: FsyncCause, _d: std::time::Duration| {
             *called_clone.lock().unwrap() = true;
         });
-        let _graph = Graph::open_with_wal_observer(
-            tmp.path(),
-            &GraphConfig::default(),
-            obs,
-        )
-        .expect("open_with_wal_observer failed");
+        let _graph = Graph::open_with_wal_observer(tmp.path(), &GraphConfig::default(), obs)
+            .expect("open_with_wal_observer failed");
         assert!(
             !*called.lock().unwrap(),
             "observer must not fire during open() — only during subsequent fsyncs",
@@ -8419,12 +8724,8 @@ mod tests {
         let obs: WalObserver = Box::new(move |_c: FsyncCause, d: std::time::Duration| {
             durations_clone.lock().unwrap().push(d);
         });
-        let mut g = Graph::open_with_wal_observer(
-            tmp.path(),
-            &GraphConfig::default(),
-            obs,
-        )
-        .expect("open");
+        let mut g =
+            Graph::open_with_wal_observer(tmp.path(), &GraphConfig::default(), obs).expect("open");
         g.add_node("X", Properties::default()).unwrap();
         let recorded = durations.lock().unwrap().clone();
         assert!(
@@ -8450,12 +8751,8 @@ mod tests {
         let obs: WalObserver = Box::new(move |c: FsyncCause, _d: std::time::Duration| {
             causes_clone.lock().unwrap().push(c);
         });
-        let mut g = Graph::open_with_wal_observer(
-            tmp.path(),
-            &GraphConfig::default(),
-            obs,
-        )
-        .expect("open");
+        let mut g =
+            Graph::open_with_wal_observer(tmp.path(), &GraphConfig::default(), obs).expect("open");
         g.begin_batch();
         g.add_node("Y", Properties::default()).unwrap();
         g.add_node("Y", Properties::default()).unwrap();
@@ -8557,7 +8854,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mut g = Graph::open(tmp.path(), &GraphConfig::default()).unwrap();
         g.schema_catalog_mut().add_index("Asset", "id");
-        g.flush().expect("flush with non-empty schema catalog must not error");
+        g.flush()
+            .expect("flush with non-empty schema catalog must not error");
     }
 
     #[test]
@@ -8606,11 +8904,15 @@ mod tests {
         let mut updated_props = Properties::new();
         updated_props.insert("seq".to_string(), Property::I64(999));
         let txn = g.begin_txn().unwrap();
-        g.update_node_in_txn(txn, id, &Node::new(id, "Event", updated_props)).unwrap();
+        g.update_node_in_txn(txn, id, &Node::new(id, "Event", updated_props))
+            .unwrap();
         g.commit_txn(txn).unwrap();
 
         // Sanity: without the gate this node resolves its chain and reads 999.
-        assert_eq!(g.node(id).unwrap().properties().get("seq"), Some(&Property::I64(999)));
+        assert_eq!(
+            g.node(id).unwrap().properties().get("seq"),
+            Some(&Property::I64(999))
+        );
 
         // Now declare the label append-only and put the id on the fast path.
         g.schema_catalog_mut().mark_label_append_only("Event", 0);
@@ -8640,7 +8942,8 @@ mod tests {
         let mut updated_props = Properties::new();
         updated_props.insert("seq".to_string(), Property::I64(999));
         let txn = g.begin_txn().unwrap();
-        g.update_node_in_txn(txn, id, &Node::new(id, "Audit", updated_props)).unwrap();
+        g.update_node_in_txn(txn, id, &Node::new(id, "Audit", updated_props))
+            .unwrap();
         g.commit_txn(txn).unwrap();
 
         let read = g.node(id).unwrap();
@@ -8662,7 +8965,9 @@ mod tests {
         let before = g.storage.meta().next_node_id;
 
         let txn = g.begin_txn().unwrap();
-        let err = g.add_node_in_txn(txn, "Event", Properties::new()).unwrap_err();
+        let err = g
+            .add_node_in_txn(txn, "Event", Properties::new())
+            .unwrap_err();
 
         assert!(
             matches!(&err, Error::AppendOnlyLabelInTxn { label } if label == "Event"),
@@ -8702,10 +9007,12 @@ mod tests {
 
         let txn = g.begin_txn().unwrap();
         let other = g.add_node_in_txn(txn, "Actor", Properties::new()).unwrap();
-        g.add_edge_in_txn(txn, "EMITTED_BY", event, other, Properties::new()).unwrap();
+        g.add_edge_in_txn(txn, "EMITTED_BY", event, other, Properties::new())
+            .unwrap();
         let mut updated_props = Properties::new();
         updated_props.insert("v".to_string(), Property::I64(1));
-        g.update_node_in_txn(txn, other, &Node::new(other, "Actor", updated_props)).unwrap();
+        g.update_node_in_txn(txn, other, &Node::new(other, "Actor", updated_props))
+            .unwrap();
         g.commit_txn(txn).unwrap();
 
         assert_eq!(g.node(event).unwrap().label(), "Event");
@@ -8777,7 +9084,10 @@ mod tests {
             matches!(&err, Error::AppendOnlyLabelInTxn { label } if label == "Event"),
             "expected AppendOnlyLabelInTxn, got {err:?}"
         );
-        assert!(g.node(id).is_ok(), "the rejected remove must leave the node in place");
+        assert!(
+            g.node(id).is_ok(),
+            "the rejected remove must leave the node in place"
+        );
     }
 
     /// Cycle A7 contract: un-declaring a label frees *future* nodes of that
@@ -8847,7 +9157,9 @@ mod tests {
 
         let event = g.add_node_str("Event", Properties::new()).unwrap();
         let actor = g.add_node_str("Actor", Properties::new()).unwrap();
-        let edge = g.add_edge("EMITTED_BY", event, actor, Properties::new()).unwrap();
+        let edge = g
+            .add_edge("EMITTED_BY", event, actor, Properties::new())
+            .unwrap();
 
         let read = g.edge(edge).unwrap();
         assert_eq!(read.source(), event);
@@ -8952,7 +9264,10 @@ mod tests {
         g.remove_node_in_txn(txn, id)
             .expect("a freed node must be transactionally mutable at once");
         g.commit_txn(txn).expect("commit must succeed");
-        assert!(g.node(id).is_err(), "the delete must be visible after commit");
+        assert!(
+            g.node(id).is_err(),
+            "the delete must be visible after commit"
+        );
     }
 
     #[test]
@@ -9097,7 +9412,12 @@ mod tests {
         assert_eq!(g.outgoing_edges_by_label(a, "KNOWS").unwrap().len(), 1);
         assert_eq!(g.outgoing_edges_by_label(a, "OTHER").unwrap().len(), 0);
         // Old snapshot sees nothing.
-        assert_eq!(g.outgoing_edges_by_label_in_txn(old, a, "KNOWS").unwrap().len(), 0);
+        assert_eq!(
+            g.outgoing_edges_by_label_in_txn(old, a, "KNOWS")
+                .unwrap()
+                .len(),
+            0
+        );
         g.rollback_txn(old).unwrap();
     }
 }
@@ -9197,7 +9517,9 @@ mod constraint_enforcement_tests {
     #[test]
     fn edges_between_unknown_node_errors() {
         let g = Graph::new();
-        let err = g.edges_between(NodeId(999), NodeId(1000), "REL").unwrap_err();
+        let err = g
+            .edges_between(NodeId(999), NodeId(1000), "REL")
+            .unwrap_err();
         assert!(matches!(err, Error::NodeNotFound(_)));
     }
 
@@ -9222,7 +9544,8 @@ mod constraint_enforcement_tests {
         let a = g.add_node("N", Properties::new()).unwrap();
         let b = g.add_node("N", Properties::new()).unwrap();
         let w = g.begin_txn().unwrap();
-        g.add_edge_in_txn(w, "REL", a, b, Properties::new()).unwrap();
+        g.add_edge_in_txn(w, "REL", a, b, Properties::new())
+            .unwrap();
         g.commit_txn(w).unwrap();
         // Auto-commit reader (new snapshot) sees it.
         assert_eq!(g.edges_between(a, b, "REL").unwrap().len(), 1);
@@ -9318,7 +9641,10 @@ mod constraint_enforcement_tests {
         g.add_edge("L1", a, b, Properties::new()).unwrap();
 
         let found = g.edges_between(a, b, "L2").unwrap();
-        assert!(found.is_empty(), "edges_between debe filtrar por label exacto");
+        assert!(
+            found.is_empty(),
+            "edges_between debe filtrar por label exacto"
+        );
         assert!(!g.has_edge(a, b, "L2").unwrap());
 
         // La arista "L1" sigue encontrándose por su propio label.
@@ -9366,7 +9692,11 @@ mod constraint_enforcement_tests {
 
         for &t in &targets {
             let found = g.edges_between(from, t, "REL").unwrap();
-            assert_eq!(found.len(), 1, "target {t:?} debe resolver a exactamente 1 arista");
+            assert_eq!(
+                found.len(),
+                1,
+                "target {t:?} debe resolver a exactamente 1 arista"
+            );
             assert_eq!(found[0].source, from);
             assert_eq!(found[0].target, t);
         }
@@ -9586,8 +9916,7 @@ mod constraint_enforcement_tests {
         let small_dir = tempfile::tempdir().unwrap();
         let default_dir = tempfile::tempdir().unwrap();
 
-        let mut small =
-            Graph::open(small_dir.path(), &config_with_threshold(Some(4096))).unwrap();
+        let mut small = Graph::open(small_dir.path(), &config_with_threshold(Some(4096))).unwrap();
         let mut with_default = Graph::open(default_dir.path(), &GraphConfig::default()).unwrap();
 
         write_batch_past_threshold(&mut small, 500);
@@ -9625,7 +9954,10 @@ mod constraint_enforcement_tests {
         }
 
         let wal_before_flush = file_size(&wal);
-        assert!(wal_before_flush > 0, "the writes must be durable in the journal");
+        assert!(
+            wal_before_flush > 0,
+            "the writes must be durable in the journal"
+        );
 
         g.flush().unwrap();
 
@@ -9633,7 +9965,10 @@ mod constraint_enforcement_tests {
             file_size(&wal) < wal_before_flush,
             "disabling the automatic checkpoint must not break the explicit one"
         );
-        assert!(file_size(&nodes) > 0, "flush must still materialise the data");
+        assert!(
+            file_size(&nodes) > 0,
+            "flush must still materialise the data"
+        );
     }
 
     /// A graph with no journal has nothing to bound. It must ignore the
@@ -9706,8 +10041,7 @@ mod constraint_enforcement_tests {
         );
 
         drop(g);
-        let reopened =
-            Graph::open(tmp.path(), &config_with_threshold(Some(4096))).unwrap();
+        let reopened = Graph::open(tmp.path(), &config_with_threshold(Some(4096))).unwrap();
         assert_eq!(
             reopened.nodes_by_label("Tx").len(),
             1,
@@ -9765,8 +10099,7 @@ mod constraint_enforcement_tests {
         );
 
         drop(g);
-        let reopened =
-            Graph::open(tmp.path(), &config_with_threshold(Some(THRESHOLD))).unwrap();
+        let reopened = Graph::open(tmp.path(), &config_with_threshold(Some(THRESHOLD))).unwrap();
         assert_eq!(
             reopened.nodes_by_label("Res").len(),
             expected,
@@ -9859,7 +10192,6 @@ mod constraint_enforcement_tests {
         );
     }
 
-
     // ---- Cycle 6: adjacency pointer persisted in the node slot (#54) --------
 
     #[test]
@@ -9936,7 +10268,9 @@ mod constraint_enforcement_tests {
         // vacuum re-serializes still knows where the edges are.
         let txn = g.begin_txn().unwrap();
         let mut updated = g.node_in_txn(txn, a).unwrap();
-        updated.properties_mut().insert("v".to_owned(), Property::I64(2));
+        updated
+            .properties_mut()
+            .insert("v".to_owned(), Property::I64(2));
         g.update_node_in_txn(txn, a, &updated).unwrap();
         g.commit_txn(txn).unwrap();
         g.vacuum_once().unwrap();
@@ -9956,4 +10290,3 @@ mod constraint_enforcement_tests {
         assert_eq!(g.outgoing_edges(a).unwrap().len(), 1);
     }
 }
-

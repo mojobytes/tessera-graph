@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 
 use crate::errors;
 
 /// Graph traversal direction.
-#[pyclass(name = "Direction", frozen, eq, hash)]
+#[pyclass(name = "Direction", frozen, eq, hash, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PyDirection {
     #[pyo3(name = "OUTGOING")]

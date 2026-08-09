@@ -71,8 +71,7 @@ pub fn dispatch_call(
         ProcedureKind::Snapshot | ProcedureKind::Restore => {
             return Err((
                 "Neo.ClientError.Statement.ExecutionFailed".to_owned(),
-                "admin backup procedure routed to the read-only call handler"
-                    .to_owned(),
+                "admin backup procedure routed to the read-only call handler".to_owned(),
             ));
         }
     };
@@ -106,8 +105,11 @@ pub fn dispatch_call(
         (None, None) => vec![stmt.yield_col.clone()],
     };
 
-    let fields_psv: Vec<PackStreamValue> =
-        columns.iter().cloned().map(PackStreamValue::String).collect();
+    let fields_psv: Vec<PackStreamValue> = columns
+        .iter()
+        .cloned()
+        .map(PackStreamValue::String)
+        .collect();
     let rows: Vec<Vec<PackStreamValue>> = gql_rows
         .iter()
         .map(|row| {
@@ -179,9 +181,16 @@ mod tests {
     #[test]
     fn vertex_labels_full_pipeline_returns_rows() {
         let graph = make_graph_with_data();
-        let pending =
-            dispatch_call(&call_full("vertex_labels", "vertex_labels", "vl"), &graph, 1000).unwrap();
-        assert_eq!(pending.fields_psv, vec![PackStreamValue::String("vl".to_owned())]);
+        let pending = dispatch_call(
+            &call_full("vertex_labels", "vertex_labels", "vl"),
+            &graph,
+            1000,
+        )
+        .unwrap();
+        assert_eq!(
+            pending.fields_psv,
+            vec![PackStreamValue::String("vl".to_owned())]
+        );
         // Distinct labels: Asset, Node, Person.
         assert_eq!(pending.rows.len(), 3, "got {:?}", pending.rows);
         // Each row is a single String cell.

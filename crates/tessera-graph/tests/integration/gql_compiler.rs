@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
-use tessera_graph::{gql, props, Graph, GqlValue};
+use tessera_graph::{GqlValue, Graph, gql, props};
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -29,7 +29,10 @@ fn social_graph() -> Graph {
 }
 
 /// Parses and executes a GQL query against a graph.
-fn run(graph: &Graph, query: &str) -> tessera_graph::Result<Vec<std::collections::HashMap<String, GqlValue>>> {
+fn run(
+    graph: &Graph,
+    query: &str,
+) -> tessera_graph::Result<Vec<std::collections::HashMap<String, GqlValue>>> {
     let ast = gql::parse(query)?;
     gql::execute(graph, &ast, 0)
 }
@@ -184,11 +187,7 @@ fn return_literal_value() {
 fn return_distinct_deduplicates() {
     let g = social_graph();
     // Alice has two KNOWS edges, so without DISTINCT we'd get Alice twice
-    let rows = run(
-        &g,
-        "MATCH (a:Person)-[:KNOWS]->(b) RETURN DISTINCT a.name",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person)-[:KNOWS]->(b) RETURN DISTINCT a.name").unwrap();
     let alice_count = rows
         .iter()
         .filter(|r| r["a.name"] == GqlValue::Str("Alice".into()))
@@ -201,11 +200,7 @@ fn return_distinct_deduplicates() {
 #[test]
 fn order_by_asc_sorts_strings() {
     let g = social_graph();
-    let rows = run(
-        &g,
-        "MATCH (a:Person) RETURN a.name ORDER BY a.name ASC",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person) RETURN a.name ORDER BY a.name ASC").unwrap();
     let names: Vec<&str> = rows
         .iter()
         .map(|r| match &r["a.name"] {
@@ -219,11 +214,7 @@ fn order_by_asc_sorts_strings() {
 #[test]
 fn order_by_desc_sorts_strings() {
     let g = social_graph();
-    let rows = run(
-        &g,
-        "MATCH (a:Person) RETURN a.name ORDER BY a.name DESC",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person) RETURN a.name ORDER BY a.name DESC").unwrap();
     let names: Vec<&str> = rows
         .iter()
         .map(|r| match &r["a.name"] {
@@ -237,11 +228,7 @@ fn order_by_desc_sorts_strings() {
 #[test]
 fn order_by_int_asc() {
     let g = social_graph();
-    let rows = run(
-        &g,
-        "MATCH (a:Person) RETURN a.name ORDER BY a.age ASC",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person) RETURN a.name ORDER BY a.age ASC").unwrap();
     let names: Vec<&str> = rows
         .iter()
         .map(|r| match &r["a.name"] {
@@ -260,11 +247,7 @@ fn order_by_null_values_sort_last() {
     g.add_node("Person", props! { "name" => "Bob" }).unwrap(); // no "score"
     g.add_node("Person", props! { "name" => "Carol", "score" => 5_i64 })
         .unwrap();
-    let rows = run(
-        &g,
-        "MATCH (a:Person) RETURN a.name ORDER BY a.score ASC",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person) RETURN a.name ORDER BY a.score ASC").unwrap();
     // Bob has no score → NULL → sorts last
     let names: Vec<&str> = rows
         .iter()
@@ -338,11 +321,7 @@ fn avg_aggregate() {
 #[test]
 fn min_max_aggregate() {
     let g = social_graph();
-    let rows = run(
-        &g,
-        "MATCH (a:Person) RETURN MIN(a.age), MAX(a.age)",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person) RETURN MIN(a.age), MAX(a.age)").unwrap();
     assert_eq!(rows[0]["MIN(a.age)"], GqlValue::Int(25));
     assert_eq!(rows[0]["MAX(a.age)"], GqlValue::Int(40));
 }
@@ -418,7 +397,10 @@ fn return_bare_node_var_produces_node_value() {
             let expected_id = id.as_u64() as i64;
             assert_eq!(node.id, expected_id);
             assert_eq!(node.labels, vec!["Person".to_owned()]);
-            assert_eq!(node.props.get("name"), Some(&GqlValue::Str("Alice".to_owned())));
+            assert_eq!(
+                node.props.get("name"),
+                Some(&GqlValue::Str("Alice".to_owned()))
+            );
         }
         other => panic!("expected GqlValue::Node, got {other:?}"),
     }
@@ -463,11 +445,7 @@ fn order_by_bare_node_var_keeps_all_rows() {
 #[test]
 fn count_node_var_with_where_filter() {
     let g = social_graph(); // Alice(35), Bob(25), Carol(30), Dave(40)
-    let rows = run(
-        &g,
-        "MATCH (n:Person) WHERE n.age > 30 RETURN COUNT(n)",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (n:Person) WHERE n.age > 30 RETURN COUNT(n)").unwrap();
     assert_eq!(rows.len(), 1);
     // Alice(35) and Dave(40) pass the filter
     assert_eq!(rows[0]["COUNT(n)"], GqlValue::Int(2));
@@ -502,11 +480,7 @@ fn full_query_match_where_return_order_limit() {
 #[test]
 fn full_query_count_with_where() {
     let g = social_graph();
-    let rows = run(
-        &g,
-        "MATCH (a:Person) WHERE a.age > 30 RETURN COUNT(*)",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (a:Person) WHERE a.age > 30 RETURN COUNT(*)").unwrap();
     // Alice(35), Dave(40)
     assert_eq!(rows[0]["COUNT(*)"], GqlValue::Int(2));
 }
@@ -589,9 +563,12 @@ fn order_by_mixed_types_does_not_panic() {
 #[test]
 fn distinct_removes_duplicate_rows_multi_column() {
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 }).unwrap();
-    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 }).unwrap();
-    g.add_node("Person", props! { "name" => "Bob",   "age" => 25_i64 }).unwrap();
+    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 })
+        .unwrap();
+    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 })
+        .unwrap();
+    g.add_node("Person", props! { "name" => "Bob",   "age" => 25_i64 })
+        .unwrap();
 
     let rows = run(&g, "MATCH (a:Person) RETURN DISTINCT a.name, a.age").unwrap();
     assert_eq!(rows.len(), 2);
@@ -624,7 +601,10 @@ fn distinct_on_integer_column_is_deterministic() {
 fn where_integer_as_bool_predicate_excludes_all_rows() {
     let g = social_graph();
     let rows = run(&g, "MATCH (a:Person) WHERE a.age RETURN a.name").unwrap();
-    assert!(rows.is_empty(), "integer as WHERE predicate must exclude all rows");
+    assert!(
+        rows.is_empty(),
+        "integer as WHERE predicate must exclude all rows"
+    );
 }
 
 #[test]
@@ -633,7 +613,8 @@ fn where_and_with_null_propagates_null() {
     let rows = run(
         &g,
         "MATCH (a:Person) WHERE a.missing AND true RETURN a.name",
-    ).unwrap();
+    )
+    .unwrap();
     assert!(rows.is_empty(), "NULL AND true must be NULL → row excluded");
 }
 
@@ -643,8 +624,13 @@ fn where_or_with_true_and_null_includes_row() {
     let rows = run(
         &g,
         "MATCH (a:Person) WHERE a.age > 0 OR a.missing RETURN a.name",
-    ).unwrap();
-    assert_eq!(rows.len(), 4, "true OR NULL must be true → all rows included");
+    )
+    .unwrap();
+    assert_eq!(
+        rows.len(),
+        4,
+        "true OR NULL must be true → all rows included"
+    );
 }
 
 #[test]
@@ -653,7 +639,8 @@ fn where_false_or_null_excludes_row() {
     let rows = run(
         &g,
         "MATCH (a:Person) WHERE a.age < 0 OR a.missing RETURN a.name",
-    ).unwrap();
+    )
+    .unwrap();
     assert!(rows.is_empty(), "false OR NULL must be NULL → row excluded");
 }
 
@@ -663,8 +650,12 @@ fn where_null_and_false_excludes_row() {
     let rows = run(
         &g,
         "MATCH (a:Person) WHERE a.missing AND a.age < 0 RETURN a.name",
-    ).unwrap();
-    assert!(rows.is_empty(), "NULL AND false must be false → row excluded");
+    )
+    .unwrap();
+    assert!(
+        rows.is_empty(),
+        "NULL AND false must be false → row excluded"
+    );
 }
 
 // ── C10: Cross-join ────────────────────────────────────────────────────
@@ -678,7 +669,8 @@ fn multi_pattern_match_cross_join() {
     let results = run(
         &g,
         "MATCH (a:Person {name: 'Alice'}), (b:Person {name: 'Bob'}) RETURN a.name, b.name",
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["a.name"], GqlValue::Str("Alice".into()));
     assert_eq!(results[0]["b.name"], GqlValue::Str("Bob".into()));
@@ -709,7 +701,8 @@ fn single_pattern_match_still_works() {
 fn count_star_pushdown_matches_materialized() {
     let mut g = Graph::new();
     for i in 0_i32..100 {
-        g.add_node("Person", props! { "id" => i64::from(i) }).unwrap();
+        g.add_node("Person", props! { "id" => i64::from(i) })
+            .unwrap();
     }
     g.add_node("Bot", props! { "name" => "siri" }).unwrap();
     let rows = run(&g, "MATCH (n:Person) RETURN COUNT(*)").unwrap();
@@ -721,7 +714,8 @@ fn count_star_pushdown_matches_materialized() {
 fn count_star_pushdown_large_dataset() {
     let mut g = Graph::new();
     for i in 0_i32..10_000 {
-        g.add_node("Person", props! { "id" => i64::from(i) }).unwrap();
+        g.add_node("Person", props! { "id" => i64::from(i) })
+            .unwrap();
     }
     let t0 = std::time::Instant::now();
     let rows = run(&g, "MATCH (n:Person) RETURN COUNT(*)").unwrap();
@@ -741,7 +735,8 @@ fn count_prop_pushdown() {
         if i % 3 == 0 {
             g.add_node("Person", props! {}).unwrap();
         } else {
-            g.add_node("Person", props! { "name" => format!("p{i}") }).unwrap();
+            g.add_node("Person", props! { "name" => format!("p{i}") })
+                .unwrap();
         }
     }
     let rows = run(&g, "MATCH (n:Person) RETURN COUNT(n.name)").unwrap();
@@ -766,7 +761,8 @@ fn sum_pushdown() {
 fn avg_pushdown() {
     let mut g = Graph::new();
     for i in 0_i32..1_000 {
-        g.add_node("Person", props! { "score" => i64::from(i % 10) }).unwrap();
+        g.add_node("Person", props! { "score" => i64::from(i % 10) })
+            .unwrap();
     }
     let rows = run(&g, "MATCH (n:Person) RETURN AVG(n.score)").unwrap();
     assert_eq!(rows[0]["AVG(n.score)"], GqlValue::Float(4.5));
@@ -776,12 +772,10 @@ fn avg_pushdown() {
 fn min_max_pushdown() {
     let mut g = Graph::new();
     for i in 0_i32..1_000 {
-        g.add_node("Person", props! { "score" => i64::from(i % 100) }).unwrap();
+        g.add_node("Person", props! { "score" => i64::from(i % 100) })
+            .unwrap();
     }
-    let rows = run(
-        &g,
-        "MATCH (n:Person) RETURN MIN(n.score), MAX(n.score)",
-    ).unwrap();
+    let rows = run(&g, "MATCH (n:Person) RETURN MIN(n.score), MAX(n.score)").unwrap();
     assert_eq!(rows[0]["MIN(n.score)"], GqlValue::Int(0));
     assert_eq!(rows[0]["MAX(n.score)"], GqlValue::Int(99));
 }
@@ -790,7 +784,8 @@ fn min_max_pushdown() {
 fn collect_pushdown() {
     let mut g = Graph::new();
     for i in 0..5 {
-        g.add_node("Person", props! { "name" => format!("p{i}") }).unwrap();
+        g.add_node("Person", props! { "name" => format!("p{i}") })
+            .unwrap();
     }
     let rows = run(&g, "MATCH (n:Person) RETURN COLLECT(n.name)").unwrap();
     match &rows[0]["COLLECT(n.name)"] {
@@ -803,12 +798,14 @@ fn collect_pushdown() {
 fn multi_aggregate_pushdown() {
     let mut g = Graph::new();
     for i in 0_i32..100 {
-        g.add_node("Person", props! { "age" => i64::from(i % 50) }).unwrap();
+        g.add_node("Person", props! { "age" => i64::from(i % 50) })
+            .unwrap();
     }
     let rows = run(
         &g,
         "MATCH (n:Person) RETURN COUNT(*), SUM(n.age), AVG(n.age), MIN(n.age), MAX(n.age)",
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(rows[0]["COUNT(*)"], GqlValue::Int(100));
     assert_eq!(rows[0]["MIN(n.age)"], GqlValue::Int(0));
     assert_eq!(rows[0]["MAX(n.age)"], GqlValue::Int(49));
@@ -818,7 +815,8 @@ fn multi_aggregate_pushdown() {
 fn aggregate_with_where_still_correct() {
     let mut g = Graph::new();
     for i in 0_i32..100 {
-        g.add_node("Person", props! { "age" => i64::from(i) }).unwrap();
+        g.add_node("Person", props! { "age" => i64::from(i) })
+            .unwrap();
     }
     let rows = run(&g, "MATCH (n:Person) WHERE n.age >= 50 RETURN COUNT(n)").unwrap();
     assert_eq!(rows[0]["COUNT(n)"], GqlValue::Int(50));
@@ -867,11 +865,7 @@ fn count_one_hop_no_end_label_constraint() {
         g.add_edge("CONTAINS", container, other, props! {}).unwrap();
     }
     // Without end label filter: all 6 edges match
-    let rows = run(
-        &g,
-        "MATCH (p:Container)-[:CONTAINS]->(c) RETURN count(c)",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (p:Container)-[:CONTAINS]->(c) RETURN count(c)").unwrap();
     assert_eq!(rows[0]["COUNT(c)"], GqlValue::Int(6));
     // With end label filter: only 4 Item edges match
     let rows = run(
@@ -891,11 +885,7 @@ fn count_one_hop_incoming_direction() {
     g.add_edge("R", a, b, props! {}).unwrap();
     g.add_edge("R", a, c, props! {}).unwrap();
     // Incoming: from B's perspective, count incoming R edges from A
-    let rows = run(
-        &g,
-        "MATCH (b:B)<-[:R]-(a:A) RETURN count(a)",
-    )
-    .unwrap();
+    let rows = run(&g, "MATCH (b:B)<-[:R]-(a:A) RETURN count(a)").unwrap();
     assert_eq!(rows[0]["COUNT(a)"], GqlValue::Int(2));
 }
 
@@ -907,10 +897,13 @@ fn unwind_list_with_match_returns_cross_join() {
     g.add_node("N", props! {}).unwrap();
     let rows = run(&g, "UNWIND [10, 20, 30] AS x MATCH (n:N) RETURN x").unwrap();
     assert_eq!(rows.len(), 3);
-    let mut values: Vec<i64> = rows.iter().map(|r| match &r["x"] {
-        GqlValue::Int(v) => *v,
-        other => panic!("expected Int, got {other:?}"),
-    }).collect();
+    let mut values: Vec<i64> = rows
+        .iter()
+        .map(|r| match &r["x"] {
+            GqlValue::Int(v) => *v,
+            other => panic!("expected Int, got {other:?}"),
+        })
+        .collect();
     values.sort_unstable();
     assert_eq!(values, vec![10, 20, 30]);
 }
@@ -927,12 +920,19 @@ fn unwind_empty_list_returns_zero_rows() {
 fn unwind_with_where_filter() {
     let mut g = Graph::new();
     g.add_node("N", props! {}).unwrap();
-    let rows = run(&g, "UNWIND [1, 2, 3, 4, 5] AS x MATCH (n:N) WHERE x > 3 RETURN x").unwrap();
+    let rows = run(
+        &g,
+        "UNWIND [1, 2, 3, 4, 5] AS x MATCH (n:N) WHERE x > 3 RETURN x",
+    )
+    .unwrap();
     assert_eq!(rows.len(), 2);
-    let mut values: Vec<i64> = rows.iter().map(|r| match &r["x"] {
-        GqlValue::Int(v) => *v,
-        other => panic!("expected Int, got {other:?}"),
-    }).collect();
+    let mut values: Vec<i64> = rows
+        .iter()
+        .map(|r| match &r["x"] {
+            GqlValue::Int(v) => *v,
+            other => panic!("expected Int, got {other:?}"),
+        })
+        .collect();
     values.sort_unstable();
     assert_eq!(values, vec![4, 5]);
 }
@@ -961,10 +961,13 @@ fn unwind_string_list() {
     g.add_node("N", props! {}).unwrap();
     let rows = run(&g, "UNWIND ['a', 'b', 'c'] AS s MATCH (n:N) RETURN s").unwrap();
     assert_eq!(rows.len(), 3);
-    let mut values: Vec<String> = rows.iter().map(|r| match &r["s"] {
-        GqlValue::Str(v) => v.clone(),
-        other => panic!("expected Str, got {other:?}"),
-    }).collect();
+    let mut values: Vec<String> = rows
+        .iter()
+        .map(|r| match &r["s"] {
+            GqlValue::Str(v) => v.clone(),
+            other => panic!("expected Str, got {other:?}"),
+        })
+        .collect();
     values.sort();
     assert_eq!(values, vec!["a", "b", "c"]);
 }
@@ -983,10 +986,13 @@ fn unwind_range_with_match_returns_cross_join() {
     g.add_node("N", props! {}).unwrap();
     let rows = run(&g, "UNWIND range(1, 3) AS x MATCH (n:N) RETURN x").unwrap();
     assert_eq!(rows.len(), 3, "range(1,3) must expand to 3 elements");
-    let mut values: Vec<i64> = rows.iter().map(|r| match &r["x"] {
-        GqlValue::Int(v) => *v,
-        other => panic!("expected Int, got {other:?}"),
-    }).collect();
+    let mut values: Vec<i64> = rows
+        .iter()
+        .map(|r| match &r["x"] {
+            GqlValue::Int(v) => *v,
+            other => panic!("expected Int, got {other:?}"),
+        })
+        .collect();
     values.sort_unstable();
     assert_eq!(values, vec![1, 2, 3]);
 }
@@ -1004,15 +1010,21 @@ fn execute_expr_resolves_range_builtin() {
 
     let stmt = gql::parse_statement("UNWIND range(1, 3) AS x CREATE (:N {v: x})").unwrap();
     let mutation = stmt.into_mutation().expect("expected a mutation statement");
-    let unwind = mutation.unwind_clause.as_ref().expect("expected UNWIND clause");
+    let unwind = mutation
+        .unwind_clause
+        .as_ref()
+        .expect("expected UNWIND clause");
 
     let list_val = gql::execute_expr(&unwind.expr, &empty, &g);
     match list_val {
         GqlValue::List(items) => {
-            let ints: Vec<i64> = items.iter().map(|v| match v {
-                GqlValue::Int(n) => *n,
-                other => panic!("expected Int element, got {other:?}"),
-            }).collect();
+            let ints: Vec<i64> = items
+                .iter()
+                .map(|v| match v {
+                    GqlValue::Int(n) => *n,
+                    other => panic!("expected Int element, got {other:?}"),
+                })
+                .collect();
             assert_eq!(ints, vec![1, 2, 3], "range(1,3) must be inclusive");
         }
         other => panic!("expected List, got {other:?}"),
@@ -1029,10 +1041,17 @@ fn execute_expr_range_descending_is_empty() {
 
     let stmt = gql::parse_statement("UNWIND range(5, 1) AS x CREATE (:N {v: x})").unwrap();
     let mutation = stmt.into_mutation().expect("expected a mutation statement");
-    let unwind = mutation.unwind_clause.as_ref().expect("expected UNWIND clause");
+    let unwind = mutation
+        .unwind_clause
+        .as_ref()
+        .expect("expected UNWIND clause");
 
     let list_val = gql::execute_expr(&unwind.expr, &empty, &g);
-    assert_eq!(list_val, GqlValue::List(Vec::new()), "range(5,1) must be empty");
+    assert_eq!(
+        list_val,
+        GqlValue::List(Vec::new()),
+        "range(5,1) must be empty"
+    );
 }
 
 /// `size()` must likewise resolve through `execute_expr`, since both `range`
@@ -1044,13 +1063,19 @@ fn execute_expr_resolves_size_builtin() {
     let empty = PatternMatch::empty();
 
     // size([1,2,3,4]) == 4, evaluated via the public expression entry point.
-    let stmt = gql::parse_statement("UNWIND range(1, size([7, 8, 9, 10])) AS x CREATE (:N {v: x})").unwrap();
+    let stmt = gql::parse_statement("UNWIND range(1, size([7, 8, 9, 10])) AS x CREATE (:N {v: x})")
+        .unwrap();
     let mutation = stmt.into_mutation().expect("expected a mutation statement");
-    let unwind = mutation.unwind_clause.as_ref().expect("expected UNWIND clause");
+    let unwind = mutation
+        .unwind_clause
+        .as_ref()
+        .expect("expected UNWIND clause");
 
     let list_val = gql::execute_expr(&unwind.expr, &empty, &g);
     match list_val {
-        GqlValue::List(items) => assert_eq!(items.len(), 4, "range(1, size([..4..])) must be 4 elements"),
+        GqlValue::List(items) => {
+            assert_eq!(items.len(), 4, "range(1, size([..4..])) must be 4 elements");
+        }
         other => panic!("expected List, got {other:?}"),
     }
 }
@@ -1063,7 +1088,9 @@ fn execute_expr_resolves_size_builtin() {
 fn shuffled_age_graph() -> Graph {
     let mut g = Graph::new();
     // Interleave even/odd ages so insertion order ≠ sorted order.
-    let ages: Vec<i64> = (0..20).map(|i| if i % 2 == 0 { i / 2 + 1 } else { 20 - i / 2 }).collect();
+    let ages: Vec<i64> = (0..20)
+        .map(|i| if i % 2 == 0 { i / 2 + 1 } else { 20 - i / 2 })
+        .collect();
     for age in ages {
         g.add_node("Person", props! { "age" => age }).unwrap();
     }
@@ -1075,10 +1102,13 @@ fn order_by_precomputed_keys_ascending() {
     let g = shuffled_age_graph();
     let rows = run(&g, "MATCH (n:Person) RETURN n.age ORDER BY n.age ASC").unwrap();
     assert_eq!(rows.len(), 20);
-    let ages: Vec<i64> = rows.iter().map(|r| match r["n.age"] {
-        GqlValue::Int(v) => v,
-        ref other => panic!("expected Int, got {other:?}"),
-    }).collect();
+    let ages: Vec<i64> = rows
+        .iter()
+        .map(|r| match r["n.age"] {
+            GqlValue::Int(v) => v,
+            ref other => panic!("expected Int, got {other:?}"),
+        })
+        .collect();
     let mut expected = ages.clone();
     expected.sort_unstable();
     assert_eq!(ages, expected, "rows must be in ascending age order");
@@ -1089,10 +1119,13 @@ fn order_by_precomputed_keys_descending() {
     let g = shuffled_age_graph();
     let rows = run(&g, "MATCH (n:Person) RETURN n.age ORDER BY n.age DESC").unwrap();
     assert_eq!(rows.len(), 20);
-    let ages: Vec<i64> = rows.iter().map(|r| match r["n.age"] {
-        GqlValue::Int(v) => v,
-        ref other => panic!("expected Int, got {other:?}"),
-    }).collect();
+    let ages: Vec<i64> = rows
+        .iter()
+        .map(|r| match r["n.age"] {
+            GqlValue::Int(v) => v,
+            ref other => panic!("expected Int, got {other:?}"),
+        })
+        .collect();
     let mut expected = ages.clone();
     expected.sort_unstable_by(|a, b| b.cmp(a));
     assert_eq!(ages, expected, "rows must be in descending age order");
@@ -1176,10 +1209,9 @@ fn unwind_create_node_with_variable_prop() {
     let mut g = Graph::new();
     g.add_node("Root", props! { "id" => 1_i64 }).unwrap();
 
-    let stmt = gql::parse_statement(
-        "UNWIND [10, 20, 30] AS x MATCH (r:Root) CREATE (n:Item {val: x})",
-    )
-    .unwrap();
+    let stmt =
+        gql::parse_statement("UNWIND [10, 20, 30] AS x MATCH (r:Root) CREATE (n:Item {val: x})")
+            .unwrap();
 
     let mutation = match stmt {
         GqlStatement::Mutation(m) => m,
@@ -1257,10 +1289,8 @@ fn unwind_create_empty_list_no_mutations() {
     let mut g = Graph::new();
     g.add_node("Root", props! { "id" => 1_i64 }).unwrap();
 
-    let stmt = gql::parse_statement(
-        "UNWIND [] AS x MATCH (r:Root) CREATE (n:Item {val: x})",
-    )
-    .unwrap();
+    let stmt =
+        gql::parse_statement("UNWIND [] AS x MATCH (r:Root) CREATE (n:Item {val: x})").unwrap();
 
     let mutation = match stmt {
         GqlStatement::Mutation(m) => m,
@@ -1275,7 +1305,10 @@ fn unwind_create_empty_list_no_mutations() {
         GqlValue::List(items) => items,
         _ => panic!("expected list"),
     };
-    assert!(elements.is_empty(), "empty list should produce zero elements");
+    assert!(
+        elements.is_empty(),
+        "empty list should produce zero elements"
+    );
 
     // No mutations should be applied — verify 0 Item nodes exist.
     let rows = run(&g, "MATCH (n:Item) RETURN n.val").unwrap();
@@ -1297,10 +1330,9 @@ fn unwind_create_with_expression_prop() {
     let mut g = Graph::new();
     g.add_node("Root", props! { "id" => 1_i64 }).unwrap();
 
-    let stmt = gql::parse_statement(
-        "UNWIND [1, 2, 3] AS x MATCH (r:Root) CREATE (n:Item {val: x + 10})",
-    )
-    .unwrap();
+    let stmt =
+        gql::parse_statement("UNWIND [1, 2, 3] AS x MATCH (r:Root) CREATE (n:Item {val: x + 10})")
+            .unwrap();
 
     let mutation = match stmt {
         GqlStatement::Mutation(m) => m,
@@ -1396,9 +1428,12 @@ fn resolve_create_props_literal_only() {
 ///   2 × Eng, 1 × Sales
 fn dept_graph() -> Graph {
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alice", "dept" => "Eng" }).unwrap();
-    g.add_node("Person", props! { "name" => "Bob", "dept" => "Eng" }).unwrap();
-    g.add_node("Person", props! { "name" => "Carol", "dept" => "Sales" }).unwrap();
+    g.add_node("Person", props! { "name" => "Alice", "dept" => "Eng" })
+        .unwrap();
+    g.add_node("Person", props! { "name" => "Bob", "dept" => "Eng" })
+        .unwrap();
+    g.add_node("Person", props! { "name" => "Carol", "dept" => "Sales" })
+        .unwrap();
     g
 }
 
@@ -1421,10 +1456,26 @@ fn group_by_single_key_count() {
 #[test]
 fn group_by_multiple_keys() {
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "A", "dept" => "Eng", "region" => "US" }).unwrap();
-    g.add_node("Person", props! { "name" => "B", "dept" => "Eng", "region" => "EU" }).unwrap();
-    g.add_node("Person", props! { "name" => "C", "dept" => "Eng", "region" => "US" }).unwrap();
-    g.add_node("Person", props! { "name" => "D", "dept" => "Sales", "region" => "US" }).unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "A", "dept" => "Eng", "region" => "US" },
+    )
+    .unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "B", "dept" => "Eng", "region" => "EU" },
+    )
+    .unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "C", "dept" => "Eng", "region" => "US" },
+    )
+    .unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "D", "dept" => "Sales", "region" => "US" },
+    )
+    .unwrap();
 
     let rows = run(
         &g,
@@ -1451,9 +1502,12 @@ fn group_by_multiple_keys() {
 #[test]
 fn group_by_with_sum() {
     let mut g = Graph::new();
-    g.add_node("Sale", props! { "dept" => "Eng", "amount" => 100_i64 }).unwrap();
-    g.add_node("Sale", props! { "dept" => "Eng", "amount" => 200_i64 }).unwrap();
-    g.add_node("Sale", props! { "dept" => "Sales", "amount" => 50_i64 }).unwrap();
+    g.add_node("Sale", props! { "dept" => "Eng", "amount" => 100_i64 })
+        .unwrap();
+    g.add_node("Sale", props! { "dept" => "Eng", "amount" => 200_i64 })
+        .unwrap();
+    g.add_node("Sale", props! { "dept" => "Sales", "amount" => 50_i64 })
+        .unwrap();
 
     let rows = run(
         &g,
@@ -1537,7 +1591,10 @@ fn group_by_error_non_aggregate_not_in_group_by() {
 // layer cannot verify: graph-state isolation and integration with the
 // public `parse_statement` → executor pipeline.
 
-fn run_const_return(graph: &Graph, input: &str) -> Vec<std::collections::HashMap<String, GqlValue>> {
+fn run_const_return(
+    graph: &Graph,
+    input: &str,
+) -> Vec<std::collections::HashMap<String, GqlValue>> {
     let stmt = gql::parse_statement(input).unwrap();
     let q = match stmt {
         gql::GqlStatement::ConstReturn(q) => q,

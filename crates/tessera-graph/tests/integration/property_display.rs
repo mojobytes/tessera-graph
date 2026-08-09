@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::Property;
 
@@ -29,10 +29,7 @@ fn display_bool_false() {
 
 #[test]
 fn display_bytes() {
-    assert_eq!(
-        format!("{}", Property::Bytes(vec![1, 2, 3])),
-        "[3 bytes]"
-    );
+    assert_eq!(format!("{}", Property::Bytes(vec![1, 2, 3])), "[3 bytes]");
 }
 
 #[test]

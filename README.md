@@ -22,7 +22,7 @@ ejecutan; la suite de pruebas está en verde.
 | `tessera-graph-config` | Lectura de configuración |
 | `tessera-graph-python` | Enlace para Python |
 
-Requisitos: Rust 1.85 o superior, edición 2024.
+Requisitos: Rust 1.88 o superior, edición 2024.
 
 ## Arranque rápido
 
@@ -166,9 +166,10 @@ tráfico, rotación del registro de auditoría y mantenimiento en segundo plano.
 ## Desarrollo
 
 ```bash
-cargo check --workspace --all-targets     # compilación
-cargo test --workspace --features plain-tcp   # pruebas
+cargo check --workspace --all-targets
+cargo test --workspace --exclude tessera-graph-python --features plain-tcp
 cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
 La opción `plain-tcp` habilita un canal sin cifrar **reservado a las pruebas
@@ -176,17 +177,41 @@ de integración**: sin ella, los binarios de prueba que necesitan una conexión
 directa se compilan vacíos y la suite pasa sin haber ejercitado nada. El
 binario que se publica nunca la activa.
 
-En macOS sobre x86_64, el enlace de Python no compila en el anfitrión por un
-problema de enlazado con PyO3; se construye dentro de Docker.
+Los bindings de Python se prueban sobre Python 3.9 y 3.12. Para construirlos y
+ejecutar sus pruebas en un entorno virtual:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install 'maturin>=1.7,<2.0' pytest
+.venv/bin/maturin develop --locked \
+  --manifest-path crates/tessera-graph-python/Cargo.toml
+.venv/bin/python -m pytest crates/tessera-graph-python/tests -q
+```
+
+La construcción reproducible y aislada está disponible mediante Docker:
+
+```bash
+docker build --target test \
+  -f crates/tessera-graph-python/Dockerfile .
+```
+
+Antes de crear una versión se ejecuta `scripts/check-release.sh`. Una etiqueta
+`vX.Y.Z` cuyo valor coincida con la versión del workspace activa la creación de
+los binarios Community, los wheels de Python y el paquete del crate MIT. Los
+artefactos se adjuntan automáticamente a una release de GitHub; la publicación
+en crates.io o PyPI requiere después las credenciales y aprobación del titular.
+Los cambios se documentan en [CHANGELOG.md](CHANGELOG.md).
 
 ## Licencias
 
 El reparto de licencias entre componentes es parte del propio diseño:
 
-- **Motor** (`tessera-graph`): Apache-2.0 — publicable como paquete
+- **Motor** (`tessera-graph`) y bindings Python: MIT — publicable como paquete
   independiente para grafos en memoria.
-- **Servidor Community**: BSL 1.1 — código a la vista, no distribuible como
-  servicio competidor.
+- **Servidor Community y componentes de red**: BSL 1.1 — admite uso productivo
+  interno, pero no DBaaS, redistribución/OEM ni productos competidores sin un
+  acuerdo comercial. Cada versión cambia a Apache-2.0 cuatro años después de
+  hacerse pública.
 
 Las funcionalidades de la edición Enterprise (autorización fina, multi-base y
 multi-inquilino, auditoría de cumplimiento, proveedores de identidad

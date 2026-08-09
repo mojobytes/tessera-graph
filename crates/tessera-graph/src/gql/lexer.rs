@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! GQL lexer (tokenizer).
 //!
@@ -17,8 +17,8 @@
 //! depend only on [`crate::gql::parse`] / [`crate::gql::parse_statement`]
 //! for stable behaviour.
 
-use crate::gql::token::{Span, SpannedToken, Token};
 use crate::Error;
+use crate::gql::token::{Span, SpannedToken, Token};
 
 /// Stateful GQL lexer.
 ///
@@ -38,7 +38,13 @@ impl<'a> Lexer<'a> {
     /// Creates a new `Lexer` positioned at the start of `input`.
     #[must_use]
     pub const fn new(input: &'a str) -> Self {
-        Self { str_input: input, input: input.as_bytes(), pos: 0, line: 1, col: 1 }
+        Self {
+            str_input: input,
+            input: input.as_bytes(),
+            pos: 0,
+            line: 1,
+            col: 1,
+        }
     }
 
     /// Tokenizes the entire input and returns all [`SpannedToken`]s.
@@ -148,10 +154,7 @@ impl<'a> Lexer<'a> {
                     return Err(Error::GqlSyntaxError {
                         line: self.line,
                         col: self.col,
-                        message: format!(
-                            "unexpected character '{}'",
-                            char::from(unknown)
-                        ),
+                        message: format!("unexpected character '{}'", char::from(unknown)),
                     });
                 }
             };
@@ -203,7 +206,8 @@ impl<'a> Lexer<'a> {
     /// Panics if called past the end of input. Callers must always check
     /// [`peek()`](Self::peek) before calling this method.
     fn advance(&mut self) -> u8 {
-        let b = *self.input
+        let b = *self
+            .input
             .get(self.pos)
             .expect("advance() called past end of input");
         self.pos += 1;
@@ -233,7 +237,12 @@ impl<'a> Lexer<'a> {
     /// Constructs a [`Span`] from a saved start position/line/col up to the
     /// current position.
     const fn make_span(&self, start: usize, start_line: u32, start_col: u32) -> Span {
-        Span { start, end: self.pos, line: start_line, col: start_col }
+        Span {
+            start,
+            end: self.pos,
+            line: start_line,
+            col: start_col,
+        }
     }
 
     /// Maps an upper-cased identifier string to a keyword [`Token`], if any.
@@ -441,8 +450,8 @@ impl<'a> Lexer<'a> {
 
         // Check for fractional part: requires '.' followed by a digit
         // (to avoid treating `1..5` as a float).
-        let is_float = self.peek() == Some(b'.')
-            && self.peek_next().is_some_and(|c| c.is_ascii_digit());
+        let is_float =
+            self.peek() == Some(b'.') && self.peek_next().is_some_and(|c| c.is_ascii_digit());
 
         if is_float {
             self.advance(); // consume '.'
@@ -464,8 +473,8 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let raw = std::str::from_utf8(&self.input[start..self.pos])
-            .expect("digit bytes are valid UTF-8");
+        let raw =
+            std::str::from_utf8(&self.input[start..self.pos]).expect("digit bytes are valid UTF-8");
 
         if is_float || has_exp {
             let value: f64 = raw.parse().map_err(|_| Error::GqlSyntaxError {
@@ -742,8 +751,7 @@ mod tests {
 
     #[test]
     fn lex_full_match_query() {
-        let toks =
-            tokens("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b) RETURN a.name");
+        let toks = tokens("MATCH (a:Person {name: 'Alice'})-[:KNOWS]->(b) RETURN a.name");
         // Verify it lexes without error and produces reasonable token count.
         assert!(toks.len() > 15);
         assert_eq!(toks[0], Token::Match);
@@ -845,7 +853,10 @@ mod tests {
     fn lex_unterminated_delimited_identifier_returns_error() {
         let err = Lexer::new("\"hello").tokenize().unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("unterminated delimited identifier"), "got: {msg}");
+        assert!(
+            msg.contains("unterminated delimited identifier"),
+            "got: {msg}"
+        );
         assert!(msg.contains("col 1"), "got: {msg}");
     }
 
@@ -892,7 +903,10 @@ mod tests {
     fn lex_unterminated_backtick_identifier_is_error() {
         let err = Lexer::new("`hello").tokenize().unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("unterminated delimited identifier"), "got: {msg}");
+        assert!(
+            msg.contains("unterminated delimited identifier"),
+            "got: {msg}"
+        );
     }
 
     #[test]
@@ -942,21 +956,16 @@ mod tests {
     #[test]
     fn lexer_emits_dollar_for_named_param() {
         let toks = tokens("$name");
-        assert_eq!(toks, vec![
-            Token::Dollar,
-            Token::Ident("name".into()),
-            Token::Eof,
-        ]);
+        assert_eq!(
+            toks,
+            vec![Token::Dollar, Token::Ident("name".into()), Token::Eof,]
+        );
     }
 
     #[test]
     fn lexer_emits_dollar_for_positional_param() {
         let toks = tokens("$1");
-        assert_eq!(toks, vec![
-            Token::Dollar,
-            Token::IntLit(1),
-            Token::Eof,
-        ]);
+        assert_eq!(toks, vec![Token::Dollar, Token::IntLit(1), Token::Eof,]);
     }
 
     #[test]
@@ -964,15 +973,18 @@ mod tests {
         // The dollar must appear at the correct position inside a longer
         // token stream (here: after `=`), not just at the start of input.
         let toks = tokens("n.id = $id");
-        assert_eq!(toks, vec![
-            Token::Ident("n".into()),
-            Token::Dot,
-            Token::Ident("id".into()),
-            Token::Eq,
-            Token::Dollar,
-            Token::Ident("id".into()),
-            Token::Eof,
-        ]);
+        assert_eq!(
+            toks,
+            vec![
+                Token::Ident("n".into()),
+                Token::Dot,
+                Token::Ident("id".into()),
+                Token::Eq,
+                Token::Dollar,
+                Token::Ident("id".into()),
+                Token::Eof,
+            ]
+        );
     }
 
     #[test]
@@ -982,11 +994,7 @@ mod tests {
         // a `Token::Dollar`. This test documents the lexer-vs-parser split:
         // any later change that adds validation to the lexer will break it.
         let toks = tokens("$$");
-        assert_eq!(toks, vec![
-            Token::Dollar,
-            Token::Dollar,
-            Token::Eof,
-        ]);
+        assert_eq!(toks, vec![Token::Dollar, Token::Dollar, Token::Eof,]);
     }
 
     // ── Cycle 3.1: PlusEq token ──────────────────────────────────────────────

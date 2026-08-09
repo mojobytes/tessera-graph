@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use pyo3::prelude::*;
 
 use crate::errors;
 
 /// Traversal strategy.
-#[pyclass(name = "Strategy", frozen, eq, hash)]
+#[pyclass(name = "Strategy", frozen, eq, hash, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PyStrategy {
     #[pyo3(name = "BFS")]

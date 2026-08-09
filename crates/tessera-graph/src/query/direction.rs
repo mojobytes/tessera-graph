@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 /// Direction filter for graph traversals and neighbor queries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

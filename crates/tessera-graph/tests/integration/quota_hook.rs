@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Task 15 ciclo 1 — Pre-WAL quota hook API tests.
 //!
@@ -8,8 +8,8 @@
 //! `Graph::open_with_hook` (Decision Q2: builder, not setter) and produces
 //! a `tessera_graph::Error::QuotaExceeded` variant (Decision Q3).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tempfile::TempDir;
 use tessera_graph::{Error, Graph, GraphConfig, props};
@@ -140,34 +140,33 @@ fn write_throughput_with_real_stat_hook_stays_under_30_seconds() {
     // depend on the server crate, so we re-implement the stat
     // inline using `std::fs`.
     let hook_dir = tmp.path().to_path_buf();
-    let hook: Box<dyn Fn() -> tessera_graph::Result<()> + Send + Sync> =
-        Box::new(move || {
-            let mut total: u64 = 0;
-            let mut stack: Vec<std::path::PathBuf> = vec![hook_dir.clone()];
-            while let Some(p) = stack.pop() {
-                let Ok(rd) = std::fs::read_dir(&p) else {
-                    continue;
-                };
-                for entry in rd.flatten() {
-                    if let Ok(meta) = entry.metadata() {
-                        if meta.is_dir() {
-                            stack.push(entry.path());
-                        } else {
-                            total = total.saturating_add(meta.len());
-                        }
+    let hook: Box<dyn Fn() -> tessera_graph::Result<()> + Send + Sync> = Box::new(move || {
+        let mut total: u64 = 0;
+        let mut stack: Vec<std::path::PathBuf> = vec![hook_dir.clone()];
+        while let Some(p) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&p) else {
+                continue;
+            };
+            for entry in rd.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    if meta.is_dir() {
+                        stack.push(entry.path());
+                    } else {
+                        total = total.saturating_add(meta.len());
                     }
                 }
             }
-            if total >= limit {
-                Err(Error::QuotaExceeded {
-                    path: hook_dir.to_string_lossy().into_owned(),
-                    limit_bytes: limit,
-                    current_bytes: total,
-                })
-            } else {
-                Ok(())
-            }
-        });
+        }
+        if total >= limit {
+            Err(Error::QuotaExceeded {
+                path: hook_dir.to_string_lossy().into_owned(),
+                limit_bytes: limit,
+                current_bytes: total,
+            })
+        } else {
+            Ok(())
+        }
+    });
 
     let mut g = Graph::open_with_hook(tmp.path(), &test_config(), hook).unwrap();
     let start = Instant::now();
@@ -200,11 +199,10 @@ fn hook_fires_once_per_write_op() {
     let tmp = TempDir::new().unwrap();
     let calls = Arc::new(AtomicU64::new(0));
     let calls_inner = Arc::clone(&calls);
-    let hook: Box<dyn Fn() -> tessera_graph::Result<()> + Send + Sync> =
-        Box::new(move || {
-            calls_inner.fetch_add(1, Ordering::Relaxed);
-            Ok(())
-        });
+    let hook: Box<dyn Fn() -> tessera_graph::Result<()> + Send + Sync> = Box::new(move || {
+        calls_inner.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    });
     let mut g = Graph::open_with_hook(tmp.path(), &test_config(), hook).unwrap();
     let a = g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     let b = g.add_node("Person", props! { "name" => "Bob" }).unwrap();

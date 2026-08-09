@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Offline administrative commands.
 //!
@@ -95,7 +95,6 @@ pub(crate) fn map_lock_error(e: &std::io::Error) -> (i32, String) {
     }
 }
 
-
 /// Carries the locked, opened store + the `fs2` guard that keeps the
 /// system graph exclusive for the duration of the operation.
 ///
@@ -122,7 +121,10 @@ pub(crate) struct LockedStore {
 /// This is the prologue shared verbatim by every offline admin module.
 /// The returned [`LockedStore`] must be kept alive (and dropped only
 /// after the operation completes) so the advisory lock stays held.
-pub(crate) fn open_locked_store(prefix: &str, data_dir: &str) -> Result<LockedStore, (i32, String)> {
+pub(crate) fn open_locked_store(
+    prefix: &str,
+    data_dir: &str,
+) -> Result<LockedStore, (i32, String)> {
     let data_dir = PathBuf::from(data_dir);
     validate_data_dir(prefix, &data_dir)?;
     let system_dir = data_dir.join("system");
@@ -134,10 +136,7 @@ pub(crate) fn open_locked_store(prefix: &str, data_dir: &str) -> Result<LockedSt
     let graph = Graph::open(&system_dir, &GraphConfig::new()).map_err(|e| {
         (
             1,
-            format!(
-                "cannot open system graph at {}: {e}",
-                system_dir.display()
-            ),
+            format!("cannot open system graph at {}: {e}", system_dir.display()),
         )
     })?;
     let graph = Arc::new(RwLock::new(graph));

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Unit tests for [`ServerConfig`].
 
@@ -119,7 +119,10 @@ fn default_config_has_batch_limit_defaults() {
 fn from_map_parses_batch_limit_env_vars() {
     let m = HashMap::from([
         ("TESSERA_MAX_BATCH_OPERATIONS".to_owned(), "5000".to_owned()),
-        ("TESSERA_MAX_BATCH_MEMORY_BYTES".to_owned(), "1048576".to_owned()),
+        (
+            "TESSERA_MAX_BATCH_MEMORY_BYTES".to_owned(),
+            "1048576".to_owned(),
+        ),
     ]);
     let cfg = ServerConfig::from_map(&m);
     assert_eq!(cfg.max_batch_operations, Some(5000));
@@ -242,9 +245,6 @@ fn no_auth_flag_requires_exact_string_one() {
 
 // ── v0.5.0 Task 3: multi-database runtime keys ──────────────────────────────
 
-
-
-
 #[test]
 fn multi_database_defaults_match_spec() {
     let cfg = ServerConfig::default();
@@ -259,7 +259,6 @@ fn multi_database_defaults_match_spec() {
 
 // ── v0.5.0 Task 11 cycle 9: max_open_databases env wiring ───────────────────
 
-
 #[test]
 fn max_open_databases_default_is_none() {
     let vars: HashMap<String, String> = HashMap::new();
@@ -269,7 +268,6 @@ fn max_open_databases_default_is_none() {
         "absence of TESSERA_MAX_OPEN_DATABASES must mean unlimited"
     );
 }
-
 
 // ── v0.6.0 Fase 2 Task 1 cycle 1: metrics endpoint config ───────────────────
 
@@ -306,18 +304,20 @@ fn slow_query_threshold_ms_defaults_to_one_thousand() {
 
 #[test]
 fn slow_query_threshold_ms_reads_from_env_override() {
-    let map = HashMap::from([
-        ("TESSERA_SLOW_QUERY_THRESHOLD_MS".to_owned(), "250".to_owned()),
-    ]);
+    let map = HashMap::from([(
+        "TESSERA_SLOW_QUERY_THRESHOLD_MS".to_owned(),
+        "250".to_owned(),
+    )]);
     let cfg = ServerConfig::from_map(&map);
     assert_eq!(cfg.slow_query_threshold_ms, 250);
 }
 
 #[test]
 fn slow_query_threshold_ms_falls_back_to_default_on_invalid_value() {
-    let map = HashMap::from([
-        ("TESSERA_SLOW_QUERY_THRESHOLD_MS".to_owned(), "not-a-number".to_owned()),
-    ]);
+    let map = HashMap::from([(
+        "TESSERA_SLOW_QUERY_THRESHOLD_MS".to_owned(),
+        "not-a-number".to_owned(),
+    )]);
     let cfg = ServerConfig::from_map(&map);
     assert_eq!(cfg.slow_query_threshold_ms, 1000);
 }
@@ -330,18 +330,20 @@ fn max_slow_events_per_minute_defaults_to_sixty() {
 
 #[test]
 fn max_slow_events_per_minute_reads_from_env_override() {
-    let map = HashMap::from([
-        ("TESSERA_SLOW_QUERY_MAX_EVENTS_PER_MINUTE".to_owned(), "10".to_owned()),
-    ]);
+    let map = HashMap::from([(
+        "TESSERA_SLOW_QUERY_MAX_EVENTS_PER_MINUTE".to_owned(),
+        "10".to_owned(),
+    )]);
     let cfg = ServerConfig::from_map(&map);
     assert_eq!(cfg.max_slow_events_per_minute, 10);
 }
 
 #[test]
 fn max_slow_events_per_minute_falls_back_to_default_on_invalid_value() {
-    let map = HashMap::from([
-        ("TESSERA_SLOW_QUERY_MAX_EVENTS_PER_MINUTE".to_owned(), "abc".to_owned()),
-    ]);
+    let map = HashMap::from([(
+        "TESSERA_SLOW_QUERY_MAX_EVENTS_PER_MINUTE".to_owned(),
+        "abc".to_owned(),
+    )]);
     let cfg = ServerConfig::from_map(&map);
     assert_eq!(cfg.max_slow_events_per_minute, 60);
 }
@@ -399,7 +401,10 @@ fn auth_max_failures_per_minute_defaults_to_5() {
 #[test]
 fn auth_max_failures_per_minute_parsed_from_env_map() {
     let mut vars = HashMap::new();
-    vars.insert("TESSERA_AUTH_MAX_FAILURES_PER_MINUTE".to_owned(), "12".to_owned());
+    vars.insert(
+        "TESSERA_AUTH_MAX_FAILURES_PER_MINUTE".to_owned(),
+        "12".to_owned(),
+    );
     let cfg = ServerConfig::from_map(&vars);
     assert_eq!(cfg.auth_max_failures_per_minute, 12);
 }
@@ -441,7 +446,10 @@ fn max_bytes_per_second_defaults_to_1_mib() {
 #[test]
 fn max_bytes_per_second_parsed_from_env_map() {
     let mut vars = HashMap::new();
-    vars.insert("TESSERA_MAX_BYTES_PER_SECOND".to_owned(), "2097152".to_owned());
+    vars.insert(
+        "TESSERA_MAX_BYTES_PER_SECOND".to_owned(),
+        "2097152".to_owned(),
+    );
     let cfg = ServerConfig::from_map(&vars);
     assert_eq!(cfg.max_bytes_per_second, 2_097_152);
 }
@@ -463,9 +471,15 @@ fn rate_limit_ip_cap_parsed_from_env_map() {
 #[test]
 fn rate_limit_invalid_env_falls_back_to_default() {
     let mut vars = HashMap::new();
-    vars.insert("TESSERA_QUERIES_MAX_PER_SECOND".to_owned(), "not-a-number".to_owned());
+    vars.insert(
+        "TESSERA_QUERIES_MAX_PER_SECOND".to_owned(),
+        "not-a-number".to_owned(),
+    );
     let cfg = ServerConfig::from_map(&vars);
-    assert_eq!(cfg.queries_max_per_second, 100, "invalid value falls back to default");
+    assert_eq!(
+        cfg.queries_max_per_second, 100,
+        "invalid value falls back to default"
+    );
 }
 
 // ── v0.6.0 Fase 2 Task 6: query timeout config ──────────────────────────────
@@ -567,11 +581,6 @@ fn file_config_env_overrides_toml() {
 // instead of letting it slip into production unnoticed. ("Si es molesto, se
 // mide" — exhaustive, not representative.)
 
-
-
-
-
-
 // ── v0.7.0 Fase 3 Feature B: file-backed default + :memory: sentinel (C6) ────
 
 #[test]
@@ -624,8 +633,6 @@ fn data_dir_memory_sentinel_in_toml_produces_none() {
     );
 }
 
-
-
 // ── MVCC vacuum interval ─────────────────────────────────────────────────────
 
 #[test]
@@ -637,7 +644,10 @@ fn vacuum_interval_defaults_to_300() {
 #[test]
 fn vacuum_interval_read_from_env() {
     let mut m = HashMap::new();
-    m.insert("TESSERA_VACUUM_INTERVAL_SECONDS".to_owned(), "42".to_owned());
+    m.insert(
+        "TESSERA_VACUUM_INTERVAL_SECONDS".to_owned(),
+        "42".to_owned(),
+    );
     let cfg = ServerConfig::from_map(&m);
     assert_eq!(cfg.vacuum_interval_seconds, 42);
 }
@@ -659,9 +669,6 @@ fn vacuum_interval_default_survives_empty_map() {
 // ya ha sufrido cuatro veces. La diferencia es que aquí no se puede "cablear":
 // la funcionalidad no existe en esa edición. Lo que sí se puede —y se debe— es
 // que el operador se entere en vez de creer que su tope está aplicado.
-
-
-
 
 /// Todo ajuste está clasificado: o lo aplica cualquier edición, o se reporta.
 ///

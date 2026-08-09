@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use tessera_graph::gql::{self, GqlMutationResult, GqlQuery, GqlValue};
 use tessera_graph::Graph;
+use tessera_graph::gql::{self, GqlMutationResult, GqlQuery, GqlValue};
 
 /// A single result row: column name → value.
 pub type ResultRow = std::collections::HashMap<String, GqlValue>;
@@ -135,7 +135,7 @@ fn enforce_output_cap(rows: Vec<ResultRow>, max_rows: u64) -> Result<Vec<ResultR
 
 /// Extension point for graph access.
 ///
-/// The MIT server uses [`DefaultGraphAccessor`] which executes queries
+/// The Community server uses [`DefaultGraphAccessor`] which executes queries
 /// directly against `Arc<RwLock<Graph>>`. Enterprise can implement this
 /// trait to wrap access with LBAC, audit logging, and tenant isolation.
 ///
@@ -146,7 +146,7 @@ fn enforce_output_cap(rows: Vec<ResultRow>, max_rows: u64) -> Result<Vec<ResultR
 /// Bolt `RUN.params` field, applies substitution to the AST, and then
 /// moves the map into the accessor call. Enterprise implementations that
 /// need to inspect the map (audit log, LBAC) own it for the duration of
-/// the call without an extra clone; the MIT default impl ignores it and
+/// the call without an extra clone; the Community default impl ignores it and
 /// the move is zero-cost. A `&HashMap<...>` signature was considered but
 /// would force enterprise auditors to clone the map every call.
 pub trait GraphAccessor: Send + Sync + 'static {
@@ -441,7 +441,10 @@ impl GraphAccessor for DefaultGraphAccessor {
                     .map_err(|_| "graph lock poisoned".to_owned())?;
                 let rows = gql::execute_pipeline_with_deadline(&*graph, pq, max_rows, deadline)
                     .map_err(engine_err_to_string)?;
-                Ok((enforce_output_cap(rows, max_rows)?, GqlMutationResult::default()))
+                Ok((
+                    enforce_output_cap(rows, max_rows)?,
+                    GqlMutationResult::default(),
+                ))
             }
             PipelineTerminal::Set(_) | PipelineTerminal::Delete(_) => {
                 // SET / DELETE terminals: the engine's pipeline mutation runs
@@ -520,13 +523,7 @@ impl GraphAccessor for DefaultGraphAccessor {
         }
         // MATCH…CREATE / MATCH…SET path.
         if mutation.match_clause.is_some() {
-            return execute_match_mutation_in_txn(
-                &self.graph,
-                txn_id,
-                mutation,
-                &params,
-                deadline,
-            );
+            return execute_match_mutation_in_txn(&self.graph, txn_id, mutation, &params, deadline);
         }
         // MERGE path.
         if let gql::MutationClause::Merge(merge) = &mutation.mutation {
@@ -562,7 +559,10 @@ impl GraphAccessor for DefaultGraphAccessor {
                 let view = gql::TxnReadView::new(&graph, txn_id);
                 let rows = gql::execute_pipeline_with_deadline(&view, pq, max_rows, deadline)
                     .map_err(engine_err_to_string)?;
-                Ok((enforce_output_cap(rows, max_rows)?, GqlMutationResult::default()))
+                Ok((
+                    enforce_output_cap(rows, max_rows)?,
+                    GqlMutationResult::default(),
+                ))
             }
             PipelineTerminal::Set(_) | PipelineTerminal::Delete(_) => {
                 // SET / DELETE terminal: the engine's pipeline mutation runs the
@@ -665,9 +665,10 @@ pub(crate) fn execute_match_mutation(
     params: &HashMap<String, GqlValue>,
     deadline: Option<Instant>,
 ) -> Result<(Vec<ResultRow>, GqlMutationResult), String> {
-    let match_clause = mutation.match_clause.as_ref().ok_or_else(|| {
-        "execute_match_mutation invoked without a MATCH clause".to_owned()
-    })?;
+    let match_clause = mutation
+        .match_clause
+        .as_ref()
+        .ok_or_else(|| "execute_match_mutation invoked without a MATCH clause".to_owned())?;
 
     // Phase 1 — compile bindings under read lock; all owned data collected.
     // The deadline bounds this MATCH phase; Phase 2 (the write below) runs
@@ -676,8 +677,7 @@ pub(crate) fn execute_match_mutation(
         let graph = shared
             .read()
             .map_err(|_| "graph lock poisoned".to_owned())?;
-        gql::compile_match_rows(&*graph, match_clause, deadline)
-            .map_err(engine_err_to_string)?
+        gql::compile_match_rows(&*graph, match_clause, deadline).map_err(engine_err_to_string)?
     };
 
     if rows.is_empty() {
@@ -705,9 +705,10 @@ fn execute_match_mutation_in_txn(
     params: &HashMap<String, GqlValue>,
     deadline: Option<Instant>,
 ) -> Result<(Vec<ResultRow>, GqlMutationResult), String> {
-    let match_clause = mutation.match_clause.as_ref().ok_or_else(|| {
-        "execute_match_mutation_in_txn invoked without a MATCH clause".to_owned()
-    })?;
+    let match_clause = mutation
+        .match_clause
+        .as_ref()
+        .ok_or_else(|| "execute_match_mutation_in_txn invoked without a MATCH clause".to_owned())?;
 
     // Phase 1 — compile bindings under a read lock over the txn snapshot view.
     let rows: Vec<gql::MatchRow> = {
@@ -715,8 +716,7 @@ fn execute_match_mutation_in_txn(
             .read()
             .map_err(|_| "graph lock poisoned".to_owned())?;
         let view = gql::TxnReadView::new(&graph, txn_id);
-        gql::compile_match_rows(&view, match_clause, deadline)
-            .map_err(engine_err_to_string)?
+        gql::compile_match_rows(&view, match_clause, deadline).map_err(engine_err_to_string)?
     };
 
     if rows.is_empty() {
@@ -762,8 +762,7 @@ fn execute_bare_merge(
     let mut graph = shared
         .write()
         .map_err(|_| "graph lock poisoned".to_owned())?;
-    gql::apply_merge_write(&mut graph, merge, lookup, params, None)
-        .map_err(engine_err_to_string)
+    gql::apply_merge_write(&mut graph, merge, lookup, params, None).map_err(engine_err_to_string)
 }
 
 /// Transactional twin of [`execute_bare_merge`]: the lookup runs over a
@@ -810,9 +809,10 @@ fn execute_unwind_mutation(
 ) -> Result<GqlMutationResult, String> {
     use tessera_graph::gql::MutationClause;
 
-    let unwind = mutation.unwind_clause.as_ref().ok_or_else(|| {
-        "execute_unwind_mutation invoked without an UNWIND clause".to_owned()
-    })?;
+    let unwind = mutation
+        .unwind_clause
+        .as_ref()
+        .ok_or_else(|| "execute_unwind_mutation invoked without an UNWIND clause".to_owned())?;
 
     // UNWIND supports CREATE and DELETE; reject other clauses early.
     match &mutation.mutation {
@@ -847,8 +847,7 @@ fn execute_unwind_mutation(
                 .map_err(engine_err_to_string)
         }
         MutationClause::Delete(dc) => {
-            gql::apply_unwind_delete_body(&mut graph, &rows, dc, None)
-                .map_err(engine_err_to_string)
+            gql::apply_unwind_delete_body(&mut graph, &rows, dc, None).map_err(engine_err_to_string)
         }
         other => Err(format!(
             "mutation clause not yet supported with UNWIND: {other:?}"
@@ -901,12 +900,15 @@ fn execute_unwind_mutation_in_txn(
         .write()
         .map_err(|_| "graph lock poisoned".to_owned())?;
     match &mutation.mutation {
-        MutationClause::Create(create) => {
-            gql::apply_unwind_create_body(
-                &mut graph, unwind, create, &elements, &rows, Some(txn_id),
-            )
-            .map_err(engine_err_to_string)
-        }
+        MutationClause::Create(create) => gql::apply_unwind_create_body(
+            &mut graph,
+            unwind,
+            create,
+            &elements,
+            &rows,
+            Some(txn_id),
+        )
+        .map_err(engine_err_to_string),
         MutationClause::Delete(dc) => {
             gql::apply_unwind_delete_body(&mut graph, &rows, dc, Some(txn_id))
                 .map_err(engine_err_to_string)
@@ -1028,12 +1030,20 @@ mod tests {
              CREATE (a)-[:KNOWS]->(b)",
         );
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((0, 1)), "expected (0, 1), got {result:?}");
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((0, 1)),
+            "expected (0, 1), got {result:?}"
+        );
 
         // Verify the edge exists by querying outgoing edges from Alice.
         let alice_id = find_person(&accessor, "Alice");
         let graph = accessor.graph.read().unwrap();
-        let out_edges = graph.outgoing_edges(alice_id).expect("outgoing_edges failed");
+        let out_edges = graph
+            .outgoing_edges(alice_id)
+            .expect("outgoing_edges failed");
         assert_eq!(out_edges.len(), 1);
         assert_eq!(out_edges[0].label(), "KNOWS");
     }
@@ -1052,11 +1062,18 @@ mod tests {
              CREATE (a)-[:KNOWS {since: 2024}]->(b)",
         );
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((0, 1)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((0, 1))
+        );
 
         let alice_id = find_person(&accessor, "Alice");
         let graph = accessor.graph.read().unwrap();
-        let edges = graph.outgoing_edges(alice_id).expect("outgoing_edges failed");
+        let edges = graph
+            .outgoing_edges(alice_id)
+            .expect("outgoing_edges failed");
         assert_eq!(edges.len(), 1);
         let since = edges[0].properties().get("since").cloned();
         assert_eq!(
@@ -1079,7 +1096,12 @@ mod tests {
              CREATE (a)-[:KNOWS]->(b)",
         );
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((0, 0)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((0, 0))
+        );
     }
 
     // ── Cycle 5 ───────────────────────────────────────────────────────────────
@@ -1100,12 +1122,20 @@ mod tests {
              CREATE (a)-[:KNOWS]->(b)",
         );
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((0, 4)), "expected (0, 4), got {result:?}");
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((0, 4)),
+            "expected (0, 4), got {result:?}"
+        );
 
         // Verify outgoing edge count from Alice.
         let alice_id = find_person(&accessor, "Alice");
         let graph = accessor.graph.read().unwrap();
-        let out_edges = graph.outgoing_edges(alice_id).expect("outgoing_edges failed");
+        let out_edges = graph
+            .outgoing_edges(alice_id)
+            .expect("outgoing_edges failed");
         assert_eq!(out_edges.len(), 4);
     }
 
@@ -1125,13 +1155,20 @@ mod tests {
              CREATE (a)-[:KNOWS]->(b)",
         );
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((0, 1)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((0, 1))
+        );
 
         accessor.end_batch().expect("end_batch failed");
 
         let alice_id = find_person(&accessor, "Alice");
         let graph = accessor.graph.read().unwrap();
-        let edges = graph.outgoing_edges(alice_id).expect("outgoing_edges failed");
+        let edges = graph
+            .outgoing_edges(alice_id)
+            .expect("outgoing_edges failed");
         assert_eq!(edges.len(), 1);
     }
 
@@ -1143,7 +1180,12 @@ mod tests {
         let accessor = make_accessor();
         let mutation = parse_mutation("CREATE (n:Person {name: 'Alice'})");
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((1, 0)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((1, 0))
+        );
     }
 
     // ── UNWIND+CREATE ─────────────────────────────────────────────────────────
@@ -1158,11 +1200,16 @@ mod tests {
             g.add_node("Root", Properties::default()).unwrap();
         }
 
-        let mutation = parse_mutation(
-            "UNWIND [10, 20, 30] AS x MATCH (r:Root) CREATE (n:Item {val: x})",
-        );
+        let mutation =
+            parse_mutation("UNWIND [10, 20, 30] AS x MATCH (r:Root) CREATE (n:Item {val: x})");
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((3, 0)), "expected 3 nodes created, got {result:?}");
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((3, 0)),
+            "expected 3 nodes created, got {result:?}"
+        );
 
         // Verify node properties.
         let graph = accessor.graph.read().unwrap();
@@ -1192,11 +1239,14 @@ mod tests {
             g.add_node("Root", Properties::default()).unwrap();
         }
 
-        let mutation = parse_mutation(
-            "UNWIND [] AS x MATCH (r:Root) CREATE (n:Item {val: x})",
-        );
+        let mutation = parse_mutation("UNWIND [] AS x MATCH (r:Root) CREATE (n:Item {val: x})");
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((0, 0)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((0, 0))
+        );
     }
 
     /// UNWIND [1, 2, 3] AS x MATCH (r:Root) CREATE (n:Item {val: x + 10})
@@ -1209,11 +1259,15 @@ mod tests {
             g.add_node("Root", Properties::default()).unwrap();
         }
 
-        let mutation = parse_mutation(
-            "UNWIND [1, 2, 3] AS x MATCH (r:Root) CREATE (n:Item {val: x + 10})",
-        );
+        let mutation =
+            parse_mutation("UNWIND [1, 2, 3] AS x MATCH (r:Root) CREATE (n:Item {val: x + 10})");
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((3, 0)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((3, 0))
+        );
 
         let graph = accessor.graph.read().unwrap();
         let item_ids = graph.nodes_by_label("Item");
@@ -1238,11 +1292,14 @@ mod tests {
     fn unwind_create_without_match() {
         let accessor = make_accessor();
 
-        let mutation = parse_mutation(
-            "UNWIND [100, 200] AS x CREATE (n:Item {val: x})",
-        );
+        let mutation = parse_mutation("UNWIND [100, 200] AS x CREATE (n:Item {val: x})");
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((2, 0)));
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((2, 0))
+        );
 
         let graph = accessor.graph.read().unwrap();
         let item_ids = graph.nodes_by_label("Item");
@@ -1271,11 +1328,15 @@ mod tests {
     fn unwind_range_create_persists_nodes() {
         let accessor = make_accessor();
 
-        let mutation = parse_mutation(
-            "UNWIND range(1, 3) AS i CREATE (n:M {i: i})",
-        );
+        let mutation = parse_mutation("UNWIND range(1, 3) AS i CREATE (n:M {i: i})");
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((3, 0)), "range(1,3) CREATE must persist 3 nodes, got {result:?}");
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((3, 0)),
+            "range(1,3) CREATE must persist 3 nodes, got {result:?}"
+        );
 
         let graph = accessor.graph.read().unwrap();
         let item_ids = graph.nodes_by_label("M");
@@ -1302,15 +1363,26 @@ mod tests {
         let accessor = make_accessor();
         {
             let mut g = accessor.graph.write().unwrap();
-            g.add_node("Root", [("name".to_owned(), Property::String("R".to_owned()))].into_iter().collect())
-                .unwrap();
+            g.add_node(
+                "Root",
+                [("name".to_owned(), Property::String("R".to_owned()))]
+                    .into_iter()
+                    .collect(),
+            )
+            .unwrap();
         }
 
         let mutation = parse_mutation(
             "UNWIND [1, 2] AS x MATCH (r:Root) CREATE (n:Item {val: x}), (r)-[:HAS]->(n)",
         );
         let result = accessor.execute_mutation(&mutation, HashMap::new(), None);
-        assert_eq!(result.clone().map(|(_r, s)| (s.nodes_created, s.edges_created)), Ok((2, 2)), "expected 2 nodes + 2 edges, got {result:?}");
+        assert_eq!(
+            result
+                .clone()
+                .map(|(_r, s)| (s.nodes_created, s.edges_created)),
+            Ok((2, 2)),
+            "expected 2 nodes + 2 edges, got {result:?}"
+        );
 
         // Verify edges from Root.
         let graph = accessor.graph.read().unwrap();
@@ -1369,13 +1441,18 @@ mod tests {
     /// told which label refused the write.
     #[test]
     fn engine_err_to_string_remaps_append_only_in_txn_marker() {
-        let e = tessera_graph::Error::AppendOnlyLabelInTxn { label: "Event".to_owned() };
+        let e = tessera_graph::Error::AppendOnlyLabelInTxn {
+            label: "Event".to_owned(),
+        };
         let s = super::engine_err_to_string(e);
         assert!(
             s.starts_with(super::ENGINE_APPEND_ONLY_IN_TXN_PREFIX),
             "append-only rejection must be remapped, got: {s}"
         );
-        assert!(s.contains("Event"), "the offending label must survive, got: {s}");
+        assert!(
+            s.contains("Event"),
+            "the offending label must survive, got: {s}"
+        );
     }
 
     /// Cycle A10: deleting a node that still has relationships (without
@@ -1393,7 +1470,10 @@ mod tests {
             s.starts_with(super::ENGINE_DELETE_CONNECTED_PREFIX),
             "connected-node delete must be remapped, got: {s}"
         );
-        assert!(s.contains('3'), "the relationship count must survive, got: {s}");
+        assert!(
+            s.contains('3'),
+            "the relationship count must survive, got: {s}"
+        );
     }
 
     /// Cycle A11: the transaction memory cap must reach the handler tagged so
@@ -1492,7 +1572,10 @@ mod tests {
         let (rows2, stats2) = accessor
             .execute_mutation(&mutation2, HashMap::new(), None)
             .unwrap();
-        assert_eq!(stats2.nodes_created, 0, "second MERGE must not create a duplicate");
+        assert_eq!(
+            stats2.nodes_created, 0,
+            "second MERGE must not create a duplicate"
+        );
         assert!(rows2.is_empty());
 
         // Verify exactly one node exists.
@@ -1516,8 +1599,7 @@ mod tests {
     #[test]
     fn merge_on_create_set_applies_on_create() {
         let accessor = make_accessor();
-        let mutation =
-            parse_mutation("MERGE (n:Person {id: 'p1'}) ON CREATE SET n.name = 'Alice'");
+        let mutation = parse_mutation("MERGE (n:Person {id: 'p1'}) ON CREATE SET n.name = 'Alice'");
         accessor
             .execute_mutation(&mutation, HashMap::new(), None)
             .unwrap();
@@ -1539,12 +1621,15 @@ mod tests {
         let accessor = make_accessor();
         // Create the node via first MERGE.
         let m1 = parse_mutation("MERGE (n:Person {id: 'p1'}) ON CREATE SET n.name = 'Alice'");
-        accessor.execute_mutation(&m1, HashMap::new(), None).unwrap();
+        accessor
+            .execute_mutation(&m1, HashMap::new(), None)
+            .unwrap();
 
         // Second MERGE must apply ON MATCH SET, not create a duplicate.
-        let m2 =
-            parse_mutation("MERGE (n:Person {id: 'p1'}) ON MATCH SET n.name = 'AliceUpdated'");
-        accessor.execute_mutation(&m2, HashMap::new(), None).unwrap();
+        let m2 = parse_mutation("MERGE (n:Person {id: 'p1'}) ON MATCH SET n.name = 'AliceUpdated'");
+        accessor
+            .execute_mutation(&m2, HashMap::new(), None)
+            .unwrap();
 
         let graph = accessor.graph.read().unwrap();
         let ids = graph.nodes_by_label("Person");
@@ -1571,7 +1656,12 @@ mod tests {
             ]
             .into_iter()
             .collect();
-            accessor.graph.write().unwrap().add_node("Person", props).unwrap();
+            accessor
+                .graph
+                .write()
+                .unwrap()
+                .add_node("Person", props)
+                .unwrap();
         }
 
         let mut stmt =
@@ -1602,7 +1692,11 @@ mod tests {
             Some(&Property::String("Alice2".into())),
         );
         // "age" was not in $props → overwrite must have removed it.
-        assert_eq!(node.properties().get("age"), None, "overwrite must drop unset keys");
+        assert_eq!(
+            node.properties().get("age"),
+            None,
+            "overwrite must drop unset keys"
+        );
     }
 
     /// `MATCH (n:Person {name: 'Alice'}) SET n += $props` merges the map:
@@ -1649,10 +1743,8 @@ mod tests {
     fn merge_on_create_set_entity_overwrite_from_map() {
         let accessor = make_accessor();
 
-        let mut stmt = gql::parse_statement(
-            "MERGE (n:Person {id: 'p1'}) ON CREATE SET n = $props",
-        )
-        .unwrap();
+        let mut stmt =
+            gql::parse_statement("MERGE (n:Person {id: 'p1'}) ON CREATE SET n = $props").unwrap();
         let params = HashMap::from([(
             "props".to_owned(),
             gql::GqlValue::Map(HashMap::from([
@@ -1673,7 +1765,10 @@ mod tests {
         assert_eq!(ids.len(), 1, "exactly one node created");
         let node = graph.node(ids[0]).unwrap();
         // ON CREATE SET n = $props applied the whole map on top of the merge key.
-        assert_eq!(node.properties().get("name"), Some(&Property::String("Alice".into())));
+        assert_eq!(
+            node.properties().get("name"),
+            Some(&Property::String("Alice".into()))
+        );
         assert_eq!(node.properties().get("score"), Some(&Property::I64(7)));
     }
 
@@ -1686,7 +1781,8 @@ mod tests {
         // Seed a node to match.
         {
             let mut g = accessor.graph.write().unwrap();
-            g.add_node("AssetNode", tessera_graph::props! { "id" => "x" }).unwrap();
+            g.add_node("AssetNode", tessera_graph::props! { "id" => "x" })
+                .unwrap();
         }
 
         let mut stmt =
@@ -1705,7 +1801,10 @@ mod tests {
         };
 
         let (_rows, stats) = accessor.execute_mutation(&mutation, params, None).unwrap();
-        assert_eq!(stats.properties_set, 2, "two map entries merged onto the node");
+        assert_eq!(
+            stats.properties_set, 2,
+            "two map entries merged onto the node"
+        );
     }
 
     /// Issue #26 (real .NET probe variant H): `CREATE (n:L $map)` must count each
@@ -1714,8 +1813,7 @@ mod tests {
     fn create_inline_map_counts_properties_set() {
         let accessor = make_accessor();
 
-        let mut stmt =
-            gql::parse_statement("CREATE (n:Template $props) RETURN n").unwrap();
+        let mut stmt = gql::parse_statement("CREATE (n:Template $props) RETURN n").unwrap();
         let params = HashMap::from([(
             "props".to_owned(),
             gql::GqlValue::Map(HashMap::from([
@@ -1731,7 +1829,10 @@ mod tests {
 
         let (_rows, stats) = accessor.execute_mutation(&mutation, params, None).unwrap();
         assert_eq!(stats.nodes_created, 1);
-        assert_eq!(stats.properties_set, 2, "two inline-map properties on the created node");
+        assert_eq!(
+            stats.properties_set, 2,
+            "two inline-map properties on the created node"
+        );
     }
 
     // ── Cycle 5.5 — CREATE (n:Label $map) prop_map expansion (probe H) ─────────
@@ -1786,10 +1887,9 @@ mod tests {
         let accessor = make_accessor();
         add_person(&accessor, "Alice");
 
-        let mut stmt = gql::parse_statement(
-            "MATCH (n:Person {name: 'Alice'}) SET n = $properties RETURN n",
-        )
-        .unwrap();
+        let mut stmt =
+            gql::parse_statement("MATCH (n:Person {name: 'Alice'}) SET n = $properties RETURN n")
+                .unwrap();
         let params = HashMap::from([(
             "properties".to_owned(),
             gql::GqlValue::Map(HashMap::from([
@@ -1803,13 +1903,15 @@ mod tests {
             other => panic!("expected mutation, got {other:?}"),
         };
 
-        let (rows, _stats) =
-            accessor.execute_mutation(&mutation, params, None).unwrap();
+        let (rows, _stats) = accessor.execute_mutation(&mutation, params, None).unwrap();
         assert_eq!(rows.len(), 1, "RETURN n yields one row");
         let GqlValue::Map(projected) = &rows[0]["n"] else {
             panic!("n must project as a Map, got {:?}", rows[0]["n"]);
         };
-        assert_eq!(projected.get("status"), Some(&GqlValue::Str("Active".into())));
+        assert_eq!(
+            projected.get("status"),
+            Some(&GqlValue::Str("Active".into()))
+        );
         assert_eq!(projected.get("name"), Some(&GqlValue::Str("X".into())));
     }
 
@@ -1819,10 +1921,9 @@ mod tests {
         let accessor = make_accessor();
         add_person(&accessor, "Alice");
 
-        let mut stmt = gql::parse_statement(
-            "MATCH (n:Person {name: 'Alice'}) SET n += $properties RETURN n",
-        )
-        .unwrap();
+        let mut stmt =
+            gql::parse_statement("MATCH (n:Person {name: 'Alice'}) SET n += $properties RETURN n")
+                .unwrap();
         let params = HashMap::from([(
             "properties".to_owned(),
             gql::GqlValue::Map(HashMap::from([(
@@ -1836,8 +1937,7 @@ mod tests {
             other => panic!("expected mutation, got {other:?}"),
         };
 
-        let (rows, _stats) =
-            accessor.execute_mutation(&mutation, params, None).unwrap();
+        let (rows, _stats) = accessor.execute_mutation(&mutation, params, None).unwrap();
         assert_eq!(rows.len(), 1);
         let GqlValue::Map(projected) = &rows[0]["n"] else {
             panic!("n must project as a Map");
@@ -1852,8 +1952,7 @@ mod tests {
     fn bare_create_with_map_and_trailing_return_projects_node() {
         let accessor = make_accessor();
 
-        let mut stmt =
-            gql::parse_statement("CREATE (n:Template $properties) RETURN n").unwrap();
+        let mut stmt = gql::parse_statement("CREATE (n:Template $properties) RETURN n").unwrap();
         let params = HashMap::from([(
             "properties".to_owned(),
             gql::GqlValue::Map(HashMap::from([(
@@ -1867,8 +1966,7 @@ mod tests {
             other => panic!("expected mutation, got {other:?}"),
         };
 
-        let (rows, stats) =
-            accessor.execute_mutation(&mutation, params, None).unwrap();
+        let (rows, stats) = accessor.execute_mutation(&mutation, params, None).unwrap();
         assert_eq!(stats.nodes_created, 1);
         assert_eq!(rows.len(), 1, "RETURN n yields one row");
         let GqlValue::Map(projected) = &rows[0]["n"] else {
@@ -1895,16 +1993,27 @@ mod tests {
         let (_rows, stats) = accessor
             .execute_mutation_in_txn(txn, &mutation, HashMap::new(), None)
             .unwrap();
-        assert_eq!(stats.nodes_created, 1, "CREATE inside txn reports one node created");
+        assert_eq!(
+            stats.nodes_created, 1,
+            "CREATE inside txn reports one node created"
+        );
 
         // Auto-commit read must not see the pending node before COMMIT.
         let q = gql::parse("MATCH (n:Persona) RETURN n").unwrap();
         let autocommit_rows = accessor.execute_query(&q, HashMap::new(), 0, None).unwrap();
-        assert_eq!(autocommit_rows.len(), 0, "pending write invisible to auto-commit");
+        assert_eq!(
+            autocommit_rows.len(),
+            0,
+            "pending write invisible to auto-commit"
+        );
 
         accessor.commit_txn(txn).unwrap();
         let after = accessor.execute_query(&q, HashMap::new(), 0, None).unwrap();
-        assert_eq!(after.len(), 1, "COMMIT makes the node visible to auto-commit");
+        assert_eq!(
+            after.len(),
+            1,
+            "COMMIT makes the node visible to auto-commit"
+        );
     }
 
     #[test]
@@ -1947,7 +2056,10 @@ mod tests {
         let (_r2, s2) = accessor
             .execute_mutation_in_txn(txn, &merge, HashMap::new(), None)
             .unwrap();
-        assert_eq!(s2.nodes_created, 0, "second MERGE in the same txn matches its own pending node");
+        assert_eq!(
+            s2.nodes_created, 0,
+            "second MERGE in the same txn matches its own pending node"
+        );
 
         accessor.commit_txn(txn).unwrap();
         // Exactly one node after commit — no duplicate leaked.
@@ -1977,7 +2089,11 @@ mod tests {
         assert_eq!(in_txn.len(), 3, "all three pending nodes enumerated in-txn");
 
         let autocommit = accessor.execute_query(&q, HashMap::new(), 0, None).unwrap();
-        assert_eq!(autocommit.len(), 0, "pending nodes invisible to auto-commit");
+        assert_eq!(
+            autocommit.len(),
+            0,
+            "pending nodes invisible to auto-commit"
+        );
 
         accessor.commit_txn(txn).unwrap();
         let after = accessor.execute_query(&q, HashMap::new(), 0, None).unwrap();

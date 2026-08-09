@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! GQL recursive-descent parser.
 //!
@@ -7,16 +7,15 @@
 //! bounded look-ahead (at most 2 tokens) and explicit precedence levels for
 //! the expression sub-grammar.
 
+use crate::Error;
 use crate::gql::ast::{
     AggFunc, AstDirection, BinOp, ConstReturnQuery, CreateClause, CreatePattern, DeleteClause,
     EdgeLength, EdgePattern, Expr, GqlQuery, GqlStatement, LimitClause, ListPredKind, Literal,
     MatchClause, MergeClause, MutationClause, MutationStatement, NodePattern, OrderByClause,
-    OrderItem,
-    ParamRef, PathPattern, ReturnClause, ReturnItem, SetAssignment, SetClause, UnaryOp,
+    OrderItem, ParamRef, PathPattern, ReturnClause, ReturnItem, SetAssignment, SetClause, UnaryOp,
     WhereClause,
 };
 use crate::gql::token::{self, Span, SpannedToken, Token};
-use crate::Error;
 
 // ── Internal struct for edge bracket content ──────────────────────────────────
 
@@ -35,8 +34,7 @@ struct EdgeBracketContent {
 const MAX_EXPR_DEPTH: usize = 128;
 
 /// Error emitted when a variable-reference node in CREATE has inline properties.
-const VAR_REF_PROPS_ERROR: &str =
-    "variable reference in CREATE cannot have inline properties; \
+const VAR_REF_PROPS_ERROR: &str = "variable reference in CREATE cannot have inline properties; \
      add a label to create a new node";
 
 /// Recursive-descent parser for the GQL read-only query subset.
@@ -78,7 +76,11 @@ impl Parser {
             tokens.last().is_some_and(|t| t.token == Token::Eof),
             "token stream must end with Eof"
         );
-        Self { tokens, pos: 0, expr_depth: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            expr_depth: 0,
+        }
     }
 
     /// Returns `true` if the token stream is well-formed: non-empty and
@@ -122,16 +124,26 @@ impl Parser {
 
     /// Returns the source [`Span`] of the current (not yet consumed) token.
     fn current_span(&self) -> Span {
-        self.tokens
-            .get(self.pos)
-            .map_or(Span { start: 0, end: 0, line: 1, col: 1 }, |st| st.span)
+        self.tokens.get(self.pos).map_or(
+            Span {
+                start: 0,
+                end: 0,
+                line: 1,
+                col: 1,
+            },
+            |st| st.span,
+        )
     }
 
     /// Builds a [`Error::GqlSyntaxError`] anchored at the current token
     /// position.
     fn syntax_error(&self, msg: impl Into<String>) -> Error {
         let span = self.current_span();
-        Error::GqlSyntaxError { line: span.line, col: span.col, message: msg.into() }
+        Error::GqlSyntaxError {
+            line: span.line,
+            col: span.col,
+            message: msg.into(),
+        }
     }
 
     /// Builds an [`Error::GqlUnsupported`] for features not currently implemented.
@@ -149,7 +161,8 @@ impl Parser {
     /// the token stream. Callers must always check [`peek()`](Self::peek)
     /// before calling this method.
     fn advance(&mut self) -> &SpannedToken {
-        let tok = self.tokens
+        let tok = self
+            .tokens
             .get(self.pos)
             .expect("advance() called past end of token stream");
         self.pos += 1;
@@ -166,10 +179,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(self.syntax_error(format!(
-                "expected {expected}, found {}",
-                self.peek()
-            )))
+            Err(self.syntax_error(format!("expected {expected}, found {}", self.peek())))
         }
     }
 
@@ -223,9 +233,7 @@ impl Parser {
     /// Returns [`Error::GqlSyntaxError`] on any malformed input.
     pub fn parse(mut self) -> crate::Result<GqlQuery> {
         if !self.stream_is_terminated() {
-            return Err(self.syntax_error(
-                "malformed token stream: missing terminating Eof",
-            ));
+            return Err(self.syntax_error("malformed token stream: missing terminating Eof"));
         }
 
         let unwind_clause = self.parse_unwind_clause()?;
@@ -243,9 +251,12 @@ impl Parser {
 
         Ok(GqlQuery {
             unwind_clause,
-            match_clause, where_clause, return_clause,
+            match_clause,
+            where_clause,
+            return_clause,
             group_by,
-            order_by, limit,
+            order_by,
+            limit,
         })
     }
 
@@ -266,9 +277,7 @@ impl Parser {
     /// Returns [`Error::GqlSyntaxError`] on malformed input.
     pub fn parse_statement(mut self) -> crate::Result<GqlStatement> {
         if !self.stream_is_terminated() {
-            return Err(self.syntax_error(
-                "malformed token stream: missing terminating Eof",
-            ));
+            return Err(self.syntax_error("malformed token stream: missing terminating Eof"));
         }
 
         // Parse optional UNWIND before the main clause dispatch.
@@ -338,14 +347,10 @@ impl Parser {
                 }))
             }
             Token::Delete | Token::Detach => {
-                Err(self.syntax_error(
-                    "DELETE requires a preceding MATCH clause to bind variables",
-                ))
+                Err(self.syntax_error("DELETE requires a preceding MATCH clause to bind variables"))
             }
             Token::Set => {
-                Err(self.syntax_error(
-                    "SET requires a preceding MATCH clause to bind variables",
-                ))
+                Err(self.syntax_error("SET requires a preceding MATCH clause to bind variables"))
             }
             Token::Return => {
                 // `RETURN <expr-list>` as a root statement, with no MATCH/
@@ -398,7 +403,12 @@ impl Parser {
             None
         };
 
-        Ok(ConstReturnQuery { items, distinct, limit, skip })
+        Ok(ConstReturnQuery {
+            items,
+            distinct,
+            limit,
+            skip,
+        })
     }
 
     /// Parses an optional trailing `RETURN <items>` after a mutation
@@ -407,9 +417,7 @@ impl Parser {
     /// `Eof` check still applies. The official Neo4j driver emits this form for
     /// the idiomatic upsert ("mutate, then give me the node back"); without it
     /// the driver surfaces `Neo.ClientError.Statement.SyntaxError`.
-    fn parse_optional_trailing_return(
-        &mut self,
-    ) -> crate::Result<Option<Box<ReturnClause>>> {
+    fn parse_optional_trailing_return(&mut self) -> crate::Result<Option<Box<ReturnClause>>> {
         if *self.peek() != Token::Return {
             return Ok(None);
         }
@@ -517,10 +525,7 @@ impl Parser {
     /// entries and one `CreatePattern::Edge` entry (in that order so that
     /// the executor can resolve source and target variables before processing
     /// the edge).
-    fn parse_create_pattern_multi(
-        &mut self,
-        out: &mut Vec<CreatePattern>,
-    ) -> crate::Result<()> {
+    fn parse_create_pattern_multi(&mut self, out: &mut Vec<CreatePattern>) -> crate::Result<()> {
         self.expect(&Token::LParen)?;
 
         let var = if let Token::Ident(_) = self.peek() {
@@ -553,7 +558,10 @@ impl Parser {
             } else if *self.peek() == Token::Dollar {
                 self.advance(); // consume '$'
                 let param_name = self.expect_ident()?;
-                (Vec::new(), Some(Expr::ParamRef(ParamRef::Named(param_name))))
+                (
+                    Vec::new(),
+                    Some(Expr::ParamRef(ParamRef::Named(param_name))),
+                )
             } else {
                 (Vec::new(), None)
             };
@@ -562,10 +570,17 @@ impl Parser {
 
         self.expect(&Token::RParen)?;
 
-        let source_var_name = var.clone().unwrap_or_else(|| format!("_anon_{}", out.len()));
+        let source_var_name = var
+            .clone()
+            .unwrap_or_else(|| format!("_anon_{}", out.len()));
         let node_idx = out.len();
         if !is_var_ref {
-            out.push(CreatePattern::Node { var, label, props, prop_map });
+            out.push(CreatePattern::Node {
+                var,
+                label,
+                props,
+                prop_map,
+            });
         }
 
         // Incoming edges are not supported in CREATE.
@@ -654,8 +669,9 @@ impl Parser {
         };
         self.expect(&Token::RParen)?;
 
-        let target_var_name =
-            target_var.clone().unwrap_or_else(|| format!("_anon_{}", out.len()));
+        let target_var_name = target_var
+            .clone()
+            .unwrap_or_else(|| format!("_anon_{}", out.len()));
 
         // Determine the actual source variable name from the already-pushed node
         // or from the variable reference.
@@ -796,7 +812,14 @@ impl Parser {
             None
         };
 
-        Ok(MergeClause { var, label, props, on_create, on_match, return_var })
+        Ok(MergeClause {
+            var,
+            label,
+            props,
+            on_create,
+            on_match,
+            return_var,
+        })
     }
 
     /// True when the current token is the identifier `ON` (case-insensitive,
@@ -815,8 +838,7 @@ impl Parser {
 
         // Optional path-variable binding: `MATCH p = (…)`. Recognised by the
         // `IDENT =` prefix; without it, the clause has no bound path.
-        let path_var = if matches!(self.peek(), Token::Ident(_))
-            && *self.peek_ahead(1) == Token::Eq
+        let path_var = if matches!(self.peek(), Token::Ident(_)) && *self.peek_ahead(1) == Token::Eq
         {
             let name = self.expect_ident()?;
             self.expect(&Token::Eq)?;
@@ -986,8 +1008,12 @@ impl Parser {
                     )));
                 }
                 self.expect(&Token::LBracket)?;
-                let EdgeBracketContent { var, labels, props, length } =
-                    self.parse_edge_bracket_content()?;
+                let EdgeBracketContent {
+                    var,
+                    labels,
+                    props,
+                    length,
+                } = self.parse_edge_bracket_content()?;
                 self.expect(&Token::RBracket)?;
                 self.expect(&Token::Minus)?;
                 let node = self.parse_node_pattern()?;
@@ -1013,8 +1039,12 @@ impl Parser {
                     )));
                 }
                 self.expect(&Token::LBracket)?;
-                let EdgeBracketContent { var, labels, props, length } =
-                    self.parse_edge_bracket_content()?;
+                let EdgeBracketContent {
+                    var,
+                    labels,
+                    props,
+                    length,
+                } = self.parse_edge_bracket_content()?;
                 self.expect(&Token::RBracket)?;
 
                 let direction = match self.peek() {
@@ -1033,17 +1063,23 @@ impl Parser {
                     }
                 };
                 let node = self.parse_node_pattern()?;
-                Ok((EdgePattern { var, labels, props, direction, length }, node))
-            }
-            Token::ArrowRight => {
-                Err(self.syntax_error(
-                    "edge pattern requires brackets, e.g. -[r:TYPE]-> \
-                     (found `->` without preceding `[...]`)".to_string()
+                Ok((
+                    EdgePattern {
+                        var,
+                        labels,
+                        props,
+                        direction,
+                        length,
+                    },
+                    node,
                 ))
             }
-            other => {
-                Err(self.syntax_error(format!("expected edge pattern, found {other}")))
-            }
+            Token::ArrowRight => Err(self.syntax_error(
+                "edge pattern requires brackets, e.g. -[r:TYPE]-> \
+                     (found `->` without preceding `[...]`)"
+                    .to_string(),
+            )),
+            other => Err(self.syntax_error(format!("expected edge pattern, found {other}"))),
         }
     }
 
@@ -1079,7 +1115,9 @@ impl Parser {
                 let n = *n;
                 self.advance();
                 let v = u32::try_from(n).map_err(|_| {
-                    self.syntax_error(format!("variable-length min bound must be non-negative, got {n}"))
+                    self.syntax_error(format!(
+                        "variable-length min bound must be non-negative, got {n}"
+                    ))
                 })?;
                 Some(v)
             } else {
@@ -1091,7 +1129,9 @@ impl Parser {
                     let n = *n;
                     self.advance();
                     let v = u32::try_from(n).map_err(|_| {
-                        self.syntax_error(format!("variable-length max bound must be non-negative, got {n}"))
+                        self.syntax_error(format!(
+                            "variable-length max bound must be non-negative, got {n}"
+                        ))
                     })?;
                     Some(v)
                 } else {
@@ -1108,7 +1148,12 @@ impl Parser {
             EdgeLength::Fixed
         };
 
-        Ok(EdgeBracketContent { var, labels, props, length })
+        Ok(EdgeBracketContent {
+            var,
+            labels,
+            props,
+            length,
+        })
     }
 
     // ── WHERE clause ─────────────────────────────────────────────────────────
@@ -1171,9 +1216,7 @@ impl Parser {
     // ── GROUP BY clause ──────────────────────────────────────────────────────
 
     /// Parses the optional `GROUP BY expr, ...` clause.
-    fn parse_group_by_clause(
-        &mut self,
-    ) -> crate::Result<Option<super::ast::GroupByClause>> {
+    fn parse_group_by_clause(&mut self) -> crate::Result<Option<super::ast::GroupByClause>> {
         if *self.peek() != Token::Group {
             return Ok(None);
         }
@@ -1289,7 +1332,11 @@ impl Parser {
         while *self.peek() == Token::Or {
             self.advance();
             let right = self.parse_and()?;
-            left = Expr::BinaryOp { left: Box::new(left), op: BinOp::Or, right: Box::new(right) };
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinOp::Or,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -1300,8 +1347,11 @@ impl Parser {
         while *self.peek() == Token::And {
             self.advance();
             let right = self.parse_not()?;
-            left =
-                Expr::BinaryOp { left: Box::new(left), op: BinOp::And, right: Box::new(right) };
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op: BinOp::And,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -1313,7 +1363,10 @@ impl Parser {
             self.enter_expr()?;
             let expr = self.parse_not()?;
             self.exit_expr();
-            return Ok(Expr::UnaryOp { op: UnaryOp::Not, expr: Box::new(expr) });
+            return Ok(Expr::UnaryOp {
+                op: UnaryOp::Not,
+                expr: Box::new(expr),
+            });
         }
         self.parse_comparison()
     }
@@ -1338,7 +1391,10 @@ impl Parser {
                 false
             };
             self.expect(&Token::Null)?;
-            return Ok(Expr::IsNull { expr: Box::new(left), negated });
+            return Ok(Expr::IsNull {
+                expr: Box::new(left),
+                negated,
+            });
         }
 
         // Cypher string/list operators: STARTS WITH, ENDS WITH, CONTAINS, IN.
@@ -1416,7 +1472,11 @@ impl Parser {
         };
         self.advance();
         let right = self.parse_addition()?;
-        Ok(Expr::BinaryOp { left: Box::new(left), op, right: Box::new(right) })
+        Ok(Expr::BinaryOp {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        })
     }
 
     /// Parses a list literal `[lit, lit, ...]`.
@@ -1476,7 +1536,11 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_multiplication()?;
-            left = Expr::BinaryOp { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -1492,7 +1556,11 @@ impl Parser {
             };
             self.advance();
             let right = self.parse_unary()?;
-            left = Expr::BinaryOp { left: Box::new(left), op, right: Box::new(right) };
+            left = Expr::BinaryOp {
+                left: Box::new(left),
+                op,
+                right: Box::new(right),
+            };
         }
         Ok(left)
     }
@@ -1512,7 +1580,10 @@ impl Parser {
             self.enter_expr()?;
             let expr = self.parse_unary()?;
             self.exit_expr();
-            return Ok(Expr::UnaryOp { op: UnaryOp::Neg, expr: Box::new(expr) });
+            return Ok(Expr::UnaryOp {
+                op: UnaryOp::Neg,
+                expr: Box::new(expr),
+            });
         }
         self.parse_primary()
     }
@@ -1557,7 +1628,9 @@ impl Parser {
             if *self.peek() == Token::LParen {
                 let pattern = self.parse_path_pattern()?;
                 self.expect(&Token::RParen)?;
-                let expr = Expr::ShortestPath { pattern: Box::new(pattern) };
+                let expr = Expr::ShortestPath {
+                    pattern: Box::new(pattern),
+                };
                 return self.parse_primary_suffix(expr);
             }
             // Legacy two-arg form `shortestPath(a, b)`.
@@ -1569,7 +1642,10 @@ impl Parser {
             }
             self.exit_expr();
             self.expect(&Token::RParen)?;
-            let expr = Expr::FunctionCall { name: name_lower, args };
+            let expr = Expr::FunctionCall {
+                name: name_lower,
+                args,
+            };
             return self.parse_primary_suffix(expr);
         }
 
@@ -1590,7 +1666,10 @@ impl Parser {
             }
         }
         self.expect(&Token::RParen)?;
-        let expr = Expr::FunctionCall { name: name_lower, args };
+        let expr = Expr::FunctionCall {
+            name: name_lower,
+            args,
+        };
         self.parse_primary_suffix(expr)
     }
 
@@ -1720,10 +1799,7 @@ impl Parser {
             // deferred to `param_substitution::apply` (cycle 6).
             Token::Dollar => self.parse_param_ref(),
 
-            _ => Err(self.syntax_error(format!(
-                "unexpected token in expression: {}",
-                self.peek()
-            ))),
+            _ => Err(self.syntax_error(format!("unexpected token in expression: {}", self.peek()))),
         }
     }
 
@@ -1786,7 +1862,10 @@ impl Parser {
         self.exit_expr();
         let arg = arg_result?;
         self.expect(&Token::RParen)?;
-        Ok(Expr::Aggregate { func, arg: Some(Box::new(arg)) })
+        Ok(Expr::Aggregate {
+            func,
+            arg: Some(Box::new(arg)),
+        })
     }
 
     // ── Pipeline parser (WITH clause) ────────────────────────────────────────
@@ -1896,7 +1975,12 @@ impl Parser {
                 let order_by = self.parse_order_by_clause()?;
                 let skip = self.parse_skip_clause()?;
                 let limit = self.parse_limit_clause()?;
-                Ok(PipelineTerminal::Return { clause, order_by, skip, limit })
+                Ok(PipelineTerminal::Return {
+                    clause,
+                    order_by,
+                    skip,
+                    limit,
+                })
             }
             Token::Set => {
                 let set = self.parse_set_clause()?;
@@ -1959,8 +2043,8 @@ fn inject_unwind(
 mod tests {
     use super::*;
     use crate::gql::ast::{
-        AggFunc, AstDirection, BinOp, ConstReturnQuery, CreatePattern, Expr, GqlStatement,
-        Literal, MutationClause, ParamRef, UnaryOp,
+        AggFunc, AstDirection, BinOp, ConstReturnQuery, CreatePattern, Expr, GqlStatement, Literal,
+        MutationClause, ParamRef, UnaryOp,
     };
     use crate::gql::lexer::Lexer;
 
@@ -1986,8 +2070,16 @@ mod tests {
     #[should_panic(expected = "advance() called past end of token stream")]
     fn parser_advance_past_end_panics_with_clear_message() {
         use crate::gql::token::{Span, SpannedToken, Token};
-        let eof_span = Span { start: 0, end: 0, line: 1, col: 1 };
-        let tokens = vec![SpannedToken { token: Token::Eof, span: eof_span }];
+        let eof_span = Span {
+            start: 0,
+            end: 0,
+            line: 1,
+            col: 1,
+        };
+        let tokens = vec![SpannedToken {
+            token: Token::Eof,
+            span: eof_span,
+        }];
         let mut p = Parser::new(tokens);
         p.advance(); // consumes Eof
         p.advance(); // past end — should panic
@@ -2008,7 +2100,10 @@ mod tests {
     #[test]
     fn parse_node_with_label() {
         let q = parse_query("MATCH (a:Person) RETURN a").unwrap();
-        assert_eq!(q.match_clause.patterns[0].start.labels, vec!["Person".to_string()]);
+        assert_eq!(
+            q.match_clause.patterns[0].start.labels,
+            vec!["Person".to_string()]
+        );
     }
 
     #[test]
@@ -2024,7 +2119,10 @@ mod tests {
     fn parse_node_with_inline_property() {
         let q = parse_query("MATCH (a:Person {name: 'Alice'}) RETURN a").unwrap();
         let node = &q.match_clause.patterns[0].start;
-        assert_eq!(node.props, vec![("name".into(), Literal::Str("Alice".into()))]);
+        assert_eq!(
+            node.props,
+            vec![("name".into(), Literal::Str("Alice".into()))]
+        );
     }
 
     #[test]
@@ -2079,8 +2177,7 @@ mod tests {
 
     #[test]
     fn parse_three_node_path() {
-        let q =
-            parse_query("MATCH (a)-[r1:KNOWS]->(b)-[r2:LIKES]->(c) RETURN a").unwrap();
+        let q = parse_query("MATCH (a)-[r1:KNOWS]->(b)-[r2:LIKES]->(c) RETURN a").unwrap();
         assert_eq!(q.match_clause.patterns[0].hops.len(), 2);
     }
 
@@ -2109,7 +2206,10 @@ mod tests {
         let q = parse_query("MATCH (a) RETURN a.name").unwrap();
         assert_eq!(
             q.return_clause.items[0].expr,
-            Expr::PropAccess { var: "a".into(), prop: "name".into() }
+            Expr::PropAccess {
+                var: "a".into(),
+                prop: "name".into()
+            }
         );
     }
 
@@ -2130,7 +2230,10 @@ mod tests {
         let q = parse_query("MATCH (a) RETURN COUNT(*)").unwrap();
         assert_eq!(
             q.return_clause.items[0].expr,
-            Expr::Aggregate { func: AggFunc::Count, arg: None }
+            Expr::Aggregate {
+                func: AggFunc::Count,
+                arg: None
+            }
         );
     }
 
@@ -2166,8 +2269,7 @@ mod tests {
 
     #[test]
     fn parse_where_and() {
-        let q =
-            parse_query("MATCH (a) WHERE a.age > 30 AND a.name = 'Alice' RETURN a").unwrap();
+        let q = parse_query("MATCH (a) WHERE a.age > 30 AND a.name = 'Alice' RETURN a").unwrap();
         match &q.where_clause.as_ref().unwrap().predicate {
             Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::And),
             _ => panic!("expected AND"),
@@ -2228,8 +2330,7 @@ mod tests {
 
     #[test]
     fn expr_precedence_and_before_or() {
-        let q =
-            parse_query("MATCH (n) WHERE n.a = 1 OR n.b = 2 AND n.c = 3 RETURN n").unwrap();
+        let q = parse_query("MATCH (n) WHERE n.a = 1 OR n.b = 2 AND n.c = 3 RETURN n").unwrap();
         let pred = &q.where_clause.as_ref().unwrap().predicate;
         match pred {
             Expr::BinaryOp { op, right, .. } => {
@@ -2270,7 +2371,10 @@ mod tests {
     #[test]
     fn parse_return_literal_int() {
         let q = parse_query("MATCH (a) RETURN 42").unwrap();
-        assert_eq!(q.return_clause.items[0].expr, Expr::Literal(Literal::Int(42)));
+        assert_eq!(
+            q.return_clause.items[0].expr,
+            Expr::Literal(Literal::Int(42))
+        );
     }
 
     #[test]
@@ -2284,10 +2388,7 @@ mod tests {
 
     #[test]
     fn parse_parenthesized_expr() {
-        let q = parse_query(
-            "MATCH (n) WHERE (n.a = 1 OR n.b = 2) AND n.c = 3 RETURN n",
-        )
-        .unwrap();
+        let q = parse_query("MATCH (n) WHERE (n.a = 1 OR n.b = 2) AND n.c = 3 RETURN n").unwrap();
         let pred = &q.where_clause.as_ref().unwrap().predicate;
         match pred {
             Expr::BinaryOp { op, left, .. } => {
@@ -2385,7 +2486,10 @@ mod tests {
     #[test]
     fn expect_ident_returns_correct_string() {
         let q = parse_query("MATCH (myVar) RETURN myVar").unwrap();
-        assert_eq!(q.match_clause.patterns[0].start.var.as_deref(), Some("myVar"));
+        assert_eq!(
+            q.match_clause.patterns[0].start.var.as_deref(),
+            Some("myVar")
+        );
     }
 
     #[test]
@@ -2405,9 +2509,7 @@ mod tests {
 
     #[test]
     fn hops_vec_capacity_does_not_affect_output() {
-        let q = parse_query(
-            "MATCH (a)-[:R1]->(b)-[:R2]->(c)-[:R3]->(d) RETURN a"
-        ).unwrap();
+        let q = parse_query("MATCH (a)-[:R1]->(b)-[:R2]->(c)-[:R3]->(d) RETURN a").unwrap();
         assert_eq!(q.match_clause.patterns[0].hops.len(), 3);
     }
 
@@ -2419,9 +2521,7 @@ mod tests {
 
     #[test]
     fn parse_order_by_five_items() {
-        let q = parse_query(
-            "MATCH (n) RETURN n ORDER BY n.a, n.b, n.c, n.d, n.e"
-        ).unwrap();
+        let q = parse_query("MATCH (n) RETURN n ORDER BY n.a, n.b, n.c, n.d, n.e").unwrap();
         assert_eq!(q.order_by.unwrap().items.len(), 5);
     }
 
@@ -2521,7 +2621,9 @@ mod tests {
                 MutationClause::Create(c) => {
                     assert_eq!(c.patterns.len(), 1);
                     match &c.patterns[0] {
-                        CreatePattern::Node { var, label, props, .. } => {
+                        CreatePattern::Node {
+                            var, label, props, ..
+                        } => {
                             assert_eq!(var.as_deref(), Some("n"));
                             assert_eq!(label, "Person");
                             assert_eq!(props.len(), 2);
@@ -2542,7 +2644,9 @@ mod tests {
         match stmt {
             GqlStatement::Mutation(ms) => match ms.mutation {
                 MutationClause::Create(c) => match &c.patterns[0] {
-                    CreatePattern::Node { var, label, props, .. } => {
+                    CreatePattern::Node {
+                        var, label, props, ..
+                    } => {
                         assert!(var.is_none());
                         assert_eq!(label, "Thing");
                         assert!(props.is_empty());
@@ -2585,7 +2689,9 @@ mod tests {
                 MutationClause::Create(c) => {
                     assert_eq!(c.patterns.len(), 3, "expected Node a + Node b + Edge");
                     match &c.patterns[0] {
-                        CreatePattern::Node { var, label, props, .. } => {
+                        CreatePattern::Node {
+                            var, label, props, ..
+                        } => {
                             assert_eq!(var.as_deref(), Some("a"));
                             assert_eq!(label, "Person");
                             assert_eq!(props.len(), 1);
@@ -2594,7 +2700,9 @@ mod tests {
                         other => panic!("expected Node for pattern[0], got {other:?}"),
                     }
                     match &c.patterns[1] {
-                        CreatePattern::Node { var, label, props, .. } => {
+                        CreatePattern::Node {
+                            var, label, props, ..
+                        } => {
                             assert_eq!(var.as_deref(), Some("b"));
                             assert_eq!(label, "Person");
                             assert_eq!(props.len(), 1);
@@ -2648,7 +2756,10 @@ mod tests {
             .tokenize()
             .unwrap();
         let result = Parser::new(tokens).parse_statement();
-        assert!(result.is_err(), "undirected CREATE edge should be a syntax error");
+        assert!(
+            result.is_err(),
+            "undirected CREATE edge should be a syntax error"
+        );
     }
 
     #[test]
@@ -2657,7 +2768,10 @@ mod tests {
             .tokenize()
             .unwrap();
         let result = Parser::new(tokens).parse_statement();
-        assert!(result.is_err(), "incoming CREATE edge must be a syntax error");
+        assert!(
+            result.is_err(),
+            "incoming CREATE edge must be a syntax error"
+        );
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("outgoing"),
@@ -2738,9 +2852,7 @@ mod tests {
     /// already bound — is the executor's responsibility, not the parser's.
     #[test]
     fn parse_create_var_ref_without_label() {
-        let tokens = Lexer::new("CREATE (a)-[:KNOWS]->(b)")
-            .tokenize()
-            .unwrap();
+        let tokens = Lexer::new("CREATE (a)-[:KNOWS]->(b)").tokenize().unwrap();
         let stmt = Parser::new(tokens).parse_statement().unwrap();
         match stmt {
             GqlStatement::Mutation(ms) => {
@@ -2761,11 +2873,9 @@ mod tests {
 
     #[test]
     fn parse_consecutive_match_return() {
-        let tokens = Lexer::new(
-            "MATCH (a:Person) MATCH (b:Company) RETURN a, b",
-        )
-        .tokenize()
-        .unwrap();
+        let tokens = Lexer::new("MATCH (a:Person) MATCH (b:Company) RETURN a, b")
+            .tokenize()
+            .unwrap();
         let stmt = Parser::new(tokens).parse_statement().unwrap();
         match stmt {
             GqlStatement::Query(q) => {
@@ -2792,10 +2902,7 @@ mod tests {
                 // The two WHERE predicates must be merged with AND.
                 let w = q.where_clause.expect("must have where clause");
                 assert!(
-                    matches!(
-                        w.predicate,
-                        Expr::BinaryOp { op: BinOp::And, .. }
-                    ),
+                    matches!(w.predicate, Expr::BinaryOp { op: BinOp::And, .. }),
                     "expected AND, got {:?}",
                     w.predicate,
                 );
@@ -2831,11 +2938,9 @@ mod tests {
 
     #[test]
     fn parse_consecutive_match_then_create() {
-        let tokens = Lexer::new(
-            "MATCH (a:Person) MATCH (b:Person) CREATE (a)-[:KNOWS]->(b)",
-        )
-        .tokenize()
-        .unwrap();
+        let tokens = Lexer::new("MATCH (a:Person) MATCH (b:Person) CREATE (a)-[:KNOWS]->(b)")
+            .tokenize()
+            .unwrap();
         let stmt = Parser::new(tokens).parse_statement().unwrap();
         match stmt {
             GqlStatement::Mutation(ms) => {
@@ -2855,11 +2960,9 @@ mod tests {
 
     #[test]
     fn parse_consecutive_match_then_delete() {
-        let tokens = Lexer::new(
-            "MATCH (a:Person) MATCH (b:Company) DELETE a, b",
-        )
-        .tokenize()
-        .unwrap();
+        let tokens = Lexer::new("MATCH (a:Person) MATCH (b:Company) DELETE a, b")
+            .tokenize()
+            .unwrap();
         let stmt = Parser::new(tokens).parse_statement().unwrap();
         match stmt {
             GqlStatement::Mutation(ms) => {
@@ -2987,10 +3090,9 @@ mod tests {
 
     #[test]
     fn parse_delete_multiple_vars() {
-        let tokens =
-            Lexer::new("MATCH (a:Person)-[:KNOWS]->(b:Person) DETACH DELETE a, b")
-                .tokenize()
-                .unwrap();
+        let tokens = Lexer::new("MATCH (a:Person)-[:KNOWS]->(b:Person) DETACH DELETE a, b")
+            .tokenize()
+            .unwrap();
         let stmt = Parser::new(tokens).parse_statement().unwrap();
         match stmt {
             GqlStatement::Mutation(ms) => match ms.mutation {
@@ -3065,10 +3167,14 @@ mod tests {
             GqlStatement::Mutation(ms) => match ms.mutation {
                 MutationClause::Set(s) => {
                     assert_eq!(s.assignments.len(), 2);
-                    let props: Vec<&str> = s.assignments.iter().map(|a| match a {
-                        SetAssignment::Property { prop, .. } => prop.as_str(),
-                        other => panic!("expected Property, got {other:?}"),
-                    }).collect();
+                    let props: Vec<&str> = s
+                        .assignments
+                        .iter()
+                        .map(|a| match a {
+                            SetAssignment::Property { prop, .. } => prop.as_str(),
+                            other => panic!("expected Property, got {other:?}"),
+                        })
+                        .collect();
                     assert_eq!(props, vec!["age", "city"]);
                 }
                 _ => panic!("expected Set"),
@@ -3089,7 +3195,10 @@ mod tests {
                 MutationClause::Set(s) => {
                     assert!(matches!(
                         &s.assignments[0],
-                        SetAssignment::Property { value: Expr::BinaryOp { .. }, .. }
+                        SetAssignment::Property {
+                            value: Expr::BinaryOp { .. },
+                            ..
+                        }
                     ));
                 }
                 _ => panic!("expected Set"),
@@ -3141,7 +3250,10 @@ mod tests {
     fn parse_merge_without_label_is_error() {
         let tokens = Lexer::new("MERGE (n)").tokenize().unwrap();
         let result = Parser::new(tokens).parse_statement();
-        assert!(result.is_err(), "MERGE without label should be a syntax error");
+        assert!(
+            result.is_err(),
+            "MERGE without label should be a syntax error"
+        );
     }
 
     // ── Variable-length path parsing ─────────────────────────────────────────
@@ -3150,28 +3262,52 @@ mod tests {
     fn parse_var_len_star_only() {
         let q = parse_query("MATCH (a)-[*]->(b) RETURN a").unwrap();
         let hop = &q.match_clause.patterns[0].hops[0].0;
-        assert!(matches!(hop.length, EdgeLength::Variable { min: None, max: None }));
+        assert!(matches!(
+            hop.length,
+            EdgeLength::Variable {
+                min: None,
+                max: None
+            }
+        ));
     }
 
     #[test]
     fn parse_var_len_bounded() {
         let q = parse_query("MATCH (a)-[*1..5]->(b) RETURN a").unwrap();
         let hop = &q.match_clause.patterns[0].hops[0].0;
-        assert!(matches!(hop.length, EdgeLength::Variable { min: Some(1), max: Some(5) }));
+        assert!(matches!(
+            hop.length,
+            EdgeLength::Variable {
+                min: Some(1),
+                max: Some(5)
+            }
+        ));
     }
 
     #[test]
     fn parse_var_len_min_only() {
         let q = parse_query("MATCH (a)-[*2..]->(b) RETURN a").unwrap();
         let hop = &q.match_clause.patterns[0].hops[0].0;
-        assert!(matches!(hop.length, EdgeLength::Variable { min: Some(2), max: None }));
+        assert!(matches!(
+            hop.length,
+            EdgeLength::Variable {
+                min: Some(2),
+                max: None
+            }
+        ));
     }
 
     #[test]
     fn parse_var_len_max_only() {
         let q = parse_query("MATCH (a)-[*..3]->(b) RETURN a").unwrap();
         let hop = &q.match_clause.patterns[0].hops[0].0;
-        assert!(matches!(hop.length, EdgeLength::Variable { min: None, max: Some(3) }));
+        assert!(matches!(
+            hop.length,
+            EdgeLength::Variable {
+                min: None,
+                max: Some(3)
+            }
+        ));
     }
 
     #[test]
@@ -3179,22 +3315,32 @@ mod tests {
         let q = parse_query("MATCH (a)-[:KNOWS*1..3]->(b) RETURN a").unwrap();
         let hop = &q.match_clause.patterns[0].hops[0].0;
         assert_eq!(hop.labels, vec!["KNOWS"]);
-        assert!(matches!(hop.length, EdgeLength::Variable { min: Some(1), max: Some(3) }));
+        assert!(matches!(
+            hop.length,
+            EdgeLength::Variable {
+                min: Some(1),
+                max: Some(3)
+            }
+        ));
     }
 
     #[test]
     fn parse_var_len_exact_hops() {
         let q = parse_query("MATCH (a)-[*3]->(b) RETURN a").unwrap();
         let hop = &q.match_clause.patterns[0].hops[0].0;
-        assert!(matches!(hop.length, EdgeLength::Variable { min: Some(3), max: Some(3) }));
+        assert!(matches!(
+            hop.length,
+            EdgeLength::Variable {
+                min: Some(3),
+                max: Some(3)
+            }
+        ));
     }
 
     #[test]
     fn parse_group_by_clause() {
-        let query = parse_query(
-            "MATCH (p:Person) RETURN p.dept, COUNT(*) AS cnt GROUP BY p.dept",
-        )
-        .unwrap();
+        let query =
+            parse_query("MATCH (p:Person) RETURN p.dept, COUNT(*) AS cnt GROUP BY p.dept").unwrap();
         assert!(query.group_by.is_some());
         let group_by = query.group_by.unwrap();
         assert_eq!(group_by.keys.len(), 1);
@@ -3249,7 +3395,9 @@ mod tests {
 
     #[test]
     fn parser_dollar_positional_param_in_where() {
-        let tokens = Lexer::new("MATCH (n) WHERE n.age > $1 RETURN n").tokenize().unwrap();
+        let tokens = Lexer::new("MATCH (n) WHERE n.age > $1 RETURN n")
+            .tokenize()
+            .unwrap();
         let stmt = Parser::new(tokens).parse_statement().unwrap();
         let q = match stmt {
             GqlStatement::Query(q) => q,
@@ -3329,16 +3477,18 @@ mod tests {
         };
         let predicate = q.where_clause.expect("expected WHERE").predicate;
         match predicate {
-            Expr::BinaryOp { left: _, op: BinOp::In, right } => {
-                match *right {
-                    Expr::ListLit(items) => {
-                        assert_eq!(items.len(), 2);
-                        assert_eq!(items[0], Expr::ParamRef(ParamRef::Named("a".into())));
-                        assert_eq!(items[1], Expr::ParamRef(ParamRef::Named("b".into())));
-                    }
-                    other => panic!("expected ListLit on rhs of IN, got {other:?}"),
+            Expr::BinaryOp {
+                left: _,
+                op: BinOp::In,
+                right,
+            } => match *right {
+                Expr::ListLit(items) => {
+                    assert_eq!(items.len(), 2);
+                    assert_eq!(items[0], Expr::ParamRef(ParamRef::Named("a".into())));
+                    assert_eq!(items[1], Expr::ParamRef(ParamRef::Named("b".into())));
                 }
-            }
+                other => panic!("expected ListLit on rhs of IN, got {other:?}"),
+            },
             other => panic!("expected IN BinaryOp, got {other:?}"),
         }
     }
@@ -3389,11 +3539,19 @@ mod tests {
         let q = parse_const_return("RETURN 1 + 2 * 3");
         assert_eq!(q.items.len(), 1);
         match &q.items[0].expr {
-            Expr::BinaryOp { left, op: BinOp::Add, right } => {
+            Expr::BinaryOp {
+                left,
+                op: BinOp::Add,
+                right,
+            } => {
                 assert_eq!(left.as_ref(), &Expr::Literal(Literal::Int(1)));
                 // Right side must be `2 * 3` (precedence respected).
                 match right.as_ref() {
-                    Expr::BinaryOp { left: l2, op: BinOp::Mul, right: r2 } => {
+                    Expr::BinaryOp {
+                        left: l2,
+                        op: BinOp::Mul,
+                        right: r2,
+                    } => {
                         assert_eq!(l2.as_ref(), &Expr::Literal(Literal::Int(2)));
                         assert_eq!(r2.as_ref(), &Expr::Literal(Literal::Int(3)));
                     }
@@ -3485,8 +3643,7 @@ mod tests {
 
     #[test]
     fn parse_where_starts_with_uppercase() {
-        let q = parse_query("MATCH (a:Person) WHERE a.name STARTS WITH 'Al' RETURN a")
-            .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.name STARTS WITH 'Al' RETURN a").unwrap();
         let predicate = q.where_clause.expect("expected WHERE").predicate;
         match predicate {
             Expr::BinaryOp { left, op, right } => {
@@ -3505,8 +3662,7 @@ mod tests {
     #[test]
     fn parse_where_starts_with_lowercase() {
         // `starts` → Ident("starts"); `with` → Token::With. Both must match.
-        let q = parse_query("MATCH (a:Person) WHERE a.name starts with 'Al' RETURN a")
-            .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.name starts with 'Al' RETURN a").unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
             Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
             other => panic!("expected StartsWith, got {other:?}"),
@@ -3515,8 +3671,7 @@ mod tests {
 
     #[test]
     fn parse_where_starts_with_mixed_case() {
-        let q = parse_query("MATCH (a:Person) WHERE a.name Starts With 'Al' RETURN a")
-            .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.name Starts With 'Al' RETURN a").unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
             Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
             other => panic!("expected StartsWith, got {other:?}"),
@@ -3525,10 +3680,8 @@ mod tests {
 
     #[test]
     fn parse_where_ends_with_uppercase() {
-        let q = parse_query(
-            "MATCH (a:Person) WHERE a.email ENDS WITH '@example.com' RETURN a",
-        )
-        .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.email ENDS WITH '@example.com' RETURN a")
+            .unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
             Expr::BinaryOp { left, op, right } => {
                 assert_eq!(op, BinOp::EndsWith);
@@ -3545,10 +3698,8 @@ mod tests {
 
     #[test]
     fn parse_where_ends_with_lowercase() {
-        let q = parse_query(
-            "MATCH (a:Person) WHERE a.email ends with '@example.com' RETURN a",
-        )
-        .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.email ends with '@example.com' RETURN a")
+            .unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
             Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::EndsWith),
             other => panic!("expected EndsWith, got {other:?}"),
@@ -3559,12 +3710,15 @@ mod tests {
     fn parse_where_starts_with_and_condition() {
         // STARTS WITH must compose with AND: root predicate is AND, its left
         // operand is the StartsWith node.
-        let q = parse_query(
-            "MATCH (a:Person) WHERE a.name STARTS WITH 'Al' AND a.age > 30 RETURN a",
-        )
-        .unwrap();
+        let q =
+            parse_query("MATCH (a:Person) WHERE a.name STARTS WITH 'Al' AND a.age > 30 RETURN a")
+                .unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
-            Expr::BinaryOp { op: BinOp::And, left, .. } => match *left {
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left,
+                ..
+            } => match *left {
                 Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
                 other => panic!("expected StartsWith on left of AND, got {other:?}"),
             },
@@ -3579,7 +3733,11 @@ mod tests {
         )
         .unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
-            Expr::BinaryOp { op: BinOp::Or, left, right } => {
+            Expr::BinaryOp {
+                op: BinOp::Or,
+                left,
+                right,
+            } => {
                 match *left {
                     Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
                     other => panic!("expected StartsWith on left, got {other:?}"),
@@ -3602,7 +3760,11 @@ mod tests {
         )
         .unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
-            Expr::BinaryOp { op: BinOp::And, left, right } => {
+            Expr::BinaryOp {
+                op: BinOp::And,
+                left,
+                right,
+            } => {
                 match *left {
                     Expr::BinaryOp { op, .. } => assert_eq!(op, BinOp::StartsWith),
                     other => panic!("expected StartsWith on left, got {other:?}"),
@@ -3620,8 +3782,7 @@ mod tests {
     fn parse_where_contains_sanity() {
         // CONTAINS is a single Ident keyword (not reserved), so it was never
         // affected by the WITH-token bug. Pins that it still parses correctly.
-        let q = parse_query("MATCH (a:Person) WHERE a.bio CONTAINS 'engineer' RETURN a")
-            .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.bio CONTAINS 'engineer' RETURN a").unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
             Expr::BinaryOp { left, op, right } => {
                 assert_eq!(op, BinOp::Contains);
@@ -3639,10 +3800,8 @@ mod tests {
     #[test]
     fn parse_where_in_list_sanity() {
         // IN is a single Ident keyword (not reserved); re-verified in isolation.
-        let q = parse_query(
-            "MATCH (a:Person) WHERE a.status IN ['active', 'inactive'] RETURN a",
-        )
-        .unwrap();
+        let q = parse_query("MATCH (a:Person) WHERE a.status IN ['active', 'inactive'] RETURN a")
+            .unwrap();
         match q.where_clause.expect("expected WHERE").predicate {
             Expr::BinaryOp { left, op, .. } => {
                 assert_eq!(op, BinOp::In);
@@ -3732,7 +3891,9 @@ mod tests {
             other => panic!("expected Create, got {other:?}"),
         };
         match &create.patterns[0] {
-            CreatePattern::Node { props, prop_map, .. } => {
+            CreatePattern::Node {
+                props, prop_map, ..
+            } => {
                 assert!(props.is_empty(), "bare $map uses prop_map, not props");
                 assert!(matches!(
                     prop_map,
@@ -3791,7 +3952,12 @@ mod tests {
     fn parse_all_predicate() {
         let pred = list_pred_of("MATCH (n) WHERE ALL(x IN [1, 2, 3] WHERE x > 0) RETURN n");
         match pred {
-            Expr::ListPredicate { kind, var, list, predicate } => {
+            Expr::ListPredicate {
+                kind,
+                var,
+                list,
+                predicate,
+            } => {
                 assert_eq!(kind, ListPredKind::All);
                 assert_eq!(var, "x");
                 // An all-constant `[1, 2, 3]` parses to `Literal(List(_))`; a
@@ -3815,7 +3981,10 @@ mod tests {
         let pred = list_pred_of("MATCH (n) WHERE ANY(x IN [1, 2, 3] WHERE x = 2) RETURN n");
         assert!(matches!(
             pred,
-            Expr::ListPredicate { kind: ListPredKind::Any, .. }
+            Expr::ListPredicate {
+                kind: ListPredKind::Any,
+                ..
+            }
         ));
     }
 
@@ -3824,7 +3993,10 @@ mod tests {
         let pred = list_pred_of("MATCH (n) WHERE NONE(x IN [1, 2, 3] WHERE x > 5) RETURN n");
         assert!(matches!(
             pred,
-            Expr::ListPredicate { kind: ListPredKind::None, .. }
+            Expr::ListPredicate {
+                kind: ListPredKind::None,
+                ..
+            }
         ));
     }
 
@@ -3833,7 +4005,10 @@ mod tests {
         let pred = list_pred_of("MATCH (n) WHERE SINGLE(x IN [1, 2, 3] WHERE x = 2) RETURN n");
         assert!(matches!(
             pred,
-            Expr::ListPredicate { kind: ListPredKind::Single, .. }
+            Expr::ListPredicate {
+                kind: ListPredKind::Single,
+                ..
+            }
         ));
     }
 

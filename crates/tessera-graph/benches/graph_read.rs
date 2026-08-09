@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 #[allow(unused)]
 mod helpers;
@@ -6,7 +6,7 @@ mod helpers;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use tessera_graph::{Graph, Properties};
 
-use helpers::{small_props, star_graph, reverse_star_graph};
+use helpers::{reverse_star_graph, small_props, star_graph};
 
 fn bench_node_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("graph_read/node_lookup");
@@ -21,13 +21,9 @@ fn bench_node_lookup(c: &mut Criterion) {
 
         let middle = ids[size / 2];
 
-        group.bench_with_input(
-            BenchmarkId::new("mid", size),
-            &size,
-            |b, _| {
-                b.iter(|| g.node(middle).unwrap());
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mid", size), &size, |b, _| {
+            b.iter(|| g.node(middle).unwrap());
+        });
     }
 
     group.finish();
@@ -50,13 +46,9 @@ fn bench_edge_lookup(c: &mut Criterion) {
 
         let mid_eid = edge_ids[size / 2];
 
-        group.bench_with_input(
-            BenchmarkId::new("mid", size),
-            &size,
-            |b, _| {
-                b.iter(|| g.edge(mid_eid).unwrap());
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mid", size), &size, |b, _| {
+            b.iter(|| g.edge(mid_eid).unwrap());
+        });
     }
 
     group.finish();

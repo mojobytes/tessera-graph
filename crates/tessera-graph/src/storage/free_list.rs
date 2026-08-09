@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! Page reuse: taking pages off the free directory and putting them back.
 //!
@@ -80,7 +80,9 @@ pub fn take_free_page<S: FreeListStore + ?Sized>(
     // the one the common "rewrite the same entity" loop keeps cycling through.
     let spare = store.meta_ref().free_spare_page(file);
     if spare != FREE_SPARE_EMPTY {
-        store.meta_mut_ref().set_free_spare_page(file, FREE_SPARE_EMPTY);
+        store
+            .meta_mut_ref()
+            .set_free_spare_page(file, FREE_SPARE_EMPTY);
         decrement_free_count(store, file);
         store.journal_free_list_state(file)?;
         return Ok(Some(spare));
@@ -162,7 +164,10 @@ pub fn release_page<S: FreeListStore + ?Sized>(
 
     // Head is full: the released page becomes a new head linking to the old
     // one. Again no extra allocation — the page we were handed does the job.
-    let new_head = FreeDirectoryPage { next: head, entries: Vec::new() };
+    let new_head = FreeDirectoryPage {
+        next: head,
+        entries: Vec::new(),
+    };
     let encoded = free_directory_codec::encode(&new_head, file_magic(file))?;
     store.write_page_raw(file, page_id, &encoded)?;
     store.meta_mut_ref().set_free_directory_head(file, page_id);
@@ -184,10 +189,14 @@ pub fn release_page<S: FreeListStore + ?Sized>(
 /// accessor.)
 fn decrement_free_count<S: FreeListStore + ?Sized>(store: &mut S, file: DataFile) {
     let current = store.meta_ref().free_page_count(file);
-    store.meta_mut_ref().set_free_page_count(file, current.saturating_sub(1));
+    store
+        .meta_mut_ref()
+        .set_free_page_count(file, current.saturating_sub(1));
 }
 
 fn increment_free_count<S: FreeListStore + ?Sized>(store: &mut S, file: DataFile) {
     let current = store.meta_ref().free_page_count(file);
-    store.meta_mut_ref().set_free_page_count(file, current.saturating_add(1));
+    store
+        .meta_mut_ref()
+        .set_free_page_count(file, current.saturating_add(1));
 }

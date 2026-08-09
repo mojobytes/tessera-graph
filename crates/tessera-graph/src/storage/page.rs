@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAGE_HEADER_SIZE: usize = 16;

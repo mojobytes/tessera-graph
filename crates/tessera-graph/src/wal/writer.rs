@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
@@ -330,8 +330,18 @@ mod tests {
         let tf = wal_path();
         let mut w = WalWriter::open(tf.path()).unwrap();
 
-        w.append(WalRecord::TombstoneNode { lsn: 0, node_id: 1, txn_id: None }).unwrap();
-        w.append(WalRecord::TombstoneEdge { lsn: 0, edge_id: 2, txn_id: None }).unwrap();
+        w.append(WalRecord::TombstoneNode {
+            lsn: 0,
+            node_id: 1,
+            txn_id: None,
+        })
+        .unwrap();
+        w.append(WalRecord::TombstoneEdge {
+            lsn: 0,
+            edge_id: 2,
+            txn_id: None,
+        })
+        .unwrap();
         w.append(checkpoint()).unwrap();
         w.sync().unwrap();
 
@@ -407,7 +417,10 @@ mod tests {
         // PRE-SYNC: Checkpoint record (~21 bytes) fits in the 64 KB buffer,
         // so it must still be in userspace — the file on disk is empty.
         let size_before = std::fs::metadata(tf.path()).unwrap().len();
-        assert_eq!(size_before, 0, "append() must not write to disk before sync()");
+        assert_eq!(
+            size_before, 0,
+            "append() must not write to disk before sync()"
+        );
 
         w.sync().unwrap();
 
@@ -427,7 +440,10 @@ mod tests {
             // Intentionally NO sync() before drop.
         }
         let data = std::fs::read(tf.path()).unwrap();
-        assert!(!data.is_empty(), "Drop impl must flush BufWriter to OS buffer");
+        assert!(
+            !data.is_empty(),
+            "Drop impl must flush BufWriter to OS buffer"
+        );
     }
 
     #[test]
@@ -464,7 +480,10 @@ mod tests {
             .unwrap();
         }
         let size_before = std::fs::metadata(tf.path()).unwrap().len();
-        assert_eq!(size_before, 0, "BufWriter should hold both records without auto-flush");
+        assert_eq!(
+            size_before, 0,
+            "BufWriter should hold both records without auto-flush"
+        );
     }
 
     #[test]

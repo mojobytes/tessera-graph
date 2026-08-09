@@ -252,11 +252,7 @@ impl TesseraListener {
                         Ok(handler) => {
                             let mut handler = handler.with_connection_guard(conn_guard);
                             if let Some(peer_addr) = peer {
-                                audit.connection_open(
-                                    handler.connection_id(),
-                                    peer_addr,
-                                    false,
-                                );
+                                audit.connection_open(handler.connection_id(), peer_addr, false);
                             }
                             let _ = handler.run().await;
                         }
@@ -379,11 +375,7 @@ impl TesseraListener {
                         Ok(handler) => {
                             let mut handler = handler.with_connection_guard(conn_guard);
                             if let Some(peer_addr) = peer {
-                                audit.connection_open(
-                                    handler.connection_id(),
-                                    peer_addr,
-                                    true,
-                                );
+                                audit.connection_open(handler.connection_id(), peer_addr, true);
                             }
                             let _ = handler.run().await;
                         }

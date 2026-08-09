@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Integration tests for the Prometheus metrics endpoint.
 //!
@@ -252,7 +252,9 @@ async fn scrape_value(
             // label set. `name{a="1",b="2"} 3.14` ⇒ check `a="1"` and
             // `b="2"` are substrings of the segment between `{` and `}`.
             let Some(open) = line.find('{') else { continue };
-            let Some(close) = line.find('}') else { continue };
+            let Some(close) = line.find('}') else {
+                continue;
+            };
             let label_seg = &line[open + 1..close];
             if !labels
                 .iter()
@@ -274,7 +276,6 @@ async fn scrape_value(
 async fn snapshot(metrics_addr: &SocketAddr, name: &str, labels: &[(&str, &str)]) -> f64 {
     scrape_value(metrics_addr, name, labels).await
 }
-
 
 /// Open a raw TCP connection to the Bolt port and write the 20-byte
 /// Bolt 4.4 handshake.
@@ -358,12 +359,14 @@ async fn active_connections_gauge_increments_on_connect_and_decrements_on_close(
     // runs. Same timing caveat as above: poll for decrement.
     drop(stream);
 
-    let saw_decrement = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_decrement = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(&metrics_addr, "tessera_active_connections", &[]).await;
             now <= before
-        }
-    })
+        },
+    )
     .await;
     let after = scrape_value(&metrics_addr, "tessera_active_connections", &[]).await;
     assert!(
@@ -442,7 +445,9 @@ async fn spawn_test_server_with_db(
 ///
 /// Used by tests that drive HELLO end-to-end against `no_auth=true`
 /// servers (credentials are accepted but ignored).
-async fn open_bolt_session(addr: SocketAddr) -> (
+async fn open_bolt_session(
+    addr: SocketAddr,
+) -> (
     BoltChunkedWriter<tokio::io::WriteHalf<TcpStream>>,
     BoltChunkedReader<tokio::io::ReadHalf<TcpStream>>,
 ) {
@@ -572,8 +577,10 @@ async fn bolt_messages_counter_increments_on_hello_success() {
 
     send_bolt_hello_no_auth(bolt_addr).await;
 
-    let saw_bump = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_bump = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_bolt_messages_total",
@@ -581,8 +588,8 @@ async fn bolt_messages_counter_increments_on_hello_success() {
             )
             .await;
             (now - before) >= 1.0
-        }
-    })
+        },
+    )
     .await;
     let after = scrape_value(
         &metrics_addr,
@@ -602,11 +609,7 @@ async fn bolt_messages_counter_increments_on_hello_success() {
 /// HELLO with explicit credentials, return the wire reply. Used by
 /// C5 `auth_attempts` tests where the outcome (success vs failed) is
 /// what drives the counter.
-async fn send_bolt_hello_with_creds(
-    addr: SocketAddr,
-    user: &str,
-    pass: &str,
-) -> BoltResponse {
+async fn send_bolt_hello_with_creds(addr: SocketAddr, user: &str, pass: &str) -> BoltResponse {
     let (mut cw, mut cr) = open_bolt_session(addr).await;
     let hello = BoltRequest::Hello {
         extra: vec![
@@ -656,8 +659,10 @@ async fn auth_attempts_counter_increments_on_success_and_failure() {
         "expected FAILURE for HELLO admin/wrong-pw, got {fail:?}"
     );
 
-    let saw_ok = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_ok = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_auth_attempts_total",
@@ -665,11 +670,13 @@ async fn auth_attempts_counter_increments_on_success_and_failure() {
             )
             .await;
             (now - before_ok) >= 1.0
-        }
-    })
+        },
+    )
     .await;
-    let saw_fail = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_fail = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_auth_attempts_total",
@@ -677,8 +684,8 @@ async fn auth_attempts_counter_increments_on_success_and_failure() {
             )
             .await;
             (now - before_fail) >= 1.0
-        }
-    })
+        },
+    )
     .await;
     assert!(saw_ok, "success counter did not increment");
     assert!(saw_fail, "failed counter did not increment");
@@ -730,47 +737,81 @@ async fn queries_counter_and_histogram_on_successful_run() {
     let before_total = snapshot(
         &metrics_addr,
         "tessera_queries_total",
-        &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("outcome", "success")],
+        &[
+            (
+                "database",
+                tessera_graph_server::registry::COMMUNITY_DATABASE,
+            ),
+            ("outcome", "success"),
+        ],
     )
     .await;
     let before_count = snapshot(
         &metrics_addr,
         "tessera_query_duration_seconds_count",
-        &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("kind", "query")],
+        &[
+            (
+                "database",
+                tessera_graph_server::registry::COMMUNITY_DATABASE,
+            ),
+            ("kind", "query"),
+        ],
     )
     .await;
     let before_sum = snapshot(
         &metrics_addr,
         "tessera_query_duration_seconds_sum",
-        &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("kind", "query")],
+        &[
+            (
+                "database",
+                tessera_graph_server::registry::COMMUNITY_DATABASE,
+            ),
+            ("kind", "query"),
+        ],
     )
     .await;
 
     send_bolt_run_and_pull(bolt_addr, "qdb", "MATCH (n) RETURN count(n) AS c").await;
 
-    let saw_total = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_total = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_queries_total",
-                &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("outcome", "success")],
+                &[
+                    (
+                        "database",
+                        tessera_graph_server::registry::COMMUNITY_DATABASE,
+                    ),
+                    ("outcome", "success"),
+                ],
             )
             .await;
             (now - before_total) >= 1.0
-        }
-    })
+        },
+    )
     .await;
-    let saw_count = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_count = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_query_duration_seconds_count",
-                &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("kind", "query")],
+                &[
+                    (
+                        "database",
+                        tessera_graph_server::registry::COMMUNITY_DATABASE,
+                    ),
+                    ("kind", "query"),
+                ],
             )
             .await;
             (now - before_count) >= 1.0
-        }
-    })
+        },
+    )
     .await;
     assert!(saw_total, "queries_total{{outcome=success}} did not bump");
     assert!(saw_count, "histogram count for kind=query did not bump");
@@ -782,7 +823,13 @@ async fn queries_counter_and_histogram_on_successful_run() {
     let after_sum = scrape_value(
         &metrics_addr,
         "tessera_query_duration_seconds_sum",
-        &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("kind", "query")],
+        &[
+            (
+                "database",
+                tessera_graph_server::registry::COMMUNITY_DATABASE,
+            ),
+            ("kind", "query"),
+        ],
     )
     .await;
     assert!(
@@ -803,7 +850,13 @@ async fn queries_counter_outcome_error_on_syntax_failure() {
     let before = snapshot(
         &metrics_addr,
         "tessera_queries_total",
-        &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("outcome", "error")],
+        &[
+            (
+                "database",
+                tessera_graph_server::registry::COMMUNITY_DATABASE,
+            ),
+            ("outcome", "error"),
+        ],
     )
     .await;
 
@@ -816,19 +869,30 @@ async fn queries_counter_outcome_error_on_syntax_failure() {
         "syntax error must FAIL, got {resp:?}"
     );
 
-    let saw = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_queries_total",
-                &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE), ("outcome", "error")],
+                &[
+                    (
+                        "database",
+                        tessera_graph_server::registry::COMMUNITY_DATABASE,
+                    ),
+                    ("outcome", "error"),
+                ],
             )
             .await;
             (now - before) >= 1.0
-        }
-    })
+        },
+    )
     .await;
-    assert!(saw, "queries_total{{outcome=error}} did not bump on syntax error");
+    assert!(
+        saw,
+        "queries_total{{outcome=error}} did not bump on syntax error"
+    );
 
     let _ = shutdown_tx.send(true);
     let _ = tokio::time::timeout(Duration::from_secs(5), server_join).await;
@@ -853,8 +917,7 @@ fn label_guard_caps_database_label_to_other() {
     }
     let overflow = guard.resolve_database_label("db_overflow");
     assert_eq!(
-        &*overflow,
-        "_other",
+        &*overflow, "_other",
         "the first name past METRICS_DATABASE_LABEL_CAP must collapse to _other"
     );
 }
@@ -880,8 +943,10 @@ async fn bolt_messages_counter_increments_on_run_and_pull() {
 
     send_bolt_run_and_pull(bolt_addr, "qdb", "RETURN 1 AS x").await;
 
-    let saw_run = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_run = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_bolt_messages_total",
@@ -889,11 +954,13 @@ async fn bolt_messages_counter_increments_on_run_and_pull() {
             )
             .await;
             (now - before_run) >= 1.0
-        }
-    })
+        },
+    )
     .await;
-    let saw_pull = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_pull = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_bolt_messages_total",
@@ -901,8 +968,8 @@ async fn bolt_messages_counter_increments_on_run_and_pull() {
             )
             .await;
             (now - before_pull) >= 1.0
-        }
-    })
+        },
+    )
     .await;
     assert!(saw_run, "RUN counter did not increment");
     assert!(saw_pull, "PULL counter did not increment");
@@ -910,7 +977,6 @@ async fn bolt_messages_counter_increments_on_run_and_pull() {
     let _ = shutdown_tx.send(true);
     let _ = tokio::time::timeout(Duration::from_secs(5), server_join).await;
 }
-
 
 // ── Cycle C4: WAL fsync histogram E2E ───────────────────────────────────────
 
@@ -960,8 +1026,10 @@ async fn wal_fsync_histogram_has_samples_after_writes() {
         .await;
     }
 
-    let saw_samples = poll_until(Duration::from_secs(5), Duration::from_millis(50), || {
-        async move {
+    let saw_samples = poll_until(
+        Duration::from_secs(5),
+        Duration::from_millis(50),
+        || async move {
             let now = scrape_value(
                 &metrics_addr,
                 "tessera_wal_fsync_duration_seconds_count",
@@ -969,8 +1037,8 @@ async fn wal_fsync_histogram_has_samples_after_writes() {
             )
             .await;
             (now - before) >= N_WRITES_F64
-        }
-    })
+        },
+    )
     .await;
 
     let after = scrape_value(
@@ -1137,11 +1205,12 @@ type SpanFields = std::collections::HashMap<String, String>;
 /// server runs `handle_run` in a `JoinSet` task that a thread-local
 /// `set_default` would not reach, so only a process-global subscriber
 /// observes those spans.
-static CAPTURED_SPANS: OnceLock<std::sync::Mutex<std::collections::HashMap<u64, (String, SpanFields)>>> =
-    OnceLock::new();
+static CAPTURED_SPANS: OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u64, (String, SpanFields)>>,
+> = OnceLock::new();
 
-fn captured_spans() -> &'static std::sync::Mutex<std::collections::HashMap<u64, (String, SpanFields)>>
-{
+fn captured_spans()
+-> &'static std::sync::Mutex<std::collections::HashMap<u64, (String, SpanFields)>> {
     CAPTURED_SPANS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -1219,8 +1288,10 @@ async fn handle_run_emits_tracing_span_with_dynamic_fields() {
     // Find a handle_run span carrying all five fields. The global store
     // may hold spans from sibling tests; we only need one complete one.
     let store = captured_spans().lock().unwrap();
-    let handle_run_spans: Vec<&(String, SpanFields)> =
-        store.values().filter(|(name, _)| name == "handle_run").collect();
+    let handle_run_spans: Vec<&(String, SpanFields)> = store
+        .values()
+        .filter(|(name, _)| name == "handle_run")
+        .collect();
     assert!(
         !handle_run_spans.is_empty(),
         "a handle_run span must be captured; captured span names: {:?}",
@@ -1370,8 +1441,10 @@ async fn result_capped_counter_increments_on_over_cap_query() {
     // La medida lleva el nombre de la base que el servidor SIRVIÓ, no el que
     // pidió la consulta: esta edición tiene una sola base y su nombre es fijo,
     // así que el nombre pedido se ignora al resolver.
-    let labels: &[(&str, &str)] =
-        &[("database", tessera_graph_server::registry::COMMUNITY_DATABASE)];
+    let labels: &[(&str, &str)] = &[(
+        "database",
+        tessera_graph_server::registry::COMMUNITY_DATABASE,
+    )];
     let before = snapshot(&metrics_addr, "tessera_result_capped_total", labels).await;
 
     // Seed 10 nodes then MATCH them on the SAME connection so the read
@@ -1380,12 +1453,21 @@ async fn result_capped_counter_increments_on_over_cap_query() {
     let (mut cw, mut cr) = open_bolt_session(bolt_addr).await;
     let hello = BoltRequest::Hello {
         extra: vec![
-            ("principal".to_owned(), PackStreamValue::String("admin".to_owned())),
-            ("credentials".to_owned(), PackStreamValue::String("admin-pw-12chars".to_owned())),
+            (
+                "principal".to_owned(),
+                PackStreamValue::String("admin".to_owned()),
+            ),
+            (
+                "credentials".to_owned(),
+                PackStreamValue::String("admin-pw-12chars".to_owned()),
+            ),
         ],
     };
     assert!(
-        matches!(bolt_send_recv(&mut cw, &mut cr, &hello).await, BoltResponse::Success { .. }),
+        matches!(
+            bolt_send_recv(&mut cw, &mut cr, &hello).await,
+            BoltResponse::Success { .. }
+        ),
         "HELLO must succeed"
     );
     let with_db = |q: &str| BoltRequest::Run {
@@ -1413,7 +1495,10 @@ async fn result_capped_counter_increments_on_over_cap_query() {
         .expect("write pull");
     loop {
         let data = cr.read_message().await.expect("read").expect("msg");
-        if matches!(decode_response(&data).expect("decode"), BoltResponse::Success { .. }) {
+        if matches!(
+            decode_response(&data).expect("decode"),
+            BoltResponse::Success { .. }
+        ) {
             break;
         }
     }
@@ -1424,12 +1509,14 @@ async fn result_capped_counter_increments_on_over_cap_query() {
         "over-cap query must FAIL at RUN, got {resp:?}"
     );
 
-    let saw_increment = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
-        async move {
+    let saw_increment = poll_until(
+        Duration::from_secs(2),
+        Duration::from_millis(20),
+        || async move {
             let now = scrape_value(&metrics_addr, "tessera_result_capped_total", labels).await;
             (now - before) >= 1.0
-        }
-    })
+        },
+    )
     .await;
     let after = scrape_value(&metrics_addr, "tessera_result_capped_total", labels).await;
     assert!(

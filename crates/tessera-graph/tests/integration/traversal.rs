@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 use tessera_graph::{Direction, Graph, NodeId, Properties};
 
@@ -271,6 +271,10 @@ fn bfs_incoming_traverses_reverse() {
 fn bfs_both_direction_from_middle() {
     let (g, nodes) = chain_graph();
     // Start from B (index 1), direction Both
-    let visited = g.traverse(nodes[1]).direction(Direction::Both).collect().unwrap();
+    let visited = g
+        .traverse(nodes[1])
+        .direction(Direction::Both)
+        .collect()
+        .unwrap();
     assert_eq!(visited.len(), 4);
 }

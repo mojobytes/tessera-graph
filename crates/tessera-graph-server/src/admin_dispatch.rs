@@ -109,8 +109,7 @@ pub type AdminDispatcherFactory = Arc<dyn Fn() -> Arc<dyn AdminDispatcher> + Sen
 /// El árbol público no puede nombrar ese despachador, así que lo declara como
 /// **un hueco**: una función que la edición de pago instala al montarse. Aquí
 /// sólo se guarda y se llama.
-pub type PaidDispatcherBuilder =
-    Arc<dyn Fn() -> Arc<dyn AdminDispatcher> + Send + Sync>;
+pub type PaidDispatcherBuilder = Arc<dyn Fn() -> Arc<dyn AdminDispatcher> + Send + Sync>;
 
 /// Elige el despachador de esta conexión.
 ///
@@ -165,8 +164,7 @@ impl AdminDispatcher for CommunityAdminDispatcher {
         if !serves(&stmt) {
             return Err((
                 "Neo.ClientError.General.UnknownError".to_owned(),
-                "database and grant administration are not available in this edition"
-                    .to_owned(),
+                "database and grant administration are not available in this edition".to_owned(),
             ));
         }
         crate::admin_users::dispatch_user_admin(

@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
-use crate::error::Result;
-use crate::storage::page::{PageBuf, PAGE_SIZE};
 use crate::Error;
+use crate::error::Result;
+use crate::storage::page::{PAGE_SIZE, PageBuf};
 
 /// Slot size for both nodes and edges (128 bytes).
 const SLOT_SIZE: usize = 128;
@@ -145,7 +145,14 @@ impl WalRecord {
 /// ```
 ///
 /// Encodes a slot-write payload: `[tag][lsn:u64][page_id:u32][slot_idx:u8][slot:128B]`.
-fn encode_slot(buf: &mut Vec<u8>, tag: u8, lsn: u64, page_id: u32, slot_idx: u8, slot: &[u8; SLOT_SIZE]) {
+fn encode_slot(
+    buf: &mut Vec<u8>,
+    tag: u8,
+    lsn: u64,
+    page_id: u32,
+    slot_idx: u8,
+    slot: &[u8; SLOT_SIZE],
+) {
     buf.push(tag);
     buf.extend_from_slice(&lsn.to_le_bytes());
     buf.extend_from_slice(&page_id.to_le_bytes());
@@ -249,31 +256,66 @@ pub fn encode(record: &WalRecord) -> Vec<u8> {
     buf.extend_from_slice(&[0u8; 4]);
 
     match record {
-        WalRecord::WriteNode { lsn, page_id, slot_idx, slot, txn_id } => {
+        WalRecord::WriteNode {
+            lsn,
+            page_id,
+            slot_idx,
+            slot,
+            txn_id,
+        } => {
             encode_slot(&mut buf, TAG_WRITE_NODE, *lsn, *page_id, *slot_idx, slot);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
-        WalRecord::WriteEdge { lsn, page_id, slot_idx, slot, txn_id } => {
+        WalRecord::WriteEdge {
+            lsn,
+            page_id,
+            slot_idx,
+            slot,
+            txn_id,
+        } => {
             encode_slot(&mut buf, TAG_WRITE_EDGE, *lsn, *page_id, *slot_idx, slot);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
-        WalRecord::TombstoneNode { lsn, node_id, txn_id } => {
+        WalRecord::TombstoneNode {
+            lsn,
+            node_id,
+            txn_id,
+        } => {
             encode_id(&mut buf, TAG_TOMBSTONE_NODE, *lsn, *node_id);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
-        WalRecord::TombstoneEdge { lsn, edge_id, txn_id } => {
+        WalRecord::TombstoneEdge {
+            lsn,
+            edge_id,
+            txn_id,
+        } => {
             encode_id(&mut buf, TAG_TOMBSTONE_EDGE, *lsn, *edge_id);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
-        WalRecord::WriteAdjPage { lsn, page_id, data, txn_id } => {
+        WalRecord::WriteAdjPage {
+            lsn,
+            page_id,
+            data,
+            txn_id,
+        } => {
             encode_page(&mut buf, TAG_WRITE_ADJ_PAGE, *lsn, *page_id, data);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
-        WalRecord::WriteStringPage { lsn, page_id, data, txn_id } => {
+        WalRecord::WriteStringPage {
+            lsn,
+            page_id,
+            data,
+            txn_id,
+        } => {
             encode_page(&mut buf, TAG_WRITE_STRING_PAGE, *lsn, *page_id, data);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
-        WalRecord::WriteOverflowPage { lsn, page_id, data, txn_id } => {
+        WalRecord::WriteOverflowPage {
+            lsn,
+            page_id,
+            data,
+            txn_id,
+        } => {
             encode_page(&mut buf, TAG_WRITE_OVERFLOW_PAGE, *lsn, *page_id, data);
             encode_opt_txn_id(&mut buf, *txn_id);
         }
@@ -290,7 +332,13 @@ pub fn encode(record: &WalRecord) -> Vec<u8> {
         WalRecord::Rollback { lsn, txn_id } => {
             encode_id(&mut buf, TAG_ROLLBACK, *lsn, *txn_id);
         }
-        WalRecord::FreeListState { lsn, file_index, directory_head, spare_page, free_count } => {
+        WalRecord::FreeListState {
+            lsn,
+            file_index,
+            directory_head,
+            spare_page,
+            free_count,
+        } => {
             buf.push(TAG_FREE_LIST_STATE);
             buf.extend_from_slice(&lsn.to_le_bytes());
             buf.push(*file_index);
@@ -318,6 +366,7 @@ pub fn encode(record: &WalRecord) -> Vec<u8> {
 ///
 /// Returns the decoded record and the number of bytes consumed.
 /// Returns an error if the data is truncated or the CRC is invalid.
+#[allow(clippy::too_many_lines)] // Keeping all record variants together makes bounds checks auditable.
 pub fn decode(buf: &[u8]) -> Result<(WalRecord, usize)> {
     if buf.len() < 4 {
         return Err(wal_error("truncated record length"));
@@ -351,37 +400,77 @@ pub fn decode(buf: &[u8]) -> Result<(WalRecord, usize)> {
         TAG_WRITE_NODE => {
             let (page_id, slot_idx, slot) = decode_slot(payload, "truncated WriteNode payload")?;
             let txn_id = decode_opt_txn_id(&payload[5 + SLOT_SIZE..], "corrupt WriteNode txn_id")?;
-            WalRecord::WriteNode { lsn, page_id, slot_idx, slot, txn_id }
+            WalRecord::WriteNode {
+                lsn,
+                page_id,
+                slot_idx,
+                slot,
+                txn_id,
+            }
         }
         TAG_WRITE_EDGE => {
             let (page_id, slot_idx, slot) = decode_slot(payload, "truncated WriteEdge payload")?;
             let txn_id = decode_opt_txn_id(&payload[5 + SLOT_SIZE..], "corrupt WriteEdge txn_id")?;
-            WalRecord::WriteEdge { lsn, page_id, slot_idx, slot, txn_id }
+            WalRecord::WriteEdge {
+                lsn,
+                page_id,
+                slot_idx,
+                slot,
+                txn_id,
+            }
         }
         TAG_TOMBSTONE_NODE => {
             let node_id = decode_id(payload, "truncated TombstoneNode payload")?;
             let txn_id = decode_opt_txn_id(&payload[8..], "corrupt TombstoneNode txn_id")?;
-            WalRecord::TombstoneNode { lsn, node_id, txn_id }
+            WalRecord::TombstoneNode {
+                lsn,
+                node_id,
+                txn_id,
+            }
         }
         TAG_TOMBSTONE_EDGE => {
             let edge_id = decode_id(payload, "truncated TombstoneEdge payload")?;
             let txn_id = decode_opt_txn_id(&payload[8..], "corrupt TombstoneEdge txn_id")?;
-            WalRecord::TombstoneEdge { lsn, edge_id, txn_id }
+            WalRecord::TombstoneEdge {
+                lsn,
+                edge_id,
+                txn_id,
+            }
         }
         TAG_WRITE_ADJ_PAGE => {
             let (page_id, data) = decode_page(payload, "truncated WriteAdjPage payload")?;
-            let txn_id = decode_opt_txn_id(&payload[4 + PAGE_SIZE..], "corrupt WriteAdjPage txn_id")?;
-            WalRecord::WriteAdjPage { lsn, page_id, data, txn_id }
+            let txn_id =
+                decode_opt_txn_id(&payload[4 + PAGE_SIZE..], "corrupt WriteAdjPage txn_id")?;
+            WalRecord::WriteAdjPage {
+                lsn,
+                page_id,
+                data,
+                txn_id,
+            }
         }
         TAG_WRITE_STRING_PAGE => {
             let (page_id, data) = decode_page(payload, "truncated WriteStringPage payload")?;
-            let txn_id = decode_opt_txn_id(&payload[4 + PAGE_SIZE..], "corrupt WriteStringPage txn_id")?;
-            WalRecord::WriteStringPage { lsn, page_id, data, txn_id }
+            let txn_id =
+                decode_opt_txn_id(&payload[4 + PAGE_SIZE..], "corrupt WriteStringPage txn_id")?;
+            WalRecord::WriteStringPage {
+                lsn,
+                page_id,
+                data,
+                txn_id,
+            }
         }
         TAG_WRITE_OVERFLOW_PAGE => {
             let (page_id, data) = decode_page(payload, "truncated WriteOverflowPage payload")?;
-            let txn_id = decode_opt_txn_id(&payload[4 + PAGE_SIZE..], "corrupt WriteOverflowPage txn_id")?;
-            WalRecord::WriteOverflowPage { lsn, page_id, data, txn_id }
+            let txn_id = decode_opt_txn_id(
+                &payload[4 + PAGE_SIZE..],
+                "corrupt WriteOverflowPage txn_id",
+            )?;
+            WalRecord::WriteOverflowPage {
+                lsn,
+                page_id,
+                data,
+                txn_id,
+            }
         }
         TAG_CHECKPOINT => WalRecord::Checkpoint { lsn },
         TAG_BEGIN => {
@@ -537,10 +626,7 @@ mod tests {
         let (decoded, _) = decode(&bytes).unwrap();
         match decoded {
             WalRecord::WriteAdjPage {
-                lsn,
-                page_id,
-                data,
-                ..
+                lsn, page_id, data, ..
             } => {
                 assert_eq!(lsn, 5);
                 assert_eq!(page_id, 20);
@@ -637,10 +723,7 @@ mod tests {
         let (decoded, _) = decode(&bytes).unwrap();
         match decoded {
             WalRecord::WriteStringPage {
-                lsn,
-                page_id,
-                data,
-                ..
+                lsn, page_id, data, ..
             } => {
                 assert_eq!(lsn, 6);
                 assert_eq!(page_id, 30);
@@ -664,7 +747,11 @@ mod tests {
                 data: make_page(0x11),
                 txn_id: None,
             },
-            WalRecord::TombstoneNode { lsn: 2, node_id: 5, txn_id: None },
+            WalRecord::TombstoneNode {
+                lsn: 2,
+                node_id: 5,
+                txn_id: None,
+            },
             WalRecord::Checkpoint { lsn: 3 },
         ] {
             let bytes = encode(&record);
@@ -746,10 +833,7 @@ mod tests {
         let (decoded, _) = decode(&bytes).unwrap();
         match decoded {
             WalRecord::WriteOverflowPage {
-                lsn,
-                page_id,
-                data,
-                ..
+                lsn, page_id, data, ..
             } => {
                 assert_eq!(lsn, 7);
                 assert_eq!(page_id, 40);
@@ -809,7 +893,13 @@ mod tests {
             txn_id: Some(7),
         };
         let (decoded, _) = decode(&encode(&record)).unwrap();
-        assert!(matches!(decoded, WalRecord::WriteNode { txn_id: Some(7), .. }));
+        assert!(matches!(
+            decoded,
+            WalRecord::WriteNode {
+                txn_id: Some(7),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -828,11 +918,34 @@ mod tests {
     #[test]
     fn tombstone_and_page_variants_roundtrip_txn_id() {
         for record in [
-            WalRecord::TombstoneNode { lsn: 0, node_id: 9, txn_id: Some(3) },
-            WalRecord::TombstoneEdge { lsn: 0, edge_id: 9, txn_id: None },
-            WalRecord::WriteAdjPage { lsn: 0, page_id: 1, data: make_page(0x11), txn_id: Some(4) },
-            WalRecord::WriteStringPage { lsn: 0, page_id: 1, data: make_page(0x22), txn_id: None },
-            WalRecord::WriteOverflowPage { lsn: 0, page_id: 1, data: make_page(0x33), txn_id: Some(5) },
+            WalRecord::TombstoneNode {
+                lsn: 0,
+                node_id: 9,
+                txn_id: Some(3),
+            },
+            WalRecord::TombstoneEdge {
+                lsn: 0,
+                edge_id: 9,
+                txn_id: None,
+            },
+            WalRecord::WriteAdjPage {
+                lsn: 0,
+                page_id: 1,
+                data: make_page(0x11),
+                txn_id: Some(4),
+            },
+            WalRecord::WriteStringPage {
+                lsn: 0,
+                page_id: 1,
+                data: make_page(0x22),
+                txn_id: None,
+            },
+            WalRecord::WriteOverflowPage {
+                lsn: 0,
+                page_id: 1,
+                data: make_page(0x33),
+                txn_id: Some(5),
+            },
         ] {
             let expected = format!("{record:?}");
             let (decoded, _) = decode(&encode(&record)).unwrap();

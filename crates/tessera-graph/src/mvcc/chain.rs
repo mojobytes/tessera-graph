@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: MIT
 
 //! The delta chain for a single record: newest delta first.
 
@@ -39,12 +39,12 @@ impl DeltaChainHead {
     /// Consumed by the Phase 5 vacuum (pruning short chains); `is_empty` is
     /// already used by rollback's chain cleanup.
     #[allow(dead_code)]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Returns `true` when the chain holds no deltas.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 

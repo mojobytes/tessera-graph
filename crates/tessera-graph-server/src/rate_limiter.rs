@@ -311,8 +311,7 @@ impl TokenBucket {
         let shortfall = n - self.tokens;
         self.tokens = 0;
         // sleep = shortfall * refill_period / rate
-        let nanos = u128::from(shortfall)
-            .saturating_mul(self.refill_period.as_nanos())
+        let nanos = u128::from(shortfall).saturating_mul(self.refill_period.as_nanos())
             / u128::from(self.rate);
         Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX))
     }
@@ -334,9 +333,7 @@ impl TokenBucket {
             return;
         }
         // tokens_earned = elapsed * rate / refill_period
-        let earned = elapsed
-            .as_nanos()
-            .saturating_mul(u128::from(self.rate))
+        let earned = elapsed.as_nanos().saturating_mul(u128::from(self.rate))
             / self.refill_period.as_nanos();
         // Only advance last_refill when we actually earn ≥1 token.
         // Leaving it unchanged when earned == 0 lets the unspent fractional

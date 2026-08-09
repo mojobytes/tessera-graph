@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
 //! Integration tests for the GQL `WITH` pipeline clause.
 //!
@@ -13,7 +13,9 @@ fn with_is_tokenized_as_keyword_not_identifier() {
     use tessera_graph::gql::token::Token;
 
     // Lexer produces a dedicated Token::With variant.
-    let tokens = tessera_graph::gql::lexer::Lexer::new("WITH").tokenize().unwrap();
+    let tokens = tessera_graph::gql::lexer::Lexer::new("WITH")
+        .tokenize()
+        .unwrap();
     assert!(
         matches!(tokens.first().map(|t| &t.token), Some(Token::With)),
         "expected first token to be Token::With, got {:?}",
@@ -21,7 +23,9 @@ fn with_is_tokenized_as_keyword_not_identifier() {
     );
 
     // Case-insensitive.
-    let tokens_lc = tessera_graph::gql::lexer::Lexer::new("with").tokenize().unwrap();
+    let tokens_lc = tessera_graph::gql::lexer::Lexer::new("with")
+        .tokenize()
+        .unwrap();
     assert!(matches!(
         tokens_lc.first().map(|t| &t.token),
         Some(Token::With)
@@ -35,8 +39,8 @@ fn with_is_tokenized_as_keyword_not_identifier() {
 #[test]
 fn pipeline_ast_is_constructible() {
     use tessera_graph::gql::{
-        Expr, Literal, MatchClause, PipelineQuery, PipelineStage, PipelineTerminal,
-        ReturnClause, ReturnItem, SkipClause, WithClause,
+        Expr, Literal, MatchClause, PipelineQuery, PipelineStage, PipelineTerminal, ReturnClause,
+        ReturnItem, SkipClause, WithClause,
     };
 
     let stage = PipelineStage::With(WithClause {
@@ -54,7 +58,10 @@ fn pipeline_ast_is_constructible() {
     let pq = PipelineQuery {
         stages: vec![
             PipelineStage::Match {
-                clause: MatchClause { patterns: vec![], path_var: None },
+                clause: MatchClause {
+                    patterns: vec![],
+                    path_var: None,
+                },
                 where_clause: None,
             },
             stage,
@@ -138,10 +145,9 @@ fn parse_with_full_options() {
 fn parse_two_chained_with_stages() {
     use tessera_graph::gql::{GqlStatement, PipelineStage};
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a) WITH a ORDER BY a.id WITH a RETURN a",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a) WITH a ORDER BY a.id WITH a RETURN a")
+            .unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!("expected Pipeline");
     };
@@ -178,10 +184,9 @@ fn parse_with_then_unwind_pipeline() {
 fn parse_with_set_mutation_terminal() {
     use tessera_graph::gql::{GqlStatement, PipelineTerminal};
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a WITH a AS b SET b.x = 1",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a WITH a AS b SET b.x = 1")
+            .unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!("expected Pipeline");
     };
@@ -209,10 +214,9 @@ fn parse_query_without_with_stays_flat() {
 fn parse_list_subscript_in_return() {
     use tessera_graph::gql::{Expr, GqlStatement};
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a) WITH [10, 20, 30] AS lst RETURN lst[1]",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a) WITH [10, 20, 30] AS lst RETURN lst[1]")
+            .unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!("expected Pipeline");
     };
@@ -235,10 +239,8 @@ fn parse_list_literal_homogeneous_vs_heterogeneous() {
     use tessera_graph::gql::{Expr, GqlStatement, Literal};
 
     // All-literal: keeps `Literal::List` — backwards-compatible.
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a) WITH [1, 2, 3] AS xs RETURN xs",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a) WITH [1, 2, 3] AS xs RETURN xs").unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!();
     };
@@ -248,10 +250,8 @@ fn parse_list_literal_homogeneous_vs_heterogeneous() {
     assert!(matches!(&w.items[0].expr, Expr::Literal(Literal::List(_))));
 
     // Contains a variable reference: becomes `Expr::ListLit`.
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a) WITH [1, a, 3] AS xs RETURN xs",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a) WITH [1, a, 3] AS xs RETURN xs").unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!();
     };
@@ -285,17 +285,16 @@ fn parse_ensure_asset_indices_assigned_query() {
 /// WITH stage.
 #[test]
 fn execute_simple_passthrough_pipeline() {
-    use tessera_graph::{props, Graph};
+    use tessera_graph::{Graph, props};
 
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 }).unwrap();
-    g.add_node("Person", props! { "name" => "Bob", "age" => 40_i64 }).unwrap();
+    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 })
+        .unwrap();
+    g.add_node("Person", props! { "name" => "Bob", "age" => 40_i64 })
+        .unwrap();
     g.add_node("Thing", props! { "name" => "Car" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a RETURN a",
-    )
-    .unwrap();
+    let stmt = tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a RETURN a").unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!("expected Pipeline");
     };
@@ -308,15 +307,14 @@ fn execute_simple_passthrough_pipeline() {
 /// the column. Tests that WITH aliases propagate into the next stage's scope.
 #[test]
 fn execute_with_alias_rename() {
-    use tessera_graph::{props, Graph};
+    use tessera_graph::{Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a AS person RETURN person",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a AS person RETURN person")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -332,12 +330,28 @@ fn execute_with_alias_rename() {
 // ── Phase 6 RED: WITH WHERE / ORDER BY / LIMIT / SKIP / DISTINCT / agg ──────
 
 fn ages_graph() -> tessera_graph::Graph {
-    use tessera_graph::{props, Graph};
+    use tessera_graph::{Graph, props};
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64, "dept" => "A" }).unwrap();
-    g.add_node("Person", props! { "name" => "Bob",   "age" => 40_i64, "dept" => "A" }).unwrap();
-    g.add_node("Person", props! { "name" => "Carol", "age" => 25_i64, "dept" => "B" }).unwrap();
-    g.add_node("Person", props! { "name" => "Dave",  "age" => 50_i64, "dept" => "B" }).unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "Alice", "age" => 30_i64, "dept" => "A" },
+    )
+    .unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "Bob",   "age" => 40_i64, "dept" => "A" },
+    )
+    .unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "Carol", "age" => 25_i64, "dept" => "B" },
+    )
+    .unwrap();
+    g.add_node(
+        "Person",
+        props! { "name" => "Dave",  "age" => 50_i64, "dept" => "B" },
+    )
+    .unwrap();
     g
 }
 
@@ -347,10 +361,9 @@ fn execute_with_property_projection() {
     use tessera_graph::GqlValue;
 
     let g = ages_graph();
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a.name AS name RETURN name",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a.name AS name RETURN name")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -365,7 +378,10 @@ fn execute_with_property_projection() {
         .collect();
     assert_eq!(
         names,
-        ["Alice", "Bob", "Carol", "Dave"].into_iter().map(String::from).collect(),
+        ["Alice", "Bob", "Carol", "Dave"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
     );
 }
 
@@ -373,10 +389,9 @@ fn execute_with_property_projection() {
 #[test]
 fn execute_with_where_filter() {
     let g = ages_graph();
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a WHERE a.age > 30 RETURN a",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a WHERE a.age > 30 RETURN a")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -437,10 +452,8 @@ fn execute_with_order_by_descending() {
 #[test]
 fn execute_with_limit() {
     let g = ages_graph();
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a LIMIT 2 RETURN a",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a LIMIT 2 RETURN a").unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -481,10 +494,9 @@ fn execute_with_collect_list_contents() {
     use tessera_graph::GqlValue;
 
     let g = ages_graph();
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH collect(a) AS all RETURN all",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH collect(a) AS all RETURN all")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -510,10 +522,8 @@ fn execute_with_count_aggregate() {
     use tessera_graph::GqlValue;
 
     let g = ages_graph();
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH count(a) AS n RETURN n",
-    )
-    .unwrap();
+    let stmt = tessera_graph::gql::parse_statement("MATCH (a:Person) WITH count(a) AS n RETURN n")
+        .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -537,7 +547,8 @@ fn execute_with_groupby_via_mixed_projection() {
     };
     let rows = tessera_graph::gql::execute_pipeline(&g, pq, 0).unwrap();
     assert_eq!(rows.len(), 2, "expected one row per dept: {rows:?}");
-    let mut counts_by_dept: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut counts_by_dept: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
     for r in &rows {
         let dept = match r.get("dept") {
             Some(GqlValue::Str(s)) => s.clone(),
@@ -575,10 +586,7 @@ fn execute_with_distinct() {
             _ => None,
         })
         .collect();
-    assert_eq!(
-        depts,
-        ["A", "B"].into_iter().map(String::from).collect()
-    );
+    assert_eq!(depts, ["A", "B"].into_iter().map(String::from).collect());
 }
 
 /// T10: two chained WITH stages preserve ordering.
@@ -612,10 +620,8 @@ fn execute_two_chained_with_preserves_ordering() {
 #[test]
 fn execute_scope_isolation_after_with() {
     let g = ages_graph();
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a.name AS name RETURN a",
-    )
-    .unwrap();
+    let stmt = tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a.name AS name RETURN a")
+        .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -633,15 +639,14 @@ fn execute_scope_isolation_after_with() {
 /// T12: `range(0, 2)` returns `[0, 1, 2]`.
 #[test]
 fn execute_range_positive() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH range(0, 2) AS r RETURN r",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH range(0, 2) AS r RETURN r")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -663,7 +668,7 @@ fn execute_range_positive() {
 /// once the capped capacity is exceeded.
 #[test]
 fn execute_range_caps_excessive_length() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
@@ -690,16 +695,15 @@ fn execute_range_caps_excessive_length() {
 /// `1_000_001` elements → exceeds cap.
 #[test]
 fn execute_range_at_cap_boundary() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
     // 1_000_000 elements — at the cap.
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH range(0, 999999) AS r RETURN r",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH range(0, 999999) AS r RETURN r")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -713,15 +717,14 @@ fn execute_range_at_cap_boundary() {
 /// T13: `range(5, 2)` with start > end returns `[]`.
 #[test]
 fn execute_range_empty_when_start_gt_end() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH range(5, 2) AS r RETURN r",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH range(5, 2) AS r RETURN r")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -776,7 +779,7 @@ fn execute_size_on_collect() {
 /// T15: `[10, 20, 30][1]` → 20. Literal list via `Literal::List`.
 #[test]
 fn execute_subscript_on_literal_list() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
@@ -797,15 +800,14 @@ fn execute_subscript_on_literal_list() {
 /// T16: `lst[5]` where `lst = [10, 20]` → Null (out-of-bounds).
 #[test]
 fn execute_subscript_out_of_bounds_returns_null() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH [10, 20] AS lst RETURN lst[5]",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH [10, 20] AS lst RETURN lst[5]")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -817,7 +819,7 @@ fn execute_subscript_out_of_bounds_returns_null() {
 /// `MATCH ... RETURN` (no pipeline), not silently collapse to `Null`.
 #[test]
 fn execute_subscript_in_legacy_match_return() {
-    use tessera_graph::{gql, props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, gql, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
@@ -869,14 +871,18 @@ fn execute_unwind_after_with_produces_one_row_per_element() {
     // Every row has a first-class node `a` (since Fase B `nodes[i]` over a
     // `collect(a)` list yields a `GqlValue::Node`, not the raw id).
     for r in &rows {
-        assert!(matches!(r.get("a"), Some(GqlValue::Node(_))), "got {:?}", r.get("a"));
+        assert!(
+            matches!(r.get("a"), Some(GqlValue::Node(_))),
+            "got {:?}",
+            r.get("a")
+        );
     }
 }
 
 /// Simple UNWIND of a literal list after WITH: expands each element.
 #[test]
 fn execute_unwind_literal_list_after_with() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
@@ -905,15 +911,14 @@ fn execute_unwind_literal_list_after_with() {
 /// UNWIND of an empty list produces zero rows (binding is dropped).
 #[test]
 fn execute_unwind_empty_list_drops_binding() {
-    use tessera_graph::{props, Graph};
+    use tessera_graph::{Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a UNWIND [] AS n RETURN n",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a UNWIND [] AS n RETURN n")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -924,15 +929,14 @@ fn execute_unwind_empty_list_drops_binding() {
 /// UNWIND of a non-list (null) value produces zero rows — Cypher semantics.
 #[test]
 fn execute_unwind_null_drops_binding() {
-    use tessera_graph::{props, Graph};
+    use tessera_graph::{Graph, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = tessera_graph::gql::parse_statement(
-        "MATCH (a:Person) WITH a UNWIND null AS n RETURN n",
-    )
-    .unwrap();
+    let stmt =
+        tessera_graph::gql::parse_statement("MATCH (a:Person) WITH a UNWIND null AS n RETURN n")
+            .unwrap();
     let tessera_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -944,10 +948,11 @@ fn execute_unwind_null_drops_binding() {
 /// downstream RETURN can still access the outer `a`.
 #[test]
 fn execute_unwind_preserves_outer_binding() {
-    use tessera_graph::{props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, props};
 
     let mut g = Graph::new();
-    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 }).unwrap();
+    g.add_node("Person", props! { "name" => "Alice", "age" => 30_i64 })
+        .unwrap();
 
     let stmt = tessera_graph::gql::parse_statement(
         "MATCH (a:Person) WITH a UNWIND [1, 2] AS n RETURN a.name AS name, n",
@@ -970,7 +975,7 @@ fn execute_unwind_preserves_outer_binding() {
 /// order>`. After execution, a follow-up read verifies the indices.
 #[test]
 fn execute_with_set_mutation_assigns_asset_idx() {
-    use tessera_graph::{gql, props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, gql, props};
 
     let mut g = Graph::new();
     // Insert nodes in reverse id order so the ORDER BY a.id is meaningful.
@@ -997,8 +1002,7 @@ fn execute_with_set_mutation_assigns_asset_idx() {
     );
 
     // Verify: MATCH (a:AssetNode) RETURN a.id AS id, a.asset_idx AS idx
-    let readback = gql::parse("MATCH (a:AssetNode) RETURN a.id AS id, a.asset_idx AS idx")
-        .unwrap();
+    let readback = gql::parse("MATCH (a:AssetNode) RETURN a.id AS id, a.asset_idx AS idx").unwrap();
     let rows = gql::execute(&g, &readback, 0).unwrap();
     assert_eq!(rows.len(), 5);
 
@@ -1022,15 +1026,12 @@ fn execute_with_set_mutation_assigns_asset_idx() {
 /// and that the alias-renamed binding `b` resolves to the original node.
 #[test]
 fn execute_with_set_via_simple_pipeline() {
-    use tessera_graph::{gql, props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, gql, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = gql::parse_statement(
-        "MATCH (a:Person) WITH a WITH a AS b SET b.x = 42",
-    )
-    .unwrap();
+    let stmt = gql::parse_statement("MATCH (a:Person) WITH a WITH a AS b SET b.x = 42").unwrap();
     let result = gql::execute_pipeline_mutation(&mut g, &stmt, None).unwrap();
     assert_eq!(result.properties_set, 1);
 
@@ -1044,15 +1045,12 @@ fn execute_with_set_via_simple_pipeline() {
 /// surface an error.
 #[test]
 fn execute_with_set_unknown_variable_is_error() {
-    use tessera_graph::{gql, props, Graph};
+    use tessera_graph::{Graph, gql, props};
 
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt = gql::parse_statement(
-        "MATCH (a:Person) WITH a.name AS n SET a.x = 1",
-    )
-    .unwrap();
+    let stmt = gql::parse_statement("MATCH (a:Person) WITH a.name AS n SET a.x = 1").unwrap();
     let result = gql::execute_pipeline_mutation(&mut g, &stmt, None);
     assert!(
         result.is_err(),
@@ -1065,7 +1063,7 @@ fn execute_with_set_unknown_variable_is_error() {
 /// writes into the txn's delta chain) — invisible to auto-commit until COMMIT.
 #[test]
 fn execute_pipeline_set_in_txn_writes_pending_not_autocommit() {
-    use tessera_graph::{gql, props, Graph, GqlValue};
+    use tessera_graph::{GqlValue, Graph, gql, props};
 
     let mut g = Graph::new();
     g.enable_mvcc();

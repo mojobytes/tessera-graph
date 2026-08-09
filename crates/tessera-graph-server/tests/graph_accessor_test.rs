@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: BSL-1.1
 
 //! Unit tests for [`GraphAccessor`] — [`DefaultGraphAccessor`] over `Arc<RwLock<Graph>>`.
 
@@ -8,8 +8,8 @@ use std::sync::{Arc, RwLock};
 use tessera_graph::gql::GqlStatement;
 use tessera_graph::{Graph, props};
 use tessera_graph_config::QueryLanguage;
-use tessera_graph_server::graph_accessor::GraphAccessor;
 use tessera_graph_server::DefaultGraphAccessor;
+use tessera_graph_server::graph_accessor::GraphAccessor;
 
 fn make_accessor() -> (Arc<RwLock<Graph>>, DefaultGraphAccessor) {
     let graph = Arc::new(RwLock::new(Graph::new()));
@@ -42,8 +42,7 @@ fn query_returns_created_nodes() {
     // Insert a node directly via the graph API.
     {
         let mut g = graph.write().unwrap();
-        g.add_node("Person", props! { "name" => "Alice" })
-            .unwrap();
+        g.add_node("Person", props! { "name" => "Alice" }).unwrap();
     }
 
     let stmt = parse_query("MATCH (n:Person) RETURN n.name");
@@ -143,7 +142,9 @@ fn pipeline_delete_removes_node() {
     let GqlStatement::Pipeline(ref pq) = stmt else {
         panic!("expected Pipeline");
     };
-    let (_rows, stats) = accessor.execute_pipeline(pq, HashMap::new(), 0, None).unwrap();
+    let (_rows, stats) = accessor
+        .execute_pipeline(pq, HashMap::new(), 0, None)
+        .unwrap();
     assert_eq!(stats.nodes_deleted, 1);
     let g = graph.read().unwrap();
     assert_eq!(g.node_count(), 0);

@@ -57,7 +57,6 @@ pub struct ServerConfig {
     pub no_auth: bool,
 
     // ── v0.5.0: multi-database runtime (spec §11) ──────────────────────
-
     /// Los ajustes que sólo gobiernan el gestor multi-base.
     ///
     /// **Los analiza una factoría, igual que al propio gestor** (apartado
@@ -94,7 +93,6 @@ pub struct ServerConfig {
     pub vacuum_interval_seconds: u64,
 
     // ── v0.6.0 Fase 2 Task 1: observability ─────────────────────────────
-
     /// Socket address for the Prometheus metrics HTTP endpoint
     /// (`TESSERA_METRICS_ADDR`). `None` keeps the endpoint disabled — the
     /// default. When set (e.g. `"0.0.0.0:9090"`), the server spawns a
@@ -148,7 +146,6 @@ pub struct ServerConfig {
     pub max_result_rows: u64,
 
     // ── v0.6.0 Fase 2 Task 5: rate limiting ────────────────────────────
-
     /// Max HELLO failures per IP in a sliding 60-second window before
     /// further HELLOs from that IP fail-fast with
     /// `Neo.ClientError.Security.AuthorizationExpired`. `0` disables.
@@ -181,7 +178,6 @@ pub struct ServerConfig {
     pub rate_limit_ip_cap: usize,
 
     // ── v0.6.0 Fase 2 Task 6: query timeout ────────────────────────────
-
     /// Per-query cooperative timeout in **milliseconds**. When `> 0`, every
     /// RUN computes a deadline and the engine aborts the query if it overruns,
     /// surfacing `Neo.ClientError.Statement.ExecutionFailed` (a non-retryable
@@ -191,7 +187,6 @@ pub struct ServerConfig {
     pub query_timeout_ms: u64,
 
     // ── v0.7.0 Block 1: configurable server agent string ────────────────
-
     /// Agent string sent in the HELLO `server` metadata field.
     ///
     /// Default `"Neo4j/<version>"`. The official Neo4j Python driver rejects
@@ -271,8 +266,16 @@ impl ServerConfig {
                 .unwrap_or(defaults.audit_sink),
             audit_file: vars.get("TESSERA_AUDIT_FILE").map(PathBuf::from),
             audit_max_bytes: parse_num(vars, "TESSERA_AUDIT_MAX_BYTES", defaults.audit_max_bytes),
-            audit_keep_files: parse_num(vars, "TESSERA_AUDIT_KEEP_FILES", defaults.audit_keep_files),
-            audit_fsync_every: parse_num(vars, "TESSERA_AUDIT_FSYNC_EVERY", defaults.audit_fsync_every),
+            audit_keep_files: parse_num(
+                vars,
+                "TESSERA_AUDIT_KEEP_FILES",
+                defaults.audit_keep_files,
+            ),
+            audit_fsync_every: parse_num(
+                vars,
+                "TESSERA_AUDIT_FSYNC_EVERY",
+                defaults.audit_fsync_every,
+            ),
             // Intentionally strict: only the literal `"1"` activates the
             // bypass so a stray `"true"` from a shell typo cannot disable
             // authentication in production.
@@ -346,15 +349,22 @@ impl ServerConfig {
                 "TESSERA_MAX_BYTES_PER_SECOND",
                 defaults.max_bytes_per_second,
             ),
-            rate_limit_ip_cap: parse_num(vars, "TESSERA_RATE_LIMIT_IP_CAP", defaults.rate_limit_ip_cap),
-            query_timeout_ms: parse_num(vars, "TESSERA_QUERY_TIMEOUT_MS", defaults.query_timeout_ms),
+            rate_limit_ip_cap: parse_num(
+                vars,
+                "TESSERA_RATE_LIMIT_IP_CAP",
+                defaults.rate_limit_ip_cap,
+            ),
+            query_timeout_ms: parse_num(
+                vars,
+                "TESSERA_QUERY_TIMEOUT_MS",
+                defaults.query_timeout_ms,
+            ),
             server_agent: vars
                 .get("TESSERA_SERVER_AGENT")
                 .cloned()
                 .unwrap_or(defaults.server_agent),
         }
     }
-
 
     /// Rellena los ajustes del gestor multi-base.
     ///
@@ -446,20 +456,15 @@ impl ServerConfig {
 /// triplet repeated across the numeric fields of [`ServerConfig::from_map`] into
 /// one call, keeping that constructor flat and under the line budget. `T` is
 /// inferred from the destination field, so call sites need no turbofish.
-fn parse_num<T: std::str::FromStr>(
-    vars: &HashMap<String, String>,
-    key: &str,
-    default: T,
-) -> T {
-    vars.get(key).and_then(|raw| raw.parse().ok()).unwrap_or(default)
+fn parse_num<T: std::str::FromStr>(vars: &HashMap<String, String>, key: &str, default: T) -> T {
+    vars.get(key)
+        .and_then(|raw| raw.parse().ok())
+        .unwrap_or(default)
 }
 
 /// Like [`parse_num`] but yields `None` (rather than a default) when the key is
 /// absent or unparsable — for the "absence means unlimited" optional fields.
-fn parse_opt_num<T: std::str::FromStr>(
-    vars: &HashMap<String, String>,
-    key: &str,
-) -> Option<T> {
+fn parse_opt_num<T: std::str::FromStr>(vars: &HashMap<String, String>, key: &str) -> Option<T> {
     vars.get(key).and_then(|raw| raw.parse().ok())
 }
 
@@ -558,23 +563,35 @@ fn file_config_to_map(fc: &FileConfig) -> HashMap<String, String> {
     put_num("TESSERA_AUDIT_KEEP_FILES", fc.audit_keep_files);
     put_num("TESSERA_AUDIT_FSYNC_EVERY", fc.audit_fsync_every);
     put_num("TESSERA_IDLE_TTL_SECONDS", fc.idle_ttl_seconds);
-    put_num("TESSERA_DEFAULT_MAX_CONNECTIONS", fc.default_max_connections);
+    put_num(
+        "TESSERA_DEFAULT_MAX_CONNECTIONS",
+        fc.default_max_connections,
+    );
     put_num("TESSERA_DEFAULT_MAX_SIZE_BYTES", fc.default_max_size_bytes);
     put_num("TESSERA_MAX_TXN_MEMORY_BYTES", fc.max_txn_memory_bytes);
     put_num("TESSERA_MAX_BATCH_OPERATIONS", fc.max_batch_operations);
     put_num("TESSERA_MAX_BATCH_MEMORY_BYTES", fc.max_batch_memory_bytes);
-    put_num("TESSERA_SHUTDOWN_TIMEOUT_SECONDS", fc.shutdown_timeout_seconds);
+    put_num(
+        "TESSERA_SHUTDOWN_TIMEOUT_SECONDS",
+        fc.shutdown_timeout_seconds,
+    );
     put_num(
         "TESSERA_REGISTRY_SWEEP_INTERVAL_SECONDS",
         fc.registry_sweep_interval_seconds,
     );
-    put_num("TESSERA_VACUUM_INTERVAL_SECONDS", fc.vacuum_interval_seconds);
+    put_num(
+        "TESSERA_VACUUM_INTERVAL_SECONDS",
+        fc.vacuum_interval_seconds,
+    );
     put_num(
         "TESSERA_TTL_DISABLED_WARN_THRESHOLD",
         fc.ttl_disabled_warn_threshold,
     );
     put_num("TESSERA_MAX_OPEN_DATABASES", fc.max_open_databases);
-    put_num("TESSERA_SLOW_QUERY_THRESHOLD_MS", fc.slow_query_threshold_ms);
+    put_num(
+        "TESSERA_SLOW_QUERY_THRESHOLD_MS",
+        fc.slow_query_threshold_ms,
+    );
     put_num(
         "TESSERA_SLOW_QUERY_MAX_EVENTS_PER_MINUTE",
         fc.max_slow_events_per_minute,

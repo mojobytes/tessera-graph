@@ -129,10 +129,12 @@ fn dict_list(resp: &BoltResponse, key: &str) -> Option<Vec<PackStreamValue>> {
 /// used to read the `stats` block emitted after a mutation's final PULL.
 fn dict_dict(resp: &BoltResponse, key: &str) -> Option<Vec<(String, PackStreamValue)>> {
     if let BoltResponse::Success { metadata } = resp {
-        metadata.iter().find_map(|(k, v)| match (k.as_str() == key, v) {
-            (true, PackStreamValue::Dict(d)) => Some(d.clone()),
-            _ => None,
-        })
+        metadata
+            .iter()
+            .find_map(|(k, v)| match (k.as_str() == key, v) {
+                (true, PackStreamValue::Dict(d)) => Some(d.clone()),
+                _ => None,
+            })
     } else {
         None
     }
@@ -223,7 +225,10 @@ async fn hello_server_metadata_is_semver_compatible_for_dotnet_driver() {
     // v0.7.0 Block 1: the default product token is now "Neo4j" (configurable
     // via TESSERA_SERVER_AGENT). What the .NET driver needs is a semver-valid
     // version after the slash — that is what this test still guards below.
-    assert!(!product.is_empty(), "product token must not be empty, got {server:?}");
+    assert!(
+        !product.is_empty(),
+        "product token must not be empty, got {server:?}"
+    );
 
     // Minimum semver check: three dot-separated numeric components.
     // Full semver allows pre-release / build metadata but the driver
@@ -263,9 +268,9 @@ async fn hello_connection_id_is_bolt_string_not_int() {
         .expect("connection_id missing from HELLO success metadata");
     match &entry.1 {
         PackStreamValue::String(_) => {}
-        other => panic!(
-            "connection_id must be a Bolt String (driver compatibility); got {other:?}"
-        ),
+        other => {
+            panic!("connection_id must be a Bolt String (driver compatibility); got {other:?}")
+        }
     }
 }
 #[tokio::test]
@@ -358,11 +363,7 @@ async fn create_then_match_returns_records() {
     let _ = bolt_recv(&mut reader).await;
 
     // CREATE a node.
-    bolt_send(
-        &mut writer,
-        &run_query("CREATE (:Person {name: 'Alice'})"),
-    )
-    .await;
+    bolt_send(&mut writer, &run_query("CREATE (:Person {name: 'Alice'})")).await;
     let create_resp = bolt_recv(&mut reader).await;
     assert!(
         matches!(create_resp, BoltResponse::Success { .. }),
@@ -376,18 +377,17 @@ async fn create_then_match_returns_records() {
     // travel in the final SUCCESS `stats` dict instead.
     let mut records = vec![];
     let final_resp = collect_records(pull_resp, &mut records, &mut reader).await;
-    assert!(records.is_empty(), "CREATE must produce no data row, got {records:?}");
+    assert!(
+        records.is_empty(),
+        "CREATE must produce no data row, got {records:?}"
+    );
     assert!(
         matches!(final_resp, BoltResponse::Success { .. }),
         "expected trailing SUCCESS after PULL"
     );
 
     // Now MATCH to verify the node exists.
-    bolt_send(
-        &mut writer,
-        &run_query("MATCH (n:Person) RETURN n.name"),
-    )
-    .await;
+    bolt_send(&mut writer, &run_query("MATCH (n:Person) RETURN n.name")).await;
     let run_resp = bolt_recv(&mut reader).await;
     assert!(matches!(run_resp, BoltResponse::Success { .. }));
 
@@ -414,13 +414,19 @@ async fn create_mutation_pull_success_carries_no_data_row() {
     let _ = bolt_recv(&mut reader).await;
 
     bolt_send(&mut writer, &run_query("CREATE (:Person)")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &pull()).await;
     let first = bolt_recv(&mut reader).await;
     let mut records = vec![];
     let _final = collect_records(first, &mut records, &mut reader).await;
-    assert!(records.is_empty(), "CREATE must produce no data row, got {records:?}");
+    assert!(
+        records.is_empty(),
+        "CREATE must produce no data row, got {records:?}"
+    );
 }
 /// The final PULL SUCCESS after a CREATE carries a `stats` dict with the
 /// Neo4j-style hyphenated keys, listing only the non-zero counters plus
@@ -435,7 +441,10 @@ async fn pull_final_success_carries_stats_dict_for_create() {
     let _ = bolt_recv(&mut reader).await;
 
     bolt_send(&mut writer, &run_query("CREATE (:Person {name: 'Alice'})")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &pull()).await;
     let first = bolt_recv(&mut reader).await;
@@ -485,19 +494,14 @@ async fn handler_detach_delete_reports_counters() {
     let _ = collect_records(bolt_recv(&mut reader).await, &mut sink, &mut reader).await;
 
     // DETACH DELETE the source node: the node and its incident edge are removed.
-    bolt_send(
-        &mut writer,
-        &run_query("MATCH (a:Src) DETACH DELETE a"),
-    )
-    .await;
+    bolt_send(&mut writer, &run_query("MATCH (a:Src) DETACH DELETE a")).await;
     assert!(
         matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }),
         "expected SUCCESS for DETACH DELETE"
     );
     bolt_send(&mut writer, &pull()).await;
     let mut records = vec![];
-    let final_resp =
-        collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
+    let final_resp = collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
     assert!(records.is_empty(), "DETACH DELETE produces no data row");
 
     let stats = dict_dict(&final_resp, "stats").expect("DELETE must carry a stats dict");
@@ -540,11 +544,7 @@ async fn handler_delete_connected_node_without_detach_fails() {
     let _ = collect_records(bolt_recv(&mut reader).await, &mut sink, &mut reader).await;
 
     // DELETE (no DETACH) of the connected node → FAILURE, server stays up.
-    bolt_send(
-        &mut writer,
-        &run_query("MATCH (a:Src) DELETE a"),
-    )
-    .await;
+    bolt_send(&mut writer, &run_query("MATCH (a:Src) DELETE a")).await;
     let resp = bolt_recv(&mut reader).await;
     let BoltResponse::Failure { metadata } = &resp else {
         panic!("expected FAILURE for DELETE of a connected node, got {resp:?}");
@@ -577,13 +577,22 @@ async fn pipeline_set_terminal_pull_success_carries_no_data_row() {
     let mut sink = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut sink, &mut reader).await;
 
-    bolt_send(&mut writer, &run_query("MATCH (n:Person) WITH n SET n.age = 1")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    bolt_send(
+        &mut writer,
+        &run_query("MATCH (n:Person) WITH n SET n.age = 1"),
+    )
+    .await;
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut records = vec![];
-    let final_resp =
-        collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
-    assert!(records.is_empty(), "pipeline SET must produce no data row, got {records:?}");
+    let final_resp = collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
+    assert!(
+        records.is_empty(),
+        "pipeline SET must produce no data row, got {records:?}"
+    );
     let stats = dict_dict(&final_resp, "stats").expect("pipeline SET must carry a stats dict");
     assert_eq!(stats_int(&stats, "properties-set"), Some(1));
     assert_eq!(stats_bool(&stats, "contains-updates"), Some(true));
@@ -610,18 +619,27 @@ async fn pull_intermediate_success_has_no_stats_key() {
     }
 
     bolt_send(&mut writer, &run_query("MATCH (n:Item) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Partial fetch: pull a single row, leaving one behind → has_more = true.
     bolt_send(
         &mut writer,
-        &BoltRequest::Pull { extra: vec![("n".to_owned(), PackStreamValue::Int(1))] },
+        &BoltRequest::Pull {
+            extra: vec![("n".to_owned(), PackStreamValue::Int(1))],
+        },
     )
     .await;
     let mut records = vec![];
     let intermediate =
         collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
-    assert_eq!(dict_bool(&intermediate, "has_more"), Some(true), "expected more rows pending");
+    assert_eq!(
+        dict_bool(&intermediate, "has_more"),
+        Some(true),
+        "expected more rows pending"
+    );
     assert!(
         dict_dict(&intermediate, "stats").is_none(),
         "intermediate SUCCESS must not carry stats"
@@ -639,7 +657,10 @@ async fn discard_final_success_carries_stats_dict_for_create() {
     let _ = bolt_recv(&mut reader).await;
 
     bolt_send(&mut writer, &run_query("CREATE (:Person)")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     bolt_send(&mut writer, &BoltRequest::Discard { extra: vec![] }).await;
     let resp = bolt_recv(&mut reader).await;
@@ -731,10 +752,7 @@ async fn goodbye_closes_connection() {
 
     // After GOODBYE, the server should close the stream.
     // Attempting to read should return None (EOF).
-    let data = reader
-        .read_message()
-        .await
-        .expect("read should not error");
+    let data = reader.read_message().await.expect("read should not error");
     assert!(data.is_none(), "expected EOF after GOODBYE");
 }
 #[tokio::test]
@@ -750,11 +768,7 @@ async fn discard_clears_pending_result() {
     let _ = bolt_recv(&mut reader).await;
 
     // DISCARD instead of PULL.
-    bolt_send(
-        &mut writer,
-        &BoltRequest::Discard { extra: vec![] },
-    )
-    .await;
+    bolt_send(&mut writer, &BoltRequest::Discard { extra: vec![] }).await;
     let resp = bolt_recv(&mut reader).await;
     assert!(
         matches!(resp, BoltResponse::Success { .. }),
@@ -798,11 +812,17 @@ async fn begin_commit_after_bind_succeeds() {
 
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
     let begin = bolt_recv(&mut reader).await;
-    assert!(matches!(begin, BoltResponse::Success { .. }), "BEGIN should succeed");
+    assert!(
+        matches!(begin, BoltResponse::Success { .. }),
+        "BEGIN should succeed"
+    );
 
     bolt_send(&mut writer, &BoltRequest::Commit).await;
     let commit = bolt_recv(&mut reader).await;
-    assert!(matches!(commit, BoltResponse::Success { .. }), "COMMIT should succeed");
+    assert!(
+        matches!(commit, BoltResponse::Success { .. }),
+        "COMMIT should succeed"
+    );
 }
 #[tokio::test]
 async fn begin_rollback_after_bind_succeeds() {
@@ -819,7 +839,10 @@ async fn begin_rollback_after_bind_succeeds() {
     let _ = bolt_recv(&mut reader).await;
     bolt_send(&mut writer, &BoltRequest::Rollback).await;
     let resp = bolt_recv(&mut reader).await;
-    assert!(matches!(resp, BoltResponse::Success { .. }), "ROLLBACK should succeed");
+    assert!(
+        matches!(resp, BoltResponse::Success { .. }),
+        "ROLLBACK should succeed"
+    );
 }
 #[tokio::test]
 async fn commit_without_begin_fails_request_invalid() {
@@ -887,18 +910,28 @@ async fn run_inside_txn_sees_own_uncommitted_write() {
     let _ = bolt_recv(&mut reader).await;
 
     bolt_send(&mut writer, &run_query("CREATE (n:Persona)")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut sink = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut sink, &mut reader).await;
 
     // Second RUN in the same txn: the MATCH must see the pending node.
     bolt_send(&mut writer, &run_query("MATCH (n:Persona) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut records = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
-    assert_eq!(records.len(), 1, "second RUN must see the txn's own pending node");
+    assert_eq!(
+        records.len(),
+        1,
+        "second RUN must see the txn's own pending node"
+    );
 }
 #[tokio::test]
 async fn run_inside_txn_not_visible_to_other_autocommit_session_until_commit() {
@@ -924,26 +957,42 @@ async fn run_inside_txn_not_visible_to_other_autocommit_session_until_commit() {
     bolt_send(&mut w1, &BoltRequest::Begin { extra: vec![] }).await;
     let _ = bolt_recv(&mut r1).await;
     bolt_send(&mut w1, &run_query("CREATE (n:Persona)")).await;
-    assert!(matches!(bolt_recv(&mut r1).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut r1).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut w1, &pull()).await;
     let mut s = vec![];
     let _ = collect_records(bolt_recv(&mut r1).await, &mut s, &mut r1).await;
 
     // Connection 2 (auto-commit): must NOT see the pending node.
     bolt_send(&mut w2, &run_query("MATCH (n:Persona) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut r2).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut r2).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut w2, &pull()).await;
     let mut before = vec![];
     let _ = collect_records(bolt_recv(&mut r2).await, &mut before, &mut r2).await;
-    assert_eq!(before.len(), 0, "pending write invisible to other session before COMMIT");
+    assert_eq!(
+        before.len(),
+        0,
+        "pending write invisible to other session before COMMIT"
+    );
 
     // Connection 1: COMMIT.
     bolt_send(&mut w1, &BoltRequest::Commit).await;
-    assert!(matches!(bolt_recv(&mut r1).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut r1).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Connection 2: now sees it.
     bolt_send(&mut w2, &run_query("MATCH (n:Persona) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut r2).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut r2).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut w2, &pull()).await;
     let mut after = vec![];
     let _ = collect_records(bolt_recv(&mut r2).await, &mut after, &mut r2).await;
@@ -966,17 +1015,26 @@ async fn begin_create_rollback_discards_pending_write() {
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
     let _ = bolt_recv(&mut reader).await;
     bolt_send(&mut writer, &run_query("CREATE (n:Persona)")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut s = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut s, &mut reader).await;
 
     bolt_send(&mut writer, &BoltRequest::Rollback).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Auto-commit read after rollback: nothing persisted.
     bolt_send(&mut writer, &run_query("MATCH (n:Persona) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut records = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
@@ -1007,14 +1065,20 @@ async fn run_error_inside_txn_then_reset_abandons_txn_cleanly() {
 
     // A valid write in the txn (pending), then an invalid statement fails.
     bolt_send(&mut writer, &run_query("CREATE (n:Persona)")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut s = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut s, &mut reader).await;
 
     bolt_send(&mut writer, &run_query("THIS IS NOT CYPHER")).await;
     let bad = bolt_recv(&mut reader).await;
-    assert!(matches!(bad, BoltResponse::Failure { .. }), "invalid query must fail");
+    assert!(
+        matches!(bad, BoltResponse::Failure { .. }),
+        "invalid query must fail"
+    );
 
     // In FAILED state, a further RUN is IGNORED (not executed).
     bolt_send(&mut writer, &run_query("CREATE (m:Otro)")).await;
@@ -1026,15 +1090,25 @@ async fn run_error_inside_txn_then_reset_abandons_txn_cleanly() {
 
     // RESET clears the failure and rolls back the open txn.
     bolt_send(&mut writer, &BoltRequest::Reset).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
 
     // Back in auto-commit: a fresh read shows the aborted txn persisted nothing.
     bolt_send(&mut writer, &run_query("MATCH (n:Persona) RETURN n")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut records = vec![];
     let _ = collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
-    assert_eq!(records.len(), 0, "RESET rolled back the txn; nothing persisted");
+    assert_eq!(
+        records.len(),
+        0,
+        "RESET rolled back the txn; nothing persisted"
+    );
 }
 #[tokio::test]
 async fn txn_mutation_summary_counters_match_autocommit_shape() {
@@ -1055,14 +1129,23 @@ async fn txn_mutation_summary_counters_match_autocommit_shape() {
     let _ = bolt_recv(&mut reader).await;
 
     bolt_send(&mut writer, &run_query("CREATE (n:A), (m:B)")).await;
-    assert!(matches!(bolt_recv(&mut reader).await, BoltResponse::Success { .. }));
+    assert!(matches!(
+        bolt_recv(&mut reader).await,
+        BoltResponse::Success { .. }
+    ));
     bolt_send(&mut writer, &pull()).await;
     let mut records = vec![];
-    let final_resp =
-        collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
-    assert!(records.is_empty(), "no data row inside the txn, got {records:?}");
+    let final_resp = collect_records(bolt_recv(&mut reader).await, &mut records, &mut reader).await;
+    assert!(
+        records.is_empty(),
+        "no data row inside the txn, got {records:?}"
+    );
     let stats = dict_dict(&final_resp, "stats").expect("txn mutation must carry a stats dict");
-    assert_eq!(stats_int(&stats, "nodes-created"), Some(2), "two nodes created inside the txn");
+    assert_eq!(
+        stats_int(&stats, "nodes-created"),
+        Some(2),
+        "two nodes created inside the txn"
+    );
     assert_eq!(stats_int(&stats, "labels-added"), Some(2), "labels A and B");
 
     bolt_send(&mut writer, &BoltRequest::Rollback).await;
@@ -1117,7 +1200,11 @@ async fn ddl_and_call_inside_txn_are_rejected() {
     bolt_send(&mut writer, &BoltRequest::Begin { extra: vec![] }).await;
     let _ = bolt_recv(&mut reader).await;
 
-    bolt_send(&mut writer, &run_query("CREATE INDEX FOR (n:Person) ON (n.name)")).await;
+    bolt_send(
+        &mut writer,
+        &run_query("CREATE INDEX FOR (n:Person) ON (n.name)"),
+    )
+    .await;
     let ddl_resp = bolt_recv(&mut reader).await;
     assert!(
         matches!(ddl_resp, BoltResponse::Failure { .. }),
@@ -1249,9 +1336,8 @@ async fn run_before_hello_emits_access_denied_not_authenticated() {
     let _ = common::bolt_recv(&mut reader).await;
 
     let events = common::read_audit_events(&audit_tx, &audit_path).await;
-    let event = find_access_denied(&events).unwrap_or_else(|| {
-        panic!("expected access_denied event, got events: {events:#?}")
-    });
+    let event = find_access_denied(&events)
+        .unwrap_or_else(|| panic!("expected access_denied event, got events: {events:#?}"));
     assert_eq!(
         event["details"]["reason"].as_str(),
         Some("not_authenticated"),
@@ -1268,10 +1354,7 @@ async fn run_before_hello_emits_access_denied_not_authenticated() {
 fn run_with_params(query: &str, params: Vec<(&str, PackStreamValue)>) -> BoltRequest {
     BoltRequest::Run {
         query: query.to_owned(),
-        params: params
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), v))
-            .collect(),
+        params: params.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
         extra: vec![(
             "db".to_owned(),
             PackStreamValue::String(common::DEFAULT_TEST_DB.to_owned()),
@@ -1307,7 +1390,11 @@ async fn handler_run_with_named_param_substitutes_value() {
         matches!(final_resp, BoltResponse::Success { .. }),
         "expected trailing SUCCESS, got {final_resp:?}"
     );
-    assert_eq!(records.len(), 1, "expected exactly one RECORD for RETURN $x");
+    assert_eq!(
+        records.len(),
+        1,
+        "expected exactly one RECORD for RETURN $x"
+    );
     let BoltResponse::Record { fields } = &records[0] else {
         panic!("expected Record, got {:?}", records[0]);
     };
@@ -1349,7 +1436,11 @@ async fn handler_run_with_positional_param_substitutes_value() {
         matches!(final_resp, BoltResponse::Success { .. }),
         "expected trailing SUCCESS, got {final_resp:?}"
     );
-    assert_eq!(records.len(), 1, "expected exactly one RECORD for RETURN $1");
+    assert_eq!(
+        records.len(),
+        1,
+        "expected exactly one RECORD for RETURN $1"
+    );
     let BoltResponse::Record { fields } = &records[0] else {
         panic!("expected Record, got {:?}", records[0]);
     };
@@ -1532,8 +1623,8 @@ async fn pull_batch(
     bolt_send(writer, req).await;
     let mut records = vec![];
     let final_resp = collect_records(bolt_recv(reader).await, &mut records, reader).await;
-    let has_more = dict_bool(&final_resp, "has_more")
-        .expect("PULL Success must carry has_more metadata");
+    let has_more =
+        dict_bool(&final_resp, "has_more").expect("PULL Success must carry has_more metadata");
     (records.len(), has_more)
 }
 /// Seed `n` :N nodes over an authenticated session via a literal-list
@@ -1549,7 +1640,11 @@ async fn seed_n_nodes(
     n: usize,
 ) {
     let list = (1..=n).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-    bolt_send(writer, &run_query(&format!("UNWIND [{list}] AS i CREATE (:N {{i:i}})"))).await;
+    bolt_send(
+        writer,
+        &run_query(&format!("UNWIND [{list}] AS i CREATE (:N {{i:i}})")),
+    )
+    .await;
     assert!(
         matches!(bolt_recv(reader).await, BoltResponse::Success { .. }),
         "seeding CREATE must succeed"
@@ -1774,10 +1869,7 @@ async fn hello_throttle_after_n_failures_returns_auth_expired() {
         let (mut writer, mut reader, _shutdown) = fixture.spawn_extra_handler().await;
         bolt_send(
             &mut writer,
-            &common::hello_with_extras(&[
-                ("principal", "alice"),
-                ("credentials", "wrongpass"),
-            ]),
+            &common::hello_with_extras(&[("principal", "alice"), ("credentials", "wrongpass")]),
         )
         .await;
         let resp = bolt_recv(&mut reader).await;
@@ -1792,10 +1884,7 @@ async fn hello_throttle_after_n_failures_returns_auth_expired() {
     let (mut writer, mut reader, _shutdown) = fixture.spawn_extra_handler().await;
     bolt_send(
         &mut writer,
-        &common::hello_with_extras(&[
-            ("principal", "alice"),
-            ("credentials", "wrongpass"),
-        ]),
+        &common::hello_with_extras(&[("principal", "alice"), ("credentials", "wrongpass")]),
     )
     .await;
     let resp = bolt_recv(&mut reader).await;
@@ -1810,8 +1899,7 @@ async fn hello_throttle_after_n_failures_returns_auth_expired() {
     let throttle_events: Vec<_> = events
         .iter()
         .filter(|e| {
-            e.get("event_type").and_then(serde_json::Value::as_str)
-                == Some("auth_throttled")
+            e.get("event_type").and_then(serde_json::Value::as_str) == Some("auth_throttled")
         })
         .collect();
     assert!(
@@ -1864,9 +1952,8 @@ async fn run_throttle_after_burst_returns_too_many_requests() {
         let _summary = collect_records(first, &mut vec![], &mut reader).await;
     }
 
-    let throttled_at = throttled_at.expect(
-        "query bucket (cap 10, capacity 20) must throttle within 30 RUNs but never did",
-    );
+    let throttled_at = throttled_at
+        .expect("query bucket (cap 10, capacity 20) must throttle within 30 RUNs but never did");
     assert!(
         throttled_at <= 20,
         "throttle must fire within bucket capacity (≤20 RUNs), fired at {throttled_at}"
@@ -1927,10 +2014,11 @@ async fn bandwidth_cap_throttles_large_pull() {
     // list (not `range()`) because `UNWIND range(..) CREATE` creates 0 rows
     // via Bolt — a preexisting engine bug (see error-log 2026-05-27).
     let payload = "x".repeat(400);
-    let list = (1..=50).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
-    let seed = format!(
-        "UNWIND [{list}] AS i CREATE (:N {{i: i, payload: '{payload}'}})"
-    );
+    let list = (1..=50)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let seed = format!("UNWIND [{list}] AS i CREATE (:N {{i: i, payload: '{payload}'}})");
     bolt_send(&mut writer, &run_query(&seed)).await;
     let seed_resp = bolt_recv(&mut reader).await;
     assert!(
@@ -1976,12 +2064,9 @@ async fn bandwidth_cap_throttles_large_pull() {
     let bw = events
         .iter()
         .find(|e| {
-            e.get("event_type").and_then(serde_json::Value::as_str)
-                == Some("bandwidth_throttled")
+            e.get("event_type").and_then(serde_json::Value::as_str) == Some("bandwidth_throttled")
         })
-        .unwrap_or_else(|| {
-            panic!("expected a bandwidth_throttled audit event, got: {events:#?}")
-        });
+        .unwrap_or_else(|| panic!("expected a bandwidth_throttled audit event, got: {events:#?}"));
     let total_sleeps = bw
         .get("total_sleeps")
         .and_then(serde_json::Value::as_u64)
@@ -2041,7 +2126,9 @@ async fn query_timeout_surfaces_execution_failed_and_audit_event() {
         })
         .unwrap_or_else(|| panic!("expected a query_timed_out audit event, got: {events:#?}"));
     assert_eq!(
-        timed_out.get("timeout_ms").and_then(serde_json::Value::as_u64),
+        timed_out
+            .get("timeout_ms")
+            .and_then(serde_json::Value::as_u64),
         Some(50),
         "query_timed_out.timeout_ms must echo the configured timeout: {timed_out:#?}"
     );

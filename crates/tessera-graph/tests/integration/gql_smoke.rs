@@ -1,10 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-TesseraGraph-Proprietary
+// SPDX-License-Identifier: MIT
 
-use tessera_graph::gql;
-use tessera_graph::gql::{
-    BinOp, CreatePattern, Expr, GqlStatement, Literal, MutationClause,
-};
 use tessera_graph::GqlQuery;
+use tessera_graph::gql;
+use tessera_graph::gql::{BinOp, CreatePattern, Expr, GqlStatement, Literal, MutationClause};
 
 #[test]
 fn parse_stub_returns_ok() {
@@ -154,10 +152,7 @@ fn parse_deeply_nested_aggregate_is_rejected() {
 
 #[test]
 fn parse_create_with_delimited_identifier_property_key() {
-    let stmt = gql::parse_statement(
-        "CREATE (:Plant {\"Average Pyranometer\": 'value'})",
-    )
-    .unwrap();
+    let stmt = gql::parse_statement("CREATE (:Plant {\"Average Pyranometer\": 'value'})").unwrap();
     match stmt {
         GqlStatement::Mutation(ms) => match ms.mutation {
             MutationClause::Create(c) => {
@@ -182,10 +177,7 @@ fn parse_create_with_delimited_identifier_property_key() {
 
 #[test]
 fn parse_where_with_delimited_identifier_property_access() {
-    let q = gql::parse(
-        "MATCH (n) WHERE n.\"Average Pyranometer\" > 100 RETURN n",
-    )
-    .unwrap();
+    let q = gql::parse("MATCH (n) WHERE n.\"Average Pyranometer\" > 100 RETURN n").unwrap();
     match &q.where_clause.unwrap().predicate {
         Expr::BinaryOp { left, op, right } => {
             assert_eq!(*op, BinOp::Gt);
