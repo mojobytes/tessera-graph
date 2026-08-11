@@ -92,12 +92,13 @@ jobs:
           pattern: "*"
           merge-multiple: true
           path: dist
+      - run: cargo package -p tessera-graph --locked
+      - run: cp target/package/tessera-graph-${{ needs.validate.outputs.version }}.crate dist/
       - id: crates-io-auth
         uses: rust-lang/crates-io-auth-action@v1
       - run: cargo publish -p tessera-graph --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
-      - run: cp target/package/tessera-graph-${{ needs.validate.outputs.version }}.crate dist/
       - env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes --verify-tag
