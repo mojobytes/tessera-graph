@@ -81,6 +81,9 @@ jobs:
   publish-github:
     needs: [validate, binaries, python-wheels]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -88,7 +91,11 @@ jobs:
           pattern: "*"
           merge-multiple: true
           path: dist
-      - run: cargo package -p tessera-graph --locked
+      - id: crates-io-auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - run: cargo publish -p tessera-graph --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
       - run: cp target/package/tessera-graph-${{ needs.validate.outputs.version }}.crate dist/
       - env:
           GH_TOKEN: ${{ github.token }}
