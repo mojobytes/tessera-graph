@@ -220,4 +220,4 @@ separado y no forman parte de este.
 
 ---
 
-BelowZero Security OU · [tesseradb.io](https://tesseradb.io)
+[tesseradb.io](https://tesseradb.io)

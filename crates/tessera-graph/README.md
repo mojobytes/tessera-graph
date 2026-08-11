@@ -57,4 +57,4 @@ crate.
 
 Licensed under the [MIT License](LICENSE).
 
-Part of [TesseraGraph](https://tesseradb.io) by BelowZero Security OU.
+Part of [TesseraGraph](https://tesseradb.io).
