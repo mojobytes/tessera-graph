@@ -13,6 +13,6 @@ cargo package -p tessera-graph --locked
 release_venv="$(mktemp -d)/venv"
 python3 -m venv "${release_venv}"
 "${release_venv}/bin/pip" install 'maturin>=1.7,<2.0' pytest
-"${release_venv}/bin/maturin" develop --locked \
+VIRTUAL_ENV="${release_venv}" "${release_venv}/bin/maturin" develop --locked \
   --manifest-path crates/tessera-graph-python/Cargo.toml
 "${release_venv}/bin/python" -m pytest crates/tessera-graph-python/tests -q
