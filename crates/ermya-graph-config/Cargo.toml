@@ -1,0 +1,15 @@
+[package]
+name        = "ermya-graph-config"
+description = "Configuration management for ErmyaGraph"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license-file          = "../ermya-graph-server/LICENSE"
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

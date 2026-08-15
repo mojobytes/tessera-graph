@@ -1,0 +1,101 @@
+[package]
+name        = "ermya-graph-server"
+description = "Bolt 4.4 server for ErmyaGraph — standalone graph database"
+version.workspace      = true
+edition.workspace      = true
+authors.workspace      = true
+# Community is source-available under BSL 1.1. Production use is permitted for
+# internal business purposes; DBaaS, OEM redistribution and competing products
+# require a commercial agreement until the Change Date.
+license-file      = "LICENSE"
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "ermya_graph_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ermya-graph-server"
+path = "src/main.rs"
+
+[features]
+# Enable plain-TCP listener (no TLS) for integration tests.
+plain-tcp = []
+# Expose test-only injection points (e.g. `BoltHandler::with_accessor_factory`)
+# to the integration-test targets. Activated for those targets via the self
+# dev-dependency below; the production binary never enables it, so the injection
+# points are absent from the released artefact.
+test-util = []
+# Compile the `bench_support` module (lock-contention benchmark harness).
+# Off by default so benchmark-only code never links into the released
+# library or binary; the `lock_contention` bench target enables it via
+# `required-features`. See `.private/tdd-plan-lock-contention-bench.md`.
+bench-support = []
+
+[dependencies]
+ermya-graph          = { workspace = true }
+ermya-graph-protocol = { workspace = true }
+ermya-graph-config   = { workspace = true }
+ermya-graph-cypher   = { workspace = true }
+tokio        = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
+tokio-rustls      = { workspace = true }
+thiserror         = { workspace = true }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
+argon2       = { workspace = true }
+async-trait  = { workspace = true }
+base64       = { workspace = true }
+fs2          = { workspace = true }
+getrandom    = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+sha2         = { workspace = true }
+toml         = { workspace = true }
+time         = { workspace = true }
+uuid         = { workspace = true }
+# v0.6.0 Fase 2 Task 1: observability.
+# - `metrics`: lightweight facade. Zero-cost when no recorder is installed.
+# - `metrics-exporter-prometheus`: built with `default-features = false`
+#   to skip the bundled `hyper`-based listener; this crate's deliberate
+#   design (plan decision 2) serves the Prometheus scrape via a minimal
+#   custom HTTP/1.1 handler on `tokio::net::TcpListener`, avoiding the
+#   three transitive crates the exporter's `http-listener` feature pulls.
+metrics                     = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
+
+[dev-dependencies]
+# Self dev-dependency with `test-util` so the integration-test targets compile
+# the crate-under-test with its test-only injection points exposed (e.g.
+# `BoltHandler::with_accessor_factory`). The production binary/library builds
+# never enable `test-util`.
+ermya-graph-server = { path = ".", features = ["test-util"] }
+tokio           = { workspace = true, features = ["rt", "macros", "io-util", "net", "time"] }
+tokio-rustls    = { workspace = true }
+tempfile        = "3"
+rcgen           = "0.13"
+serde_json      = { workspace = true }
+fs2             = { workspace = true }
+# Async HTTP client for the metrics endpoint scrape tests.
+# Blocking feature is intentionally NOT enabled — calling blocking I/O
+# from inside `#[tokio::test]` deadlocks the runtime. No TLS feature is
+# needed because the metrics endpoint is plain HTTP by design.
+#
+# Note: `default-features = false` reduces reqwest's feature set but
+# does NOT exclude `hyper` — reqwest 0.13 uses hyper as its mandatory
+# HTTP/1 backend. The "no hyper" restriction from plan decision 2
+# applies only to the production binary (where the metrics endpoint
+# uses a custom `TcpListener` handler); dev-deps are scoped to the
+# test target and never link into the released artefact.
+reqwest         = { version = "0.13", default-features = false }
+# Lock-contention benchmark harness (Scenario 1). Only linked into the bench
+# target, which enables `bench-support` via `required-features`.
+criterion       = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "lock_contention"
+harness = false
+required-features = ["bench-support"]
+
+[lints]
+workspace = true

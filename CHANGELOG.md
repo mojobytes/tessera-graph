@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to TesseraGraph Community are recorded here. The format is
+All notable changes to ErmyaGraph Community are recorded here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
@@ -26,5 +26,5 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added Rust, Python, security-audit and container CI gates.
 - Added reproducible Python wheel builds and tagged GitHub release automation.
 
-[Unreleased]: https://github.com/tesseradb/tessera-graph/compare/v0.13.0...HEAD
-[0.13.0]: https://github.com/tesseradb/tessera-graph/releases/tag/v0.13.0
+[Unreleased]: https://github.com/ermya-vector/ermya-graph/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/ermya-vector/ermya-graph/releases/tag/v0.13.0

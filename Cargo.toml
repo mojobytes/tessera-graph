@@ -1,19 +1,19 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/tessera-graph",
-    "crates/tessera-graph-python",
-    "crates/tessera-graph-protocol",
-    "crates/tessera-graph-cli",
-    "crates/tessera-graph-config",
-    "crates/tessera-graph-cypher",
-    "crates/tessera-graph-server",
+    "crates/ermya-graph",
+    "crates/ermya-graph-python",
+    "crates/ermya-graph-protocol",
+    "crates/ermya-graph-cli",
+    "crates/ermya-graph-config",
+    "crates/ermya-graph-cypher",
+    "crates/ermya-graph-server",
 ]
 
 [workspace.package]
 version      = "0.13.0"
 edition      = "2024"
-authors      = ["Tessera DB <info@tesseradb.io>"]
+authors      = ["Ermya DB <info@ermya-vector.io>"]
 rust-version = "1.88"
 
 [workspace.lints.rust]
@@ -40,8 +40,8 @@ time         = { version = "0.3.47", default-features = false, features = ["std"
 tokio        = { version = "1", default-features = false }
 tokio-rustls = { version = "0.26" }
 uuid         = { version = "1", features = ["v7"] }
-tessera-graph          = { path = "crates/tessera-graph" }
-tessera-graph-protocol = { path = "crates/tessera-graph-protocol" }
-tessera-graph-config   = { path = "crates/tessera-graph-config" }
-tessera-graph-cypher   = { path = "crates/tessera-graph-cypher" }
-tessera-graph-server   = { path = "crates/tessera-graph-server" }
+ermya-graph          = { path = "crates/ermya-graph" }
+ermya-graph-protocol = { path = "crates/ermya-graph-protocol" }
+ermya-graph-config   = { path = "crates/ermya-graph-config" }
+ermya-graph-cypher   = { path = "crates/ermya-graph-cypher" }
+ermya-graph-server   = { path = "crates/ermya-graph-server" }
