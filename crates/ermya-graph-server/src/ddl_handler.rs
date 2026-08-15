@@ -177,8 +177,8 @@ fn persist_error(e: &ermya_graph::Error) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, RwLock};
     use ermya_graph::Graph;
+    use std::sync::{Arc, RwLock};
 
     fn make_graph() -> Arc<RwLock<Graph>> {
         Arc::new(RwLock::new(Graph::new()))
@@ -300,8 +300,7 @@ mod tests {
             .unwrap();
         }
 
-        let result =
-            dispatch_ddl(ermya_graph::gql::DdlStatement::ShowAppendOnlyInfo, &g).unwrap();
+        let result = dispatch_ddl(ermya_graph::gql::DdlStatement::ShowAppendOnlyInfo, &g).unwrap();
 
         assert_eq!(
             result.fields_psv,
@@ -322,8 +321,7 @@ mod tests {
     #[test]
     fn show_append_only_info_is_empty_when_nothing_is_declared() {
         let g = make_graph();
-        let result =
-            dispatch_ddl(ermya_graph::gql::DdlStatement::ShowAppendOnlyInfo, &g).unwrap();
+        let result = dispatch_ddl(ermya_graph::gql::DdlStatement::ShowAppendOnlyInfo, &g).unwrap();
         assert!(result.rows.is_empty());
         // The column schema is still reported, so a client can bind to it.
         assert_eq!(result.fields_psv.len(), 1);
@@ -442,8 +440,7 @@ mod tests {
             .unwrap()
             .schema_catalog_mut()
             .add_unique_constraint("Asset", "id");
-        let result =
-            dispatch_ddl(ermya_graph::gql::DdlStatement::ShowConstraintInfo, &g).unwrap();
+        let result = dispatch_ddl(ermya_graph::gql::DdlStatement::ShowConstraintInfo, &g).unwrap();
         assert!(!result.fields_psv.is_empty());
         assert_eq!(result.rows.len(), 1);
     }

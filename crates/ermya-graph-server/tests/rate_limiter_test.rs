@@ -7,9 +7,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use ermya_graph_server::rate_limiter::{
-    Clock, MockClock, RateLimiter, SlidingWindow, TokenBucket,
-};
+use ermya_graph_server::rate_limiter::{Clock, MockClock, RateLimiter, SlidingWindow, TokenBucket};
 
 fn ip(n: u8) -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(127, 0, 0, n))

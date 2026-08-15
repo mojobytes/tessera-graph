@@ -2,9 +2,9 @@
 
 //! `PyGraph` — Python wrapper around `ermya_graph::Graph`.
 
+use ermya_graph::{Graph, GraphConfig};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use ermya_graph::{Graph, GraphConfig};
 
 use crate::errors::to_py_err;
 use crate::types::edge::PyEdge;

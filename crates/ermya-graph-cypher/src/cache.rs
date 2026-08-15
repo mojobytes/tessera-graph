@@ -6,10 +6,10 @@
 //! via internal sharding. No external `RwLock` needed — multiple Bolt
 //! connections can hit the cache simultaneously without contention.
 
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use ermya_graph::GqlStatement;
 use ermya_graph::gql::GqlValue;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 /// Composite key identifying a cached parsed AST.
 ///

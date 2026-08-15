@@ -738,10 +738,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
         &metrics_addr,
         "ermya_queries_total",
         &[
-            (
-                "database",
-                ermya_graph_server::registry::COMMUNITY_DATABASE,
-            ),
+            ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
             ("outcome", "success"),
         ],
     )
@@ -750,10 +747,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
         &metrics_addr,
         "ermya_query_duration_seconds_count",
         &[
-            (
-                "database",
-                ermya_graph_server::registry::COMMUNITY_DATABASE,
-            ),
+            ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
             ("kind", "query"),
         ],
     )
@@ -762,10 +756,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
         &metrics_addr,
         "ermya_query_duration_seconds_sum",
         &[
-            (
-                "database",
-                ermya_graph_server::registry::COMMUNITY_DATABASE,
-            ),
+            ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
             ("kind", "query"),
         ],
     )
@@ -781,10 +772,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
                 &metrics_addr,
                 "ermya_queries_total",
                 &[
-                    (
-                        "database",
-                        ermya_graph_server::registry::COMMUNITY_DATABASE,
-                    ),
+                    ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
                     ("outcome", "success"),
                 ],
             )
@@ -801,10 +789,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
                 &metrics_addr,
                 "ermya_query_duration_seconds_count",
                 &[
-                    (
-                        "database",
-                        ermya_graph_server::registry::COMMUNITY_DATABASE,
-                    ),
+                    ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
                     ("kind", "query"),
                 ],
             )
@@ -824,10 +809,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
         &metrics_addr,
         "ermya_query_duration_seconds_sum",
         &[
-            (
-                "database",
-                ermya_graph_server::registry::COMMUNITY_DATABASE,
-            ),
+            ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
             ("kind", "query"),
         ],
     )
@@ -851,10 +833,7 @@ async fn queries_counter_outcome_error_on_syntax_failure() {
         &metrics_addr,
         "ermya_queries_total",
         &[
-            (
-                "database",
-                ermya_graph_server::registry::COMMUNITY_DATABASE,
-            ),
+            ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
             ("outcome", "error"),
         ],
     )
@@ -877,10 +856,7 @@ async fn queries_counter_outcome_error_on_syntax_failure() {
                 &metrics_addr,
                 "ermya_queries_total",
                 &[
-                    (
-                        "database",
-                        ermya_graph_server::registry::COMMUNITY_DATABASE,
-                    ),
+                    ("database", ermya_graph_server::registry::COMMUNITY_DATABASE),
                     ("outcome", "error"),
                 ],
             )
@@ -1007,12 +983,7 @@ async fn wal_fsync_histogram_has_samples_after_writes() {
     // Snapshot before any writes. The recorder is process-global so
     // sibling tests in the same binary may have already produced samples
     // — we assert a delta, not an absolute count.
-    let before = snapshot(
-        &metrics_addr,
-        "ermya_wal_fsync_duration_seconds_count",
-        &[],
-    )
-    .await;
+    let before = snapshot(&metrics_addr, "ermya_wal_fsync_duration_seconds_count", &[]).await;
 
     for i in 0..N_WRITES {
         // Each call opens a fresh Bolt session, runs CREATE, drains
@@ -1030,23 +1001,14 @@ async fn wal_fsync_histogram_has_samples_after_writes() {
         Duration::from_secs(5),
         Duration::from_millis(50),
         || async move {
-            let now = scrape_value(
-                &metrics_addr,
-                "ermya_wal_fsync_duration_seconds_count",
-                &[],
-            )
-            .await;
+            let now =
+                scrape_value(&metrics_addr, "ermya_wal_fsync_duration_seconds_count", &[]).await;
             (now - before) >= N_WRITES_F64
         },
     )
     .await;
 
-    let after = scrape_value(
-        &metrics_addr,
-        "ermya_wal_fsync_duration_seconds_count",
-        &[],
-    )
-    .await;
+    let after = scrape_value(&metrics_addr, "ermya_wal_fsync_duration_seconds_count", &[]).await;
     assert!(
         saw_samples,
         "expected >= {N_WRITES} new fsync samples in histogram, \
@@ -1441,10 +1403,7 @@ async fn result_capped_counter_increments_on_over_cap_query() {
     // La medida lleva el nombre de la base que el servidor SIRVIÓ, no el que
     // pidió la consulta: esta edición tiene una sola base y su nombre es fijo,
     // así que el nombre pedido se ignora al resolver.
-    let labels: &[(&str, &str)] = &[(
-        "database",
-        ermya_graph_server::registry::COMMUNITY_DATABASE,
-    )];
+    let labels: &[(&str, &str)] = &[("database", ermya_graph_server::registry::COMMUNITY_DATABASE)];
     let before = snapshot(&metrics_addr, "ermya_result_capped_total", labels).await;
 
     // Seed 10 nodes then MATCH them on the SAME connection so the read

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-use tempfile::TempDir;
 use ermya_graph::{Graph, GraphConfig, Properties, props};
+use tempfile::TempDir;
 
 const fn small_cache_config() -> GraphConfig {
     GraphConfig {

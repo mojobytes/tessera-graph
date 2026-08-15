@@ -304,10 +304,7 @@ fn slow_query_threshold_ms_defaults_to_one_thousand() {
 
 #[test]
 fn slow_query_threshold_ms_reads_from_env_override() {
-    let map = HashMap::from([(
-        "ERMYA_SLOW_QUERY_THRESHOLD_MS".to_owned(),
-        "250".to_owned(),
-    )]);
+    let map = HashMap::from([("ERMYA_SLOW_QUERY_THRESHOLD_MS".to_owned(), "250".to_owned())]);
     let cfg = ServerConfig::from_map(&map);
     assert_eq!(cfg.slow_query_threshold_ms, 250);
 }
@@ -644,10 +641,7 @@ fn vacuum_interval_defaults_to_300() {
 #[test]
 fn vacuum_interval_read_from_env() {
     let mut m = HashMap::new();
-    m.insert(
-        "ERMYA_VACUUM_INTERVAL_SECONDS".to_owned(),
-        "42".to_owned(),
-    );
+    m.insert("ERMYA_VACUUM_INTERVAL_SECONDS".to_owned(), "42".to_owned());
     let cfg = ServerConfig::from_map(&m);
     assert_eq!(cfg.vacuum_interval_seconds, 42);
 }

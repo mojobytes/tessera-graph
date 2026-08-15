@@ -516,9 +516,7 @@ async fn open_bolt_session(
     ermya_graph_protocol::bolt_frame::BoltChunkedWriter<
         tokio::io::WriteHalf<tokio::net::TcpStream>,
     >,
-    ermya_graph_protocol::bolt_frame::BoltChunkedReader<
-        tokio::io::ReadHalf<tokio::net::TcpStream>,
-    >,
+    ermya_graph_protocol::bolt_frame::BoltChunkedReader<tokio::io::ReadHalf<tokio::net::TcpStream>>,
 ) {
     let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
     let (mut read, mut write) = tokio::io::split(stream);

@@ -13,8 +13,8 @@
 //! growing — rather than against the mechanism, so a different implementation
 //! of reuse would still satisfy them.
 
-use tempfile::TempDir;
 use ermya_graph::{Graph, GraphConfig, Property, props};
+use tempfile::TempDir;
 
 const fn test_config() -> GraphConfig {
     GraphConfig {

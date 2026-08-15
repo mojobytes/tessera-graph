@@ -314,11 +314,11 @@ pub fn default_auth_store() -> Arc<dyn UserStore> {
 #[cfg(unix)]
 #[allow(dead_code)]
 pub async fn prepopulate_system(data_dir: &std::path::Path, admin_password: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    use std::sync::RwLock as StdRwLock;
     use ermya_graph::GraphConfig;
     use ermya_graph_server::auth::SecretString;
     use ermya_graph_server::migration::{CURRENT_DISK_LAYOUT, write};
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::RwLock as StdRwLock;
 
     let system_dir = data_dir.join("system");
     std::fs::create_dir_all(&system_dir).expect("create system dir");
@@ -639,11 +639,11 @@ pub struct ListenerComponents {
 /// de base que se le pasa se ignora — hay una sola y siempre es la misma.
 #[allow(dead_code)]
 pub async fn fresh_listener_components(_db_name: &str) -> ListenerComponents {
-    use std::sync::RwLock as StdRwLock;
-    use tempfile::TempDir;
     use ermya_graph::GraphConfig;
     use ermya_graph_server::auth::{NoAuthProvider, SecretString};
     use ermya_graph_server::registry::{COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager};
+    use std::sync::RwLock as StdRwLock;
+    use tempfile::TempDir;
 
     let tmp = TempDir::new().expect("tempdir for listener");
     let data_dir = tmp.path().to_path_buf();
@@ -651,8 +651,8 @@ pub async fn fresh_listener_components(_db_name: &str) -> ListenerComponents {
     let system_dir = data_dir.join("system");
     std::fs::create_dir_all(&system_dir).unwrap();
 
-    let system_graph = ermya_graph::Graph::open(&system_dir, &GraphConfig::default())
-        .expect("open system graph");
+    let system_graph =
+        ermya_graph::Graph::open(&system_dir, &GraphConfig::default()).expect("open system graph");
     let store = Arc::new(
         SystemGraphAuthStore::new(Arc::new(StdRwLock::new(system_graph)))
             .expect("system auth store"),
@@ -1110,12 +1110,12 @@ impl AuthRateLimitFixture {
     /// `auth_cap` es cuántos fallos por minuto se toleran desde una dirección
     /// antes de rechazar sin llegar a mirar las credenciales.
     pub async fn new(auth_cap: u32) -> Self {
-        use std::net::{IpAddr, Ipv4Addr};
         use ermya_graph_server::auth::{SecretString, SystemGraphAuthProvider};
         use ermya_graph_server::rate_limiter::RateLimiter;
         use ermya_graph_server::registry::{
             COMMUNITY_DATABASE, EngineLimits, SingleDatabaseManager,
         };
+        use std::net::{IpAddr, Ipv4Addr};
 
         let tmp = tempfile::TempDir::new().expect("tempdir for auth-rate fixture");
         let store = Arc::new(

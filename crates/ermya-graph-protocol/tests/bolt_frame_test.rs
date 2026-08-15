@@ -3,9 +3,7 @@
 //! Integration tests for the Bolt chunked transport framing layer.
 
 use ermya_graph_protocol::packstream::{decode, encode};
-use ermya_graph_protocol::{
-    BoltChunkedReader, BoltChunkedWriter, MAX_CHUNK_SIZE, PackStreamValue,
-};
+use ermya_graph_protocol::{BoltChunkedReader, BoltChunkedWriter, MAX_CHUNK_SIZE, PackStreamValue};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

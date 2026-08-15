@@ -266,11 +266,7 @@ impl ServerConfig {
                 .unwrap_or(defaults.audit_sink),
             audit_file: vars.get("ERMYA_AUDIT_FILE").map(PathBuf::from),
             audit_max_bytes: parse_num(vars, "ERMYA_AUDIT_MAX_BYTES", defaults.audit_max_bytes),
-            audit_keep_files: parse_num(
-                vars,
-                "ERMYA_AUDIT_KEEP_FILES",
-                defaults.audit_keep_files,
-            ),
+            audit_keep_files: parse_num(vars, "ERMYA_AUDIT_KEEP_FILES", defaults.audit_keep_files),
             audit_fsync_every: parse_num(
                 vars,
                 "ERMYA_AUDIT_FSYNC_EVERY",
@@ -354,11 +350,7 @@ impl ServerConfig {
                 "ERMYA_RATE_LIMIT_IP_CAP",
                 defaults.rate_limit_ip_cap,
             ),
-            query_timeout_ms: parse_num(
-                vars,
-                "ERMYA_QUERY_TIMEOUT_MS",
-                defaults.query_timeout_ms,
-            ),
+            query_timeout_ms: parse_num(vars, "ERMYA_QUERY_TIMEOUT_MS", defaults.query_timeout_ms),
             server_agent: vars
                 .get("ERMYA_SERVER_AGENT")
                 .cloned()
@@ -563,10 +555,7 @@ fn file_config_to_map(fc: &FileConfig) -> HashMap<String, String> {
     put_num("ERMYA_AUDIT_KEEP_FILES", fc.audit_keep_files);
     put_num("ERMYA_AUDIT_FSYNC_EVERY", fc.audit_fsync_every);
     put_num("ERMYA_IDLE_TTL_SECONDS", fc.idle_ttl_seconds);
-    put_num(
-        "ERMYA_DEFAULT_MAX_CONNECTIONS",
-        fc.default_max_connections,
-    );
+    put_num("ERMYA_DEFAULT_MAX_CONNECTIONS", fc.default_max_connections);
     put_num("ERMYA_DEFAULT_MAX_SIZE_BYTES", fc.default_max_size_bytes);
     put_num("ERMYA_MAX_TXN_MEMORY_BYTES", fc.max_txn_memory_bytes);
     put_num("ERMYA_MAX_BATCH_OPERATIONS", fc.max_batch_operations);
@@ -579,19 +568,13 @@ fn file_config_to_map(fc: &FileConfig) -> HashMap<String, String> {
         "ERMYA_REGISTRY_SWEEP_INTERVAL_SECONDS",
         fc.registry_sweep_interval_seconds,
     );
-    put_num(
-        "ERMYA_VACUUM_INTERVAL_SECONDS",
-        fc.vacuum_interval_seconds,
-    );
+    put_num("ERMYA_VACUUM_INTERVAL_SECONDS", fc.vacuum_interval_seconds);
     put_num(
         "ERMYA_TTL_DISABLED_WARN_THRESHOLD",
         fc.ttl_disabled_warn_threshold,
     );
     put_num("ERMYA_MAX_OPEN_DATABASES", fc.max_open_databases);
-    put_num(
-        "ERMYA_SLOW_QUERY_THRESHOLD_MS",
-        fc.slow_query_threshold_ms,
-    );
+    put_num("ERMYA_SLOW_QUERY_THRESHOLD_MS", fc.slow_query_threshold_ms);
     put_num(
         "ERMYA_SLOW_QUERY_MAX_EVENTS_PER_MINUTE",
         fc.max_slow_events_per_minute,

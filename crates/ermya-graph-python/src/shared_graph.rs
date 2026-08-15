@@ -7,9 +7,9 @@
 
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use ermya_graph::Graph;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use ermya_graph::Graph;
 
 use crate::errors::{self, to_py_err};
 use crate::graph::{PyGraph, to_edge_id, to_node_id};

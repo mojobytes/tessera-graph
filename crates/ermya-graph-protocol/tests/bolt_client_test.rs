@@ -99,9 +99,7 @@ async fn run_query_returns_error_when_run_is_ignored() {
         vec![], // no PULL expected — client should bail after RUN IGNORED
     ));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1").await;
@@ -132,9 +130,7 @@ async fn run_query_returns_error_when_pull_is_ignored() {
         vec![BoltResponse::Ignored],
     ));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1 AS x").await;
@@ -163,9 +159,7 @@ async fn run_query_returns_error_when_run_gets_unexpected_record() {
         vec![],
     ));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1").await;
@@ -208,9 +202,7 @@ async fn run_query_success_still_works() {
         ],
     ));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1 AS n").await.unwrap();
@@ -245,9 +237,7 @@ async fn reset_returns_ok_on_success() {
         BoltResponse::Success { metadata: vec![] },
     ));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     assert!(client.reset().await.is_ok());
@@ -269,9 +259,7 @@ async fn reset_returns_error_on_failure() {
         },
     ));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.reset().await;
@@ -292,9 +280,7 @@ async fn reset_returns_error_on_ignored() {
 
     let server = tokio::spawn(mock_server_reset(server_stream, BoltResponse::Ignored));
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.reset().await;
@@ -341,9 +327,7 @@ async fn run_ignored_does_not_send_pull() {
         );
     });
 
-    let mut client = ermya_graph_protocol::connect(client_stream)
-        .await
-        .unwrap();
+    let mut client = ermya_graph_protocol::connect(client_stream).await.unwrap();
     client.hello("neo4j", "test", None).await.unwrap();
 
     let result = client.run_query("RETURN 1").await;

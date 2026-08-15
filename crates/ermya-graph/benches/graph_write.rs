@@ -221,10 +221,7 @@ fn bench_match_create_pattern(c: &mut Criterion) {
                     let mut g = Graph::new();
                     // Create source node
                     let mut sp = Properties::new();
-                    sp.insert(
-                        "name".into(),
-                        ermya_graph::Property::String("Alice".into()),
-                    );
+                    sp.insert("name".into(), ermya_graph::Property::String("Alice".into()));
                     g.add_node("Person", sp).unwrap();
                     // Create target nodes with unique names
                     for i in 0..n {

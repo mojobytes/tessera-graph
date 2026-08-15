@@ -20,11 +20,11 @@
 use std::fs::File;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use tempfile::NamedTempFile;
 use ermya_graph::storage::backend::DataFile;
 use ermya_graph::storage::buffer_pool::BufferPool;
 use ermya_graph::storage::page::{PAGE_SIZE, new_page_buf};
 use ermya_graph::{Graph, GraphConfig, Properties};
+use tempfile::NamedTempFile;
 
 /// Builds a pool with capacity for `cached * 2` pages (so nothing is evicted)
 /// backed by a temp file holding `cached` zeroed pages, and pre-fills it with

@@ -4,8 +4,8 @@
 mod helpers;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use tempfile::TempDir;
 use ermya_graph::{Graph, GraphConfig, Properties};
+use tempfile::TempDir;
 
 fn open_file_graph(wal_enabled: bool) -> (TempDir, Graph) {
     let tmp = TempDir::new().unwrap();

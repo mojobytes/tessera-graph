@@ -2006,10 +2006,7 @@ where
     /// selected (identical to `dispatch_ddl`), falling back to the default graph
     /// for single-database sessions. The built-in procedures
     /// (`vertex_labels`/`edge_types`) read only that database's label indexes.
-    async fn dispatch_call(
-        &mut self,
-        stmt: Box<ermya_graph::gql::CallStatement>,
-    ) -> Result<bool> {
+    async fn dispatch_call(&mut self, stmt: Box<ermya_graph::gql::CallStatement>) -> Result<bool> {
         use ermya_graph::call::{ProcedureKind, resolve_procedure};
 
         // Los procedimientos de copia en caliente son asíncronos, cuelgan del

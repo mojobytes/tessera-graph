@@ -520,13 +520,7 @@ mod tests {
 
     #[test]
     fn resolve_and_resolve_full_agree_when_no_file_config() {
-        let cli = cli_from(&[
-            "ermya-cli",
-            "-H",
-            "shared-host",
-            "--connect-timeout",
-            "42",
-        ]);
+        let cli = cli_from(&["ermya-cli", "-H", "shared-host", "--connect-timeout", "42"]);
         let env = empty_env();
         let (cfg_basic, pwd_basic) = ConnectionConfig::resolve_with_env(&cli, &env);
         let (cfg_full, pwd_full) = ConnectionConfig::resolve_full_with_env(&cli, &env);

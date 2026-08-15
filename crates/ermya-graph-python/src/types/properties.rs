@@ -2,9 +2,9 @@
 
 //! Conversion helpers between Python `dict[str, Any]` and Rust `Properties`.
 
+use ermya_graph::{Properties, Property};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyString};
-use ermya_graph::{Properties, Property};
 
 /// Converts a Rust `Properties` map into a Python `dict[str, Any]`.
 pub fn to_py_dict<'py>(py: Python<'py>, props: &Properties) -> PyResult<Bound<'py, PyDict>> {

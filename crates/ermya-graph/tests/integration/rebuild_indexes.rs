@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-use tempfile::TempDir;
 use ermya_graph::{Graph, GraphConfig, Properties};
+use tempfile::TempDir;
 
 const fn wal_config() -> GraphConfig {
     GraphConfig {

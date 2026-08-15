@@ -272,9 +272,8 @@ mod tests {
 
     #[test]
     fn parse_query_with_language() {
-        let cli =
-            Cli::try_parse_from(["ermya-cli", "query", "-l", "cypher", "MATCH (n) RETURN n"])
-                .unwrap();
+        let cli = Cli::try_parse_from(["ermya-cli", "query", "-l", "cypher", "MATCH (n) RETURN n"])
+            .unwrap();
         let Some(Command::Query(q)) = cli.command else {
             panic!("expected Query command");
         };
@@ -309,9 +308,8 @@ mod tests {
 
     #[test]
     fn parse_import_continue_on_error_flag() {
-        let cli =
-            Cli::try_parse_from(["ermya-cli", "import", "data.json", "--continue-on-error"])
-                .unwrap(); // OK: test
+        let cli = Cli::try_parse_from(["ermya-cli", "import", "data.json", "--continue-on-error"])
+            .unwrap(); // OK: test
         let Some(Command::Import(i)) = cli.command else {
             panic!("expected Import command");
         };

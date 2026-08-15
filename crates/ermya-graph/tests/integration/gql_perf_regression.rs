@@ -56,9 +56,9 @@
 //! plainly what they cannot detect. A guard that silently detects nothing is
 //! worse than none, because it reads as coverage.
 
+use ermya_graph::{Direction, Graph, GraphConfig, Properties, props};
 use std::time::Instant;
 use tempfile::TempDir;
-use ermya_graph::{Direction, Graph, GraphConfig, Properties, props};
 
 use crate::helpers::graph_builders::build_chain;
 

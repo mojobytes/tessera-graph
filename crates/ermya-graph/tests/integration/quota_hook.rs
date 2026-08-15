@@ -11,8 +11,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tempfile::TempDir;
 use ermya_graph::{Error, Graph, GraphConfig, props};
+use tempfile::TempDir;
 
 const fn test_config() -> GraphConfig {
     GraphConfig {

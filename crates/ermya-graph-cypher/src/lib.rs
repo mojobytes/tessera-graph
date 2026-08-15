@@ -331,10 +331,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             &stmt,
-            GqlStatement::Ddl(ermya_graph::gql::DdlStatement::SetLabelAppendOnly {
-                on: false,
-                ..
-            })
+            GqlStatement::Ddl(ermya_graph::gql::DdlStatement::SetLabelAppendOnly { on: false, .. })
         ));
     }
 

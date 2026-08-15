@@ -145,9 +145,8 @@ fn parse_with_full_options() {
 fn parse_two_chained_with_stages() {
     use ermya_graph::gql::{GqlStatement, PipelineStage};
 
-    let stmt =
-        ermya_graph::gql::parse_statement("MATCH (a) WITH a ORDER BY a.id WITH a RETURN a")
-            .unwrap();
+    let stmt = ermya_graph::gql::parse_statement("MATCH (a) WITH a ORDER BY a.id WITH a RETURN a")
+        .unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!("expected Pipeline");
     };
@@ -184,9 +183,8 @@ fn parse_with_then_unwind_pipeline() {
 fn parse_with_set_mutation_terminal() {
     use ermya_graph::gql::{GqlStatement, PipelineTerminal};
 
-    let stmt =
-        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a WITH a AS b SET b.x = 1")
-            .unwrap();
+    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a WITH a AS b SET b.x = 1")
+        .unwrap();
     let GqlStatement::Pipeline(pq) = stmt else {
         panic!("expected Pipeline");
     };
@@ -312,9 +310,8 @@ fn execute_with_alias_rename() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt =
-        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a AS person RETURN person")
-            .unwrap();
+    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a AS person RETURN person")
+        .unwrap();
     let ermya_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -522,8 +519,8 @@ fn execute_with_count_aggregate() {
     use ermya_graph::GqlValue;
 
     let g = ages_graph();
-    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH count(a) AS n RETURN n")
-        .unwrap();
+    let stmt =
+        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH count(a) AS n RETURN n").unwrap();
     let ermya_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -620,8 +617,8 @@ fn execute_two_chained_with_preserves_ordering() {
 #[test]
 fn execute_scope_isolation_after_with() {
     let g = ages_graph();
-    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a.name AS name RETURN a")
-        .unwrap();
+    let stmt =
+        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a.name AS name RETURN a").unwrap();
     let ermya_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -644,9 +641,8 @@ fn execute_range_positive() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt =
-        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH range(0, 2) AS r RETURN r")
-            .unwrap();
+    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH range(0, 2) AS r RETURN r")
+        .unwrap();
     let ermya_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -722,9 +718,8 @@ fn execute_range_empty_when_start_gt_end() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt =
-        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH range(5, 2) AS r RETURN r")
-            .unwrap();
+    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH range(5, 2) AS r RETURN r")
+        .unwrap();
     let ermya_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };
@@ -916,9 +911,8 @@ fn execute_unwind_empty_list_drops_binding() {
     let mut g = Graph::new();
     g.add_node("Person", props! { "name" => "Alice" }).unwrap();
 
-    let stmt =
-        ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a UNWIND [] AS n RETURN n")
-            .unwrap();
+    let stmt = ermya_graph::gql::parse_statement("MATCH (a:Person) WITH a UNWIND [] AS n RETURN n")
+        .unwrap();
     let ermya_graph::gql::GqlStatement::Pipeline(ref pq) = stmt else {
         panic!();
     };

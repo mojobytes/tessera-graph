@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+use ermya_graph::{Graph, GraphConfig, Properties, props};
 use std::time::Instant;
 use tempfile::TempDir;
-use ermya_graph::{Graph, GraphConfig, Properties, props};
 
 const fn wal_config() -> GraphConfig {
     GraphConfig {
@@ -211,8 +211,8 @@ fn batch_throughput_regression_guard() {
 // instead of inferring the batch boundary by counting how many fsyncs fired.
 #[test]
 fn wal_observer_distinguishes_individual_and_batch_close_causes() {
-    use std::sync::{Arc, Mutex};
     use ermya_graph::{FsyncCause, WalObserver};
+    use std::sync::{Arc, Mutex};
 
     let tmp = TempDir::new().unwrap();
     let causes: Arc<Mutex<Vec<FsyncCause>>> = Arc::new(Mutex::new(vec![]));

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-use tempfile::TempDir;
 use ermya_graph::{Graph, GraphConfig, props};
+use tempfile::TempDir;
 
 /// Minimum buffer pool: 8 pages = 32 KB.
 /// Forces frequent eviction even with small workloads.
