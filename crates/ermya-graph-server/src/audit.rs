@@ -794,10 +794,10 @@ impl AuditSink {
     /// Returns [`AuditError::Io`] if the parent directory cannot be
     /// created or the file cannot be opened for append.
     pub fn file_sync_oneshot(path: &Path) -> Result<Self, AuditError> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         // Open-and-close the file once to surface permission errors at
         // construction time rather than at first emission. The actual

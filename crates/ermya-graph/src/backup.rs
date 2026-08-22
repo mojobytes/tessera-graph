@@ -3,9 +3,9 @@
 //! Physical, atomic copy and restore of a database's on-disk files.
 //!
 //! These are pure functions over filesystem paths: they know nothing about the
-//! server registry or `Arc<RwLock<Graph>>`, so they can be reused both online
-//! (server flush-freeze under a per-tenant write lock) and offline (CLI
-//! disaster recovery). The online consistency guarantee is the caller's
+//! server registry or `Arc<RwLock<Graph>>`, so they can be reused by a running
+//! host after quiescing writes or offline by a recovery tool. The online
+//! consistency guarantee is the caller's
 //! responsibility — it must `flush()` the target `Graph` under a write lock
 //! before calling [`copy_db_files_atomic`], so the on-disk files are a
 //! consistent point and the WAL is empty.
@@ -19,10 +19,9 @@ use crate::{Graph, GraphConfig};
 /// value that could escape the `databases/` directory (path traversal) or
 /// collide with reserved directories.
 ///
-/// This is the single source of truth shared by the engine restore, the server
-/// `restore_tenant`, and the offline CLI, so a `CALL ermya.restore('../system',
-/// …)` or `admin restore --db ../system` can never resolve `databases/<db>` onto
-/// `system/` or anywhere outside `databases/`.
+/// This is the single source of truth shared by restore callers, so an input
+/// such as `../system` can never resolve `databases/<db>` onto `system/` or
+/// anywhere outside `databases/`.
 ///
 /// Accepts: a non-empty name up to 63 bytes, first character ASCII letter or
 /// `_`, remaining characters ASCII alphanumeric / `_` / `-`. Rejects the
@@ -200,9 +199,8 @@ impl std::error::Error for RestoreError {}
 /// `live_dir`, crash-consistently and with a fail-safe rollback.
 ///
 /// Pure over filesystem paths: it knows nothing about the server registry, so
-/// the same routine serves the online restore (after the caller evicts the
-/// tenant) and the offline CLI disaster recovery (under an exclusive `fs2`
-/// lock).
+/// the same routine serves a running host after it releases the live graph
+/// and an offline recovery tool operating under an exclusive `fs2` lock.
 ///
 /// Sequence (each step runs only if the previous succeeds):
 ///
@@ -282,11 +280,11 @@ pub fn restore_db_files_atomic(
         std::fs::rename(live_dir, &bak_dir).map_err(|e| RestoreError::CopyFailed(Error::Io(e)))?;
         // Durably record that the live dir is now `.bak` before writing new
         // content, so a crash mid-copy is recoverable from `.bak`.
-        if let Some(parent) = live_dir.parent() {
-            if let Err(e) = fsync_dir(parent) {
-                let _ = std::fs::rename(&bak_dir, live_dir);
-                return Err(RestoreError::CopyFailed(Error::Io(e)));
-            }
+        if let Some(parent) = live_dir.parent()
+            && let Err(e) = fsync_dir(parent)
+        {
+            let _ = std::fs::rename(&bak_dir, live_dir);
+            return Err(RestoreError::CopyFailed(Error::Io(e)));
         }
     }
 
@@ -523,18 +521,18 @@ fn rollback_db_files(
     // destructive remove only happens AFTER `.bak` is safely reinstated.
     let failed_dir = sibling_with_suffix(live_dir, ".failed");
     let _ = std::fs::remove_dir_all(&failed_dir);
-    if live_dir.exists() {
-        if let Err(e) = std::fs::rename(live_dir, &failed_dir) {
-            // Could not even move the partial aside. `.bak` still holds the
-            // original; instruct manual recovery rather than risk it.
-            return Err(format!(
-                "restore failed and the partial copy at '{}' could not be moved \
+    if live_dir.exists()
+        && let Err(e) = std::fs::rename(live_dir, &failed_dir)
+    {
+        // Could not even move the partial aside. `.bak` still holds the
+        // original; instruct manual recovery rather than risk it.
+        return Err(format!(
+            "restore failed and the partial copy at '{}' could not be moved \
                  aside ({e}) — MANUAL RECOVERY REQUIRED: the original database is \
                  intact at '{}'; remove the partial and rename the backup back",
-                live_dir.display(),
-                bak_dir.display()
-            ));
-        }
+            live_dir.display(),
+            bak_dir.display()
+        ));
     }
 
     if let Err(e) = std::fs::rename(bak_dir, live_dir) {

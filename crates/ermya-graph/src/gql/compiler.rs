@@ -148,10 +148,10 @@ fn check_deadline(deadline: Option<Instant>, counter: u64) -> crate::Result<()> 
     if counter & DEADLINE_CHECK_MASK != 0 {
         return Ok(());
     }
-    if let Some(d) = deadline {
-        if Instant::now() >= d {
-            return Err(timeout_error());
-        }
+    if let Some(d) = deadline
+        && Instant::now() >= d
+    {
+        return Err(timeout_error());
     }
     Ok(())
 }
@@ -676,7 +676,7 @@ fn eval_function_call<G: GraphAccess + ?Sized>(
 ///
 /// `None`-valued elements are treated as not-satisfied for the purpose of the
 /// `ALL`/`ANY`/`NONE`/`SINGLE` counts. (Full SQL-style three-valued null
-/// propagation is a future refinement; the pilot's predicates are total.)
+/// propagation is a future refinement for predicates that are not total.)
 fn apply_list_quantifier(
     kind: super::ast::ListPredKind,
     items: &[GqlValue],
@@ -932,29 +932,29 @@ fn shortest_path_bfs_constrained<G: GraphAccess + ?Sized>(
         // Collect neighbor node IDs from edges based on direction
         let mut neighbors: Vec<NodeId> = Vec::new();
 
-        if matches!(direction, Direction::Outgoing | Direction::Both) {
-            if let Ok(edges) = graph.outgoing_edges(current) {
-                for edge in &edges {
-                    if let Some(lf) = label_filter {
-                        if edge.label() != lf {
-                            continue;
-                        }
-                    }
-                    neighbors.push(edge.target());
+        if matches!(direction, Direction::Outgoing | Direction::Both)
+            && let Ok(edges) = graph.outgoing_edges(current)
+        {
+            for edge in &edges {
+                if let Some(lf) = label_filter
+                    && edge.label() != lf
+                {
+                    continue;
                 }
+                neighbors.push(edge.target());
             }
         }
 
-        if matches!(direction, Direction::Incoming | Direction::Both) {
-            if let Ok(edges) = graph.incoming_edges(current) {
-                for edge in &edges {
-                    if let Some(lf) = label_filter {
-                        if edge.label() != lf {
-                            continue;
-                        }
-                    }
-                    neighbors.push(edge.source());
+        if matches!(direction, Direction::Incoming | Direction::Both)
+            && let Ok(edges) = graph.incoming_edges(current)
+        {
+            for edge in &edges {
+                if let Some(lf) = label_filter
+                    && edge.label() != lf
+                {
+                    continue;
                 }
+                neighbors.push(edge.source());
             }
         }
 
@@ -1566,24 +1566,23 @@ fn materialise_path_for_match<G: GraphAccess + ?Sized>(
         if let (Some(start_var), node_vars_named) = (
             pp.start.var.as_deref(),
             pp.hops.iter().all(|(_, np)| np.var.is_some()),
-        ) {
-            if node_vars_named {
-                let mut node_vars: Vec<&str> = vec![start_var];
-                let mut edge_vars: Vec<&str> = Vec::with_capacity(pp.hops.len());
-                for (ep, np) in &pp.hops {
-                    edge_vars.push(ep.var.as_deref()?);
-                    node_vars.push(np.var.as_deref()?);
-                }
-                return crate::gql::path_materialization::materialise_fixed_path(
-                    pm, &node_vars, &edge_vars,
-                );
+        ) && node_vars_named
+        {
+            let mut node_vars: Vec<&str> = vec![start_var];
+            let mut edge_vars: Vec<&str> = Vec::with_capacity(pp.hops.len());
+            for (ep, np) in &pp.hops {
+                edge_vars.push(ep.var.as_deref()?);
+                node_vars.push(np.var.as_deref()?);
             }
+            return crate::gql::path_materialization::materialise_fixed_path(
+                pm, &node_vars, &edge_vars,
+            );
         }
     }
 
     // Variable-length (or anonymous-edge) path: BFS from start to end, capturing
     // the traversed edges, constrained to the single hop's edge pattern. The
-    // pilot's ReBAC/GraphRAG patterns are single-hop var-length
+    // Common ReBAC/GraphRAG patterns are single-hop variable-length queries.
     // (`(a)-[:LINK*1..N]->(c)`); multi-hop var-length chains fall back to using
     // the first hop's constraints for every step (the common label case).
     let start_var = pp.start.var.as_deref()?;
@@ -1871,10 +1870,10 @@ fn node_matches_pattern(node: &crate::Node, np: &NodePattern) -> bool {
         np.labels.len() <= 1,
         "multi-label patterns not yet supported in matching"
     );
-    if let Some(label) = np.labels.first() {
-        if node.label() != label {
-            return false;
-        }
+    if let Some(label) = np.labels.first()
+        && node.label() != label
+    {
+        return false;
     }
     for (key, lit) in &np.props {
         let Some(expected) = literal_to_property(lit) else {
@@ -1890,10 +1889,10 @@ fn node_matches_pattern(node: &crate::Node, np: &NodePattern) -> bool {
 
 /// Checks if an edge matches an `EdgePattern`'s label and property constraints.
 fn edge_matches_pattern(edge: &crate::Edge, ep: &EdgePattern) -> bool {
-    if let Some(label) = ep.labels.first() {
-        if edge.label() != label {
-            return false;
-        }
+    if let Some(label) = ep.labels.first()
+        && edge.label() != label
+    {
+        return false;
     }
     for (key, lit) in &ep.props {
         let Some(expected) = literal_to_property(lit) else {
@@ -2082,10 +2081,10 @@ fn expand_variable_hop<G: GraphAccess + ?Sized>(
                     let mut nodes = pm.nodes_clone();
                     let mut edges_map = pm.edges_clone();
                     nodes.insert(end_var.to_string(), end_node);
-                    if let Some(ref evar) = ep.var {
-                        if let Some(ref le) = last_edge {
-                            edges_map.insert(evar.clone(), le.clone());
-                        }
+                    if let Some(ref evar) = ep.var
+                        && let Some(ref le) = last_edge
+                    {
+                        edges_map.insert(evar.clone(), le.clone());
                     }
                     results.push(PatternMatch::new(nodes, edges_map));
                 }
@@ -3322,19 +3321,19 @@ pub fn execute_const_return<G: GraphAccess + ?Sized>(
             ));
         }
     }
-    if let Some(ref e) = query.skip {
-        if contains_param_ref(e) {
-            return Err(Error::GqlCompileError(
-                "internal error: unsubstituted parameter in SKIP".into(),
-            ));
-        }
+    if let Some(ref e) = query.skip
+        && contains_param_ref(e)
+    {
+        return Err(Error::GqlCompileError(
+            "internal error: unsubstituted parameter in SKIP".into(),
+        ));
     }
-    if let Some(ref e) = query.limit {
-        if contains_param_ref(e) {
-            return Err(Error::GqlCompileError(
-                "internal error: unsubstituted parameter in LIMIT".into(),
-            ));
-        }
+    if let Some(ref e) = query.limit
+        && contains_param_ref(e)
+    {
+        return Err(Error::GqlCompileError(
+            "internal error: unsubstituted parameter in LIMIT".into(),
+        ));
     }
 
     let empty = PatternMatch::empty();
@@ -3471,10 +3470,8 @@ pub fn execute_with_deadline<G: GraphAccess + ?Sized>(
     //     aggregation, not a single global aggregate).
     let pushdown_eligible = is_aggregate && query.group_by.is_none();
 
-    if pushdown_eligible {
-        if let Some(result) = try_aggregate_pushdown(graph, query) {
-            return result;
-        }
+    if pushdown_eligible && let Some(result) = try_aggregate_pushdown(graph, query) {
+        return result;
     }
 
     // 3. MATCH compilation
@@ -3669,16 +3666,16 @@ pub fn compile_match_for_mutation<G: GraphAccess + ?Sized>(
     let mut result = Vec::new();
     for pm in &matches {
         for pp in &mc.patterns {
-            if let Some(ref v) = pp.start.var {
-                if let Ok(node) = pm.get_node(v) {
-                    result.push((v.clone(), node.id()));
-                }
+            if let Some(ref v) = pp.start.var
+                && let Ok(node) = pm.get_node(v)
+            {
+                result.push((v.clone(), node.id()));
             }
             for (_, np) in &pp.hops {
-                if let Some(ref v) = np.var {
-                    if let Ok(node) = pm.get_node(v) {
-                        result.push((v.clone(), node.id()));
-                    }
+                if let Some(ref v) = np.var
+                    && let Ok(node) = pm.get_node(v)
+                {
+                    result.push((v.clone(), node.id()));
                 }
             }
         }
@@ -3706,16 +3703,16 @@ pub fn compile_match_bindings<G: GraphAccess + ?Sized>(
     for pm in &matches {
         let mut row: HashMap<String, NodeId> = HashMap::new();
         for pp in &mc.patterns {
-            if let Some(ref v) = pp.start.var {
-                if let Ok(node) = pm.get_node(v) {
-                    row.insert(v.clone(), node.id());
-                }
+            if let Some(ref v) = pp.start.var
+                && let Ok(node) = pm.get_node(v)
+            {
+                row.insert(v.clone(), node.id());
             }
             for (_, np) in &pp.hops {
-                if let Some(ref v) = np.var {
-                    if let Ok(node) = pm.get_node(v) {
-                        row.insert(v.clone(), node.id());
-                    }
+                if let Some(ref v) = np.var
+                    && let Ok(node) = pm.get_node(v)
+                {
+                    row.insert(v.clone(), node.id());
                 }
             }
         }
@@ -3762,21 +3759,21 @@ pub fn compile_match_rows<G: GraphAccess + ?Sized>(
     for pm in &matches {
         let mut row = MatchRow::default();
         for pp in &mc.patterns {
-            if let Some(ref v) = pp.start.var {
-                if let Ok(node) = pm.get_node(v) {
-                    row.nodes.insert(v.clone(), node.id());
-                }
+            if let Some(ref v) = pp.start.var
+                && let Ok(node) = pm.get_node(v)
+            {
+                row.nodes.insert(v.clone(), node.id());
             }
             for (ep, np) in &pp.hops {
-                if let Some(ref v) = ep.var {
-                    if let Ok(edge) = pm.get_edge(v) {
-                        row.edges.insert(v.clone(), edge.id);
-                    }
+                if let Some(ref v) = ep.var
+                    && let Ok(edge) = pm.get_edge(v)
+                {
+                    row.edges.insert(v.clone(), edge.id);
                 }
-                if let Some(ref v) = np.var {
-                    if let Ok(node) = pm.get_node(v) {
-                        row.nodes.insert(v.clone(), node.id());
-                    }
+                if let Some(ref v) = np.var
+                    && let Ok(node) = pm.get_node(v)
+                {
+                    row.nodes.insert(v.clone(), node.id());
                 }
             }
         }
@@ -4125,7 +4122,7 @@ pub fn execute_call_result<G: GraphAccess + ?Sized>(
     }
 
     if let Some(clause) = return_clause {
-        // Skip/limit are None — the pilot's CALL query carries neither; cap B
+        // Skip/limit are None when the CALL query carries neither; cap B
         // is enforced at the GraphAccessor boundary, as for pipelines.
         return execute_pipeline_return(graph, &bindings, clause, None, None, None);
     }
@@ -5280,7 +5277,7 @@ fn eval_expr_on_binding<G: GraphAccess + ?Sized>(expr: &Expr, b: &Binding, graph
         // Defensive: param substitution must have run before compile.
         // See `eval_expr` for the matching debug_assert.
         Expr::ParamRef(_) => {
-            debug_assert!(false, "unsubstituted ParamRef reached eval_expr_on_binding",);
+            debug_assert!(false, "unsubstituted ParamRef reached eval_expr_on_binding");
             GqlValue::Null
         }
     }

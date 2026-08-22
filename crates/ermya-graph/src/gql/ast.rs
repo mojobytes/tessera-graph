@@ -520,7 +520,7 @@ pub enum DdlStatement {
 /// A `CALL <namespace>.<procedure>() YIELD <col> [UNWIND <col> AS <var>] [RETURN …]`
 /// statement.
 ///
-/// The pilot client issues the CALL, YIELD, UNWIND, and RETURN as one Bolt RUN
+/// Clients can issue CALL, YIELD, UNWIND, and RETURN as one Bolt RUN
 /// message, so the parser captures the whole statement. The server then:
 /// 1. executes the built-in procedure to get a list value,
 /// 2. optionally UNWINDs the list into per-element bindings,

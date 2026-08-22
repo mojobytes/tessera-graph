@@ -8,7 +8,7 @@
 //! - Task 4 (this): async [`AuthProvider`] / [`AuthStore`] traits + [`NoAuthProvider`].
 //! - Task 5: `SystemGraphAuthProvider` / `SystemGraphAuthStore`.
 //!
-//! See `docs/superpowers/specs/2026-04-21-auth-argon2-multi-user-design.md`.
+//! See `docs/specs/2026-04-21-auth-argon2-multi-user-design.md`.
 
 pub mod authorization;
 pub mod catalog;

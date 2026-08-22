@@ -986,14 +986,13 @@ mod tests {
         let graph = accessor.graph.read().unwrap();
         let ids = graph.nodes_by_label("Person");
         for id in ids {
-            if let Ok(node) = graph.node(id) {
-                if node
+            if let Ok(node) = graph.node(id)
+                && node
                     .properties()
                     .get("name")
                     .is_some_and(|v| v == &Property::String(name.to_owned()))
-                {
-                    return id;
-                }
+            {
+                return id;
             }
         }
         panic!("Person with name='{name}' not found");

@@ -424,10 +424,10 @@ impl Graph {
         // append-only node if the declarations are already loaded. The rebuild
         // does not read the catalog for any other purpose, so moving the load
         // earlier changes nothing else.
-        if let Ok(Some(bytes)) = graph.storage.read_schema_bytes() {
-            if let Ok(cat) = crate::schema::codec::deserialize(&bytes) {
-                graph.schema_catalog = cat;
-            }
+        if let Ok(Some(bytes)) = graph.storage.read_schema_bytes()
+            && let Ok(cat) = crate::schema::codec::deserialize(&bytes)
+        {
+            graph.schema_catalog = cat;
         }
 
         graph.rebuild_indexes()?;
@@ -529,24 +529,24 @@ impl Graph {
             return Ok(());
         }
         let next_ops = self.batch_op_count + 1;
-        if let Some(max_ops) = self.batch_max_ops {
-            if next_ops > max_ops {
-                return Err(Error::BatchLimitExceeded {
-                    kind: BatchLimitKind::Operations,
-                    current: next_ops,
-                    limit: max_ops,
-                });
-            }
+        if let Some(max_ops) = self.batch_max_ops
+            && next_ops > max_ops
+        {
+            return Err(Error::BatchLimitExceeded {
+                kind: BatchLimitKind::Operations,
+                current: next_ops,
+                limit: max_ops,
+            });
         }
         let next_bytes = self.batch_byte_count + entity_bytes;
-        if let Some(max_bytes) = self.batch_max_bytes {
-            if next_bytes > max_bytes {
-                return Err(Error::BatchLimitExceeded {
-                    kind: BatchLimitKind::Bytes,
-                    current: next_bytes,
-                    limit: max_bytes,
-                });
-            }
+        if let Some(max_bytes) = self.batch_max_bytes
+            && next_bytes > max_bytes
+        {
+            return Err(Error::BatchLimitExceeded {
+                kind: BatchLimitKind::Bytes,
+                current: next_bytes,
+                limit: max_bytes,
+            });
         }
         // Both caps passed: advance the counters. The op cap is checked before
         // the byte cap, so when both would trip the operation limit is the one
@@ -754,16 +754,16 @@ impl Graph {
                 .add_bytes(txn_id, delta_size)
                 .ok_or(Error::TxnNotActive(txn_id))?
         };
-        if let Some(cap_bytes) = self.txn_memory_cap {
-            if used_bytes > cap_bytes {
-                // Over cap: abort the whole transaction, not just this operation.
-                self.rollback_txn(txn_id)?;
-                return Err(Error::TxnMemoryCapExceeded {
-                    txn_id,
-                    used_bytes,
-                    cap_bytes,
-                });
-            }
+        if let Some(cap_bytes) = self.txn_memory_cap
+            && used_bytes > cap_bytes
+        {
+            // Over cap: abort the whole transaction, not just this operation.
+            self.rollback_txn(txn_id)?;
+            return Err(Error::TxnMemoryCapExceeded {
+                txn_id,
+                used_bytes,
+                cap_bytes,
+            });
         }
         Ok(())
     }
@@ -1257,15 +1257,13 @@ impl Graph {
     /// write in the same transaction correct (it overwrites its own pending
     /// version, not the stale committed base).
     fn node_chain_base(&self, txn_id: u64, id: NodeId) -> Option<crate::mvcc::EntitySnapshot> {
-        if let Some(table) = self.delta_table.as_ref() {
-            if let Some(chain) = table.chain_for(crate::mvcc::EntityKey::Node(id)) {
-                if let Some(own) = chain
-                    .iter()
-                    .find(|d| d.txn_id() == txn_id && d.commit_ts().is_none())
-                {
-                    return own.new_state().cloned();
-                }
-            }
+        if let Some(table) = self.delta_table.as_ref()
+            && let Some(chain) = table.chain_for(crate::mvcc::EntityKey::Node(id))
+            && let Some(own) = chain
+                .iter()
+                .find(|d| d.txn_id() == txn_id && d.commit_ts().is_none())
+        {
+            return own.new_state().cloned();
         }
         self.node_exists
             .contains(&id.0)
@@ -1279,15 +1277,13 @@ impl Graph {
 
     /// Edge analogue of [`Graph::node_chain_base`].
     fn edge_chain_base(&self, txn_id: u64, id: EdgeId) -> Option<crate::mvcc::EntitySnapshot> {
-        if let Some(table) = self.delta_table.as_ref() {
-            if let Some(chain) = table.chain_for(crate::mvcc::EntityKey::Edge(id)) {
-                if let Some(own) = chain
-                    .iter()
-                    .find(|d| d.txn_id() == txn_id && d.commit_ts().is_none())
-                {
-                    return own.new_state().cloned();
-                }
-            }
+        if let Some(table) = self.delta_table.as_ref()
+            && let Some(chain) = table.chain_for(crate::mvcc::EntityKey::Edge(id))
+            && let Some(own) = chain
+                .iter()
+                .find(|d| d.txn_id() == txn_id && d.commit_ts().is_none())
+        {
+            return own.new_state().cloned();
         }
         self.edge_exists
             .contains(&id.0)
@@ -4030,11 +4026,11 @@ impl Graph {
         edge_id: u64,
     ) -> Result<()> {
         // Check if the edge is in the pending buffer (not yet written to storage).
-        if let Some(pending) = self.adj_pending.get_mut(&(node_id, direction)) {
-            if let Some(pos) = pending.iter().position(|&eid| eid == edge_id) {
-                pending.swap_remove(pos);
-                return Ok(());
-            }
+        if let Some(pending) = self.adj_pending.get_mut(&(node_id, direction))
+            && let Some(pos) = pending.iter().position(|&eid| eid == edge_id)
+        {
+            pending.swap_remove(pos);
+            return Ok(());
         }
 
         let Some(ptr) = self.resolve_adj_pointer(node_id)? else {
@@ -4388,12 +4384,11 @@ impl Graph {
         // 0 is a real overflow page, so a plain `0` sentinel makes "no chain"
         // and "the chain at page 0" indistinguishable — which silently skipped
         // the release whenever an entity holding page 0 shrank back inline.
-        let mut new_prop_overflow: Option<u32> = None;
-        if props_overflowed {
-            if let Some(bytes) = props_bytes {
-                new_prop_overflow = Some(self.store_overflowed_props(entity, bytes)?);
-            }
-        }
+        let new_prop_overflow = if props_overflowed && let Some(bytes) = props_bytes {
+            Some(self.store_overflowed_props(entity, bytes)?)
+        } else {
+            None
+        };
         let prop_overflow_page = new_prop_overflow.unwrap_or(0);
 
         // Release the old chain only after the new one is safely written. The
@@ -4471,17 +4466,11 @@ impl Graph {
         }
 
         // Try the page last known to have room.
-        if let Some(page_id) = self.prop_slab_open_page {
-            if self.slab_page_has_room(page_id, bytes.len()) {
-                prop_slab_codec::write_blob(
-                    self.storage.as_mut(),
-                    page_id,
-                    entity_id,
-                    kind,
-                    bytes,
-                )?;
-                return Ok(page_id);
-            }
+        if let Some(page_id) = self.prop_slab_open_page
+            && self.slab_page_has_room(page_id, bytes.len())
+        {
+            prop_slab_codec::write_blob(self.storage.as_mut(), page_id, entity_id, kind, bytes)?;
+            return Ok(page_id);
         }
 
         // None, or the remembered one is full: take a fresh page. This prefers

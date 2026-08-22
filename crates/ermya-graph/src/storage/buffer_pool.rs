@@ -516,19 +516,19 @@ impl BufferPool {
         // Both maps have now dropped the victim, so they are back in sync even
         // if the flush below fails and returns early.
         Self::debug_assert_lru_synced(inner);
-        if let Some(frame) = removed {
-            if frame.dirty {
-                let disk_file =
-                    inner
-                        .files
-                        .get_mut(&victim_file)
-                        .ok_or_else(|| Error::CorruptPage {
-                            file: victim_file.file_name(),
-                            page_id: 0,
-                            reason: "data file not registered",
-                        })?;
-                Self::write_to_disk(disk_file, victim_page_id, &frame.data)?;
-            }
+        if let Some(frame) = removed
+            && frame.dirty
+        {
+            let disk_file =
+                inner
+                    .files
+                    .get_mut(&victim_file)
+                    .ok_or_else(|| Error::CorruptPage {
+                        file: victim_file.file_name(),
+                        page_id: 0,
+                        reason: "data file not registered",
+                    })?;
+            Self::write_to_disk(disk_file, victim_page_id, &frame.data)?;
         }
 
         Ok(())

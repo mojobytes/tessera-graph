@@ -79,8 +79,8 @@ pub struct WalReadResult {
     /// with only `Begin` (no `Commit` or `Rollback`) are considered
     /// in-flight at the time of the crash. `Rollback` records do NOT
     /// affect this set — only `Commit` records populate it. This field
-    /// is intended for external transaction managers (e.g. enterprise
-    /// `TxnManager`) to reconstruct their committed set during recovery.
+    /// is intended for external transaction managers that need to reconstruct
+    /// their committed set during recovery.
     pub committed_txn_ids: HashSet<u64>,
 }
 

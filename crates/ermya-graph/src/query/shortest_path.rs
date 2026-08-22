@@ -141,10 +141,10 @@ impl<'g> ShortestPathQuery<'g> {
 
         let mut result = Vec::with_capacity(edges.len());
         for edge in edges {
-            if let Some(ref label) = self.label_filter {
-                if edge.label() != label {
-                    continue;
-                }
+            if let Some(ref label) = self.label_filter
+                && edge.label() != label
+            {
+                continue;
             }
             let neighbor = if edge.source() == node {
                 edge.target()

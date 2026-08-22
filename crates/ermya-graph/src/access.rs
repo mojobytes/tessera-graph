@@ -2,9 +2,9 @@
 
 //! The `GraphAccess` trait — abstracts read and write access to a property graph.
 //!
-//! `Graph` implements this trait directly. External crates (e.g. `ermya-graph-enterprise`)
-//! can implement it to intercept reads/writes for LBAC filtering, caching, auditing,
-//! federation, or on-read transformations.
+//! `Graph` implements this trait directly. External crates can implement it to
+//! intercept reads and writes for filtering, caching, auditing, or on-read
+//! transformations.
 
 use crate::edge::Edge;
 use crate::error::{EdgeId, NodeId, Result};
@@ -29,7 +29,7 @@ use crate::storage::codec::adjacency_codec::AdjacencyPointer;
 /// This trait combines read and write access. A future version may split it
 /// into `ReadAccess` and `WriteAccess` to enable read-only views (e.g. for
 /// query builders that do not need mutation). This split is deferred until a
-/// concrete consumer (e.g. an enterprise read-replica adapter) requires it.
+/// concrete external consumer requires it.
 pub trait GraphAccess {
     // --- Node reads ---
 
@@ -289,7 +289,7 @@ pub trait GraphAccess {
         Ok(edges)
     }
 
-    // --- Adjacency internals (for enterprise index integration) ---
+    // --- Adjacency internals (for external index integration) ---
 
     /// Returns the adjacency pointer for a node, if it has adjacency pages.
     ///
@@ -306,8 +306,9 @@ pub trait GraphAccess {
 
     /// Pre-warms the internal adjacency cache with the given pointer.
     ///
-    /// Enterprise crates use this to inject index-resolved pointers into the
-    /// core cache, avoiding the O(N) page scan in `resolve_adj_pointer`.
+    /// External index implementations can use this to inject resolved pointers
+    /// into the core cache, avoiding the O(N) page scan in
+    /// `resolve_adj_pointer`.
     /// The default implementation is a no-op.
     fn set_adj_pointer(&self, _node: NodeId, _ptr: AdjacencyPointer) {}
 }

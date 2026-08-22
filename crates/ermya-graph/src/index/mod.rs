@@ -202,22 +202,22 @@ impl PropertyIndex {
         }
         // Mirror the removal in the ordered index (I64 only), cleaning empty
         // maps in cascade exactly like the hash side so the two never diverge.
-        if let Property::I64(v) = value {
-            if let Some(by_key) = self.ordered.get_mut(label) {
-                if let Some(by_value) = by_key.get_mut(key) {
-                    if let Some(ids) = by_value.get_mut(v) {
-                        ids.remove(&id);
-                        if ids.is_empty() {
-                            by_value.remove(v);
-                        }
-                    }
-                    if by_value.is_empty() {
-                        by_key.remove(key);
+        if let Property::I64(v) = value
+            && let Some(by_key) = self.ordered.get_mut(label)
+        {
+            if let Some(by_value) = by_key.get_mut(key) {
+                if let Some(ids) = by_value.get_mut(v) {
+                    ids.remove(&id);
+                    if ids.is_empty() {
+                        by_value.remove(v);
                     }
                 }
-                if by_key.is_empty() {
-                    self.ordered.remove(label);
+                if by_value.is_empty() {
+                    by_key.remove(key);
                 }
+            }
+            if by_key.is_empty() {
+                self.ordered.remove(label);
             }
         }
     }
