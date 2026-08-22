@@ -12,6 +12,14 @@ env:
   RUST_VERSION: "1.88"
 
 jobs:
+  brand-residue:
+    name: Reject retired brand residue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check active tree
+        run: bash scripts/check_brand_residue.sh
+
   rust:
     runs-on: ubuntu-latest
     steps:
