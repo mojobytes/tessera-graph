@@ -65,7 +65,7 @@ pub use query::traversal::{Strategy, TraversalBuilder};
 pub use query::weighted_path::WeightedPathQuery;
 pub use query::{Direction, Path};
 
-// Storage types — needed by enterprise crate for adjacency index integration.
+// Storage types exposed for external adjacency-index implementations.
 pub use storage::codec::adjacency_codec::AdjacencyPointer;
 
 // WAL types — needed by external crates for transaction boundaries and recovery.

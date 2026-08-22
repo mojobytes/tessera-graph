@@ -113,7 +113,7 @@ fn run_perms(n_edges: u64) -> ShapeResult {
         let resource = graph
             .add_node("Resource", Properties::new())
             .expect("add_node");
-        let subject = subject_ids[(i % subjects) as usize];
+        let subject = subject_ids[usize::try_from(i % subjects).expect("subject index fits usize")];
         graph
             .add_edge("GRANT", subject, resource, Properties::new())
             .expect("add_edge");

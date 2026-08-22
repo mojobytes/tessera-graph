@@ -17,19 +17,19 @@ pub fn format_as_gql(columns: &[String], rows: &[Vec<PackStreamValue>]) -> Strin
     for row in rows {
         let mut props = Vec::new();
         for (i, col) in columns.iter().enumerate() {
-            if let Some(val) = row.get(i) {
-                if !matches!(val, PackStreamValue::Null) {
-                    let formatted = match val {
-                        PackStreamValue::String(s) => {
-                            format!("{col}: '{}'", s.replace('\'', "\\'"))
-                        }
-                        PackStreamValue::Int(n) => format!("{col}: {n}"),
-                        PackStreamValue::Float(f) => format!("{col}: {f}"),
-                        PackStreamValue::Bool(b) => format!("{col}: {b}"),
-                        other => format!("{col}: '{}'", output::value_to_display(other)),
-                    };
-                    props.push(formatted);
-                }
+            if let Some(val) = row.get(i)
+                && !matches!(val, PackStreamValue::Null)
+            {
+                let formatted = match val {
+                    PackStreamValue::String(s) => {
+                        format!("{col}: '{}'", s.replace('\'', "\\'"))
+                    }
+                    PackStreamValue::Int(n) => format!("{col}: {n}"),
+                    PackStreamValue::Float(f) => format!("{col}: {f}"),
+                    PackStreamValue::Bool(b) => format!("{col}: {b}"),
+                    other => format!("{col}: '{}'", output::value_to_display(other)),
+                };
+                props.push(formatted);
             }
         }
 

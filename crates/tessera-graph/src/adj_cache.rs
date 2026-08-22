@@ -68,12 +68,13 @@ impl AdjCache {
     /// each other. Returns `None` on cache miss.
     pub fn get(&self, node_id: u64) -> Option<AdjacencyPointer> {
         let inner = self.inner.read().expect(LOCK_POISON_MSG);
-        if let Some(&slot_idx) = inner.map.get(&node_id) {
-            if let Some(slot) = &inner.slots[slot_idx] {
-                slot.recently_used.store(true, Ordering::Relaxed);
-                return Some(slot.ptr);
-            }
+        if let Some(&slot_idx) = inner.map.get(&node_id)
+            && let Some(slot) = &inner.slots[slot_idx]
+        {
+            slot.recently_used.store(true, Ordering::Relaxed);
+            return Some(slot.ptr);
         }
+        drop(inner);
         None
     }
 

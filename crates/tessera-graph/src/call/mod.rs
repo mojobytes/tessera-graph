@@ -3,8 +3,8 @@
 //! Built-in CALL procedure registry.
 //!
 //! Maps `(namespace, procedure_name)` pairs to [`ProcedureKind`] values.
-//! Supported namespaces: `tessera` (canonical) and `mg` (Memgraph alias,
-//! for zero-friction migration of the pilot's existing queries).
+//! Supported namespaces: `tessera` (canonical) and `mg` (Memgraph alias for
+//! query compatibility).
 //!
 //! Adding a new procedure requires:
 //! 1. a new [`ProcedureKind`] variant,
@@ -22,12 +22,11 @@ pub enum ProcedureKind {
     /// `tessera.edge_types()` / `mg.edge_types()` — one row, one column
     /// (`edge_types`) carrying a list of all distinct relationship-type strings.
     EdgeTypes,
-    /// `tessera.snapshot(db, dest)` — admin-only online physical snapshot of a
-    /// tenant. No `mg` alias (Memgraph has no equivalent). Dispatched by the
-    /// server's handler against the registry, not by the sync call handler.
+    /// `tessera.snapshot(db, dest)` — administrative physical snapshot. No `mg`
+    /// alias (Memgraph has no equivalent). Execution is delegated to the host.
     Snapshot,
-    /// `tessera.restore(db, snap)` — admin-only hot restore of a tenant from a
-    /// snapshot. No `mg` alias. Dispatched against the registry like
+    /// `tessera.restore(db, snap)` — administrative restore from a snapshot. No
+    /// `mg` alias. Execution is delegated to the host like
     /// [`ProcedureKind::Snapshot`].
     Restore,
 }

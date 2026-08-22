@@ -6,7 +6,7 @@
 //! sibling tests (`startup_test.rs`, `listener_test.rs`) use the same
 //! gate. The metrics endpoint itself is plain HTTP regardless.
 //!
-//! Cycle layout (see `docs/superpowers/plans/2026-05-18-observability-task-1-metrics.md`):
+//! Cycle layout (see `docs/plans/2026-05-18-observability-task-1-metrics.md`):
 //! - C2: endpoint serves 200 + Prometheus text format.
 //! - C3: `tessera_active_connections` gauge — delta-assertion E2E.
 //! - C4+: counters/gauges/histograms (added by later cycles).

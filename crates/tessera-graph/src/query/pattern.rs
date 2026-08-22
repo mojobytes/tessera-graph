@@ -422,12 +422,12 @@ impl<'g, G: GraphAccess + ?Sized> PatternBuilder<'g, G> {
                     hop.node.var
                 )));
             }
-            if let Some(ref var) = hop.edge.var {
-                if !seen.insert(var.as_str()) {
-                    return Err(Error::InvalidPattern(format!(
-                        "duplicate edge variable: '{var}'"
-                    )));
-                }
+            if let Some(ref var) = hop.edge.var
+                && !seen.insert(var.as_str())
+            {
+                return Err(Error::InvalidPattern(format!(
+                    "duplicate edge variable: '{var}'"
+                )));
             }
         }
         Ok(())
@@ -528,12 +528,12 @@ impl<'g, G: GraphAccess + ?Sized> PatternBuilder<'g, G> {
             // Fast-path: when only a label constraint exists (no property
             // constraints), check the label alone to skip full node
             // deserialization for non-matching nodes.
-            if let Some(ref required_label) = hop.node.label {
-                if hop.node.props.is_empty() {
-                    let actual = self.graph.node_label(neighbor_id)?;
-                    if actual != *required_label {
-                        continue;
-                    }
+            if let Some(ref required_label) = hop.node.label
+                && hop.node.props.is_empty()
+            {
+                let actual = self.graph.node_label(neighbor_id)?;
+                if actual != *required_label {
+                    continue;
                 }
             }
 
@@ -635,10 +635,10 @@ fn load_node_projected<G: GraphAccess + ?Sized>(
 
 /// Checks if a node satisfies a constraint's label and property filters.
 fn node_matches(node: &Node, constraint: &NodeConstraint) -> bool {
-    if let Some(ref label) = constraint.label {
-        if node.label() != label {
-            return false;
-        }
+    if let Some(ref label) = constraint.label
+        && node.label() != label
+    {
+        return false;
     }
     for (key, expected) in &constraint.props {
         match node.properties().get(key) {

@@ -67,10 +67,10 @@ impl BatchState {
         if self.dirty_count >= max_ops {
             return true;
         }
-        if let Some(first) = self.first_dirty_at {
-            if first.elapsed() >= max_age {
-                return true;
-            }
+        if let Some(first) = self.first_dirty_at
+            && first.elapsed() >= max_age
+        {
+            return true;
         }
         false
     }
@@ -690,25 +690,26 @@ where
         // v0.6.0 Fase 2 Task 5 eje 1 — auth-IP throttle.
         // Short-circuit BEFORE evaluating credentials so an attacker cannot
         // burn CPU on argon2 with arbitrary inputs once they've hit the cap.
-        if let (Some(rl), Some(ip)) = (self.rate_limiter.as_ref(), self.peer_ip) {
-            if rl.auth_cap_active().await && rl.is_auth_blocked(ip).await {
-                crate::metrics::rate_limit_hit("auth_ip");
-                let failures = rl.auth_failures_in_window(ip).await;
-                self.audit
-                    .auth_throttled(crate::audit::AuthThrottledDetails {
-                        client_ip: ip.to_string(),
-                        failures_in_window: failures,
-                        retry_after_seconds: 60,
-                    });
-                self.failed = true;
-                self.send_failure(
-                    "Neo.ClientError.Security.AuthorizationExpired",
-                    "too many authentication failures from this address; \
+        if let (Some(rl), Some(ip)) = (self.rate_limiter.as_ref(), self.peer_ip)
+            && rl.auth_cap_active().await
+            && rl.is_auth_blocked(ip).await
+        {
+            crate::metrics::rate_limit_hit("auth_ip");
+            let failures = rl.auth_failures_in_window(ip).await;
+            self.audit
+                .auth_throttled(crate::audit::AuthThrottledDetails {
+                    client_ip: ip.to_string(),
+                    failures_in_window: failures,
+                    retry_after_seconds: 60,
+                });
+            self.failed = true;
+            self.send_failure(
+                "Neo.ClientError.Security.AuthorizationExpired",
+                "too many authentication failures from this address; \
                      try again in 60 seconds",
-                )
-                .await?;
-                return Ok(false);
-            }
+            )
+            .await?;
+            return Ok(false);
         }
 
         let principal = extra
@@ -1282,24 +1283,25 @@ where
         // is identity-agnostic. Sessions without a `db_handle` (legacy
         // single-database path) skip this branch and rely on the
         // existing engine-level semantics.
-        if let Some(handle) = self.db_handle.as_ref() {
-            if handle.access_level() == AccessLevel::Read && ast_is_mutating(&stmt) {
-                let database = handle.database_name().to_owned();
-                let user = self.current_username().to_owned();
-                self.failed = true;
-                self.audit.access_denied(
-                    self.connection_id,
-                    Some(&user),
-                    AccessDeniedReason::WriteGateForbidden,
-                    Some(&database),
-                );
-                self.send_failure(
-                    "Neo.ClientError.Security.Forbidden",
-                    "write operation not permitted with READ-only grant",
-                )
-                .await?;
-                return Ok(false);
-            }
+        if let Some(handle) = self.db_handle.as_ref()
+            && handle.access_level() == AccessLevel::Read
+            && ast_is_mutating(&stmt)
+        {
+            let database = handle.database_name().to_owned();
+            let user = self.current_username().to_owned();
+            self.failed = true;
+            self.audit.access_denied(
+                self.connection_id,
+                Some(&user),
+                AccessDeniedReason::WriteGateForbidden,
+                Some(&database),
+            );
+            self.send_failure(
+                "Neo.ClientError.Security.Forbidden",
+                "write operation not permitted with READ-only grant",
+            )
+            .await?;
+            return Ok(false);
         }
 
         // Capture the statement kind before the executor consumes
@@ -1781,15 +1783,14 @@ where
         // RESET returns the session to a clean state: an open explicit
         // transaction is abandoned (rolled back), matching how a driver expects
         // RESET to clear in-flight work.
-        if let Some(txn_id) = self.open_txn.take() {
-            if let Some(accessor) = self.session_accessor.as_deref() {
-                if let Err(e) = accessor.rollback_txn(txn_id) {
-                    tracing::warn!(
-                        conn = self.connection_id,
-                        "rollback of open txn during RESET failed: {e}"
-                    );
-                }
-            }
+        if let Some(txn_id) = self.open_txn.take()
+            && let Some(accessor) = self.session_accessor.as_deref()
+            && let Err(e) = accessor.rollback_txn(txn_id)
+        {
+            tracing::warn!(
+                conn = self.connection_id,
+                "rollback of open txn during RESET failed: {e}"
+            );
         }
         if let Err(e) = self.flush_pending_batch() {
             tracing::warn!(conn = self.connection_id, "flush during RESET failed: {e}");
@@ -2456,7 +2457,7 @@ const fn registry_error_to_access_denied_reason(e: &RegistryError) -> Option<Acc
 /// Map a [`RegistryError`] to the Bolt wire `code`.
 ///
 /// Mapping table per spec §8 of
-/// `docs/superpowers/specs/2026-04-23-multi-database-design.md`. Kept
+/// `docs/specs/2026-04-23-multi-database-design.md`. Kept
 /// next to the handler so a reviewer can check the wire contract
 /// without crossing module boundaries; pinned by an exhaustive unit
 /// test in this file's `tests` module.

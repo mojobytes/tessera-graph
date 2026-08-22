@@ -3,7 +3,7 @@
 //! Prometheus metrics endpoint — minimal HTTP/1.1 server.
 //!
 //! v0.6.0 Fase 2 Task 1 (plan
-//! `docs/superpowers/plans/2026-05-18-observability-task-1-metrics.md`).
+//! `docs/plans/2026-05-18-observability-task-1-metrics.md`).
 //!
 //! This module owns:
 //! - The process-global `PrometheusRecorder` installed via the `metrics`

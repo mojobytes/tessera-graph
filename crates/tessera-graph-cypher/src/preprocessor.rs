@@ -178,16 +178,16 @@ pub fn reject_cypher_constructs(input: &str) -> tessera_graph::Result<()> {
     }
 
     // WITH keyword — but NOT part of "STARTS WITH" or "ENDS WITH" operators.
-    if let Some(pos) = find_word(&upper, "WITH") {
-        if is_standalone_with(&upper, pos) {
-            return Err(Error::GqlSyntaxError {
-                line: find_line(input, pos),
-                col: find_col(input, pos),
-                message: "WITH is a Cypher clause not valid in strict GQL mode; \
+    if let Some(pos) = find_word(&upper, "WITH")
+        && is_standalone_with(&upper, pos)
+    {
+        return Err(Error::GqlSyntaxError {
+            line: find_line(input, pos),
+            col: find_col(input, pos),
+            message: "WITH is a Cypher clause not valid in strict GQL mode; \
                           switch to cypher-compat mode"
-                    .into(),
-            });
-        }
+                .into(),
+        });
     }
 
     // UNWIND keyword
@@ -589,10 +589,10 @@ fn rewrite_remove_clauses(input: &str) -> tessera_graph::Result<String> {
             list_end = list_end.min(semi);
         }
         for kw in &keywords {
-            if let Some(pos) = find_word(rest_upper, kw) {
-                if pos < list_end {
-                    list_end = pos;
-                }
+            if let Some(pos) = find_word(rest_upper, kw)
+                && pos < list_end
+            {
+                list_end = pos;
             }
         }
 
@@ -742,9 +742,10 @@ fn detect_unsupported_clauses(input: &str) -> tessera_graph::Result<()> {
 
     // UNWIND is now supported natively.
 
-    if let Some(pos) = find_word(&upper, "WITH") {
-        if is_standalone_with(&upper, pos) {
-            return Err(Error::GqlSyntaxError {
+    if let Some(pos) = find_word(&upper, "WITH")
+        && is_standalone_with(&upper, pos)
+    {
+        return Err(Error::GqlSyntaxError {
                 line: find_line(input, pos),
                 col: find_col(input, pos),
                 message: "WITH (with projection) is not yet supported in CypherCompat mode; \
@@ -752,7 +753,6 @@ fn detect_unsupported_clauses(input: &str) -> tessera_graph::Result<()> {
                           Full WITH requires the enterprise multi-stage executor (planned for Phase 1.5.6)"
                     .into(),
             });
-        }
     }
 
     Ok(())

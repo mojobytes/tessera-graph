@@ -125,12 +125,12 @@ impl ConnectionConfig {
         let raw: toml::Value = toml::from_str(&content)
             .map_err(|e| CliError::Config(format!("invalid TOML in {}: {e}", path.display())))?;
 
-        if let Some(conn) = raw.get("connection") {
-            if conn.get("password").is_some() {
-                return Err(CliError::Config(
+        if let Some(conn) = raw.get("connection")
+            && conn.get("password").is_some()
+        {
+            return Err(CliError::Config(
                     "config file must not contain a password key — use TESSERA_PASSWORD env var or interactive prompt".to_owned(),
                 ));
-            }
         }
 
         let file_cfg: TomlFileConfig = toml::from_str(&content)

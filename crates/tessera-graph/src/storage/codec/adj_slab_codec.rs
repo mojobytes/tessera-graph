@@ -7,14 +7,14 @@
 //! one node's adjacency chain (today's `adjacency_codec` format, which wastes
 //! ~99.8% of a page for a degree-1 node). This module implements ONLY the
 //! isolated slab codec (write/read/append/overflow of sub-blocks); it does not
-//! wire into `Graph::add_edge`, `resolve_adj_pointer`, or `node_codec` — that
-//! is later work (see `.private/plan-issue54-adjacency-format.md`, Ciclos 5+).
+//! wire into `Graph::add_edge`, `resolve_adj_pointer`, or `node_codec`; that
+//! integration is handled separately.
 //!
 //! # Page layout (payload, [`PAGE_PAYLOAD_SIZE`] = 4080 bytes)
 //!
 //! ```text
 //! [0..2)   directory_count: u16 LE — total directory ENTRIES ever written
-//!          (live + tombstoned; see Ciclo 4's `free_subblock`, which marks an
+//!          (live + tombstoned; `free_subblock` marks an
 //!          entry freed WITHOUT decrementing this count or compacting).
 //! [2..2 + directory_count * DIR_ENTRY_SIZE)
 //!          packed directory entries, growing FORWARD from the start of the
