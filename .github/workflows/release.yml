@@ -94,16 +94,21 @@ jobs:
           path: dist
       - run: cargo package -p ermya-graph --locked
       - run: cp target/package/ermya-graph-${{ needs.validate.outputs.version }}.crate dist/
-      - id: crates-io-auth
-        uses: rust-lang/crates-io-auth-action@v1
-      - name: Publish crate when the version is not present
+      - id: crate-version
+        name: Check whether the crate version is already published
         shell: bash
         run: |
           if cargo info "ermya-graph@${{ needs.validate.outputs.version }}" >/dev/null 2>&1; then
-            echo "ermya-graph ${{ needs.validate.outputs.version }} is already published"
+            echo "published=true" >> "${GITHUB_OUTPUT}"
           else
-            cargo publish -p ermya-graph --locked
+            echo "published=false" >> "${GITHUB_OUTPUT}"
           fi
+      - id: crates-io-auth
+        if: steps.crate-version.outputs.published != 'true'
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish crate
+        if: steps.crate-version.outputs.published != 'true'
+        run: cargo publish -p ermya-graph --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-io-auth.outputs.token }}
       - env:
