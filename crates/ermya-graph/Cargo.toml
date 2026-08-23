@@ -1,0 +1,103 @@
+[package]
+name = "ermya-graph"
+version.workspace      = true
+edition.workspace      = true
+authors.workspace      = true
+# The embeddable core is the permissive adoption layer and is published as an
+# independent crate. Server-side components use BSL 1.1 separately.
+license      = "MIT"
+rust-version.workspace = true
+description = "Embeddable graph database for Rust. No server, no schema, no infrastructure."
+repository = "https://github.com/mojobytes/ermya-graph"
+homepage = "https://ermya.com"
+keywords = ["graph", "database", "embedded", "property-graph", "storage"]
+categories = ["database-implementations", "data-structures"]
+readme = "README.md"
+autobenches = false
+
+[features]
+benchmarks = []
+pool-instrumentation = []
+
+[dependencies]
+thiserror = "2"
+crc32fast = "1"
+
+[dev-dependencies]
+tempfile = "3"
+proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "graph_write"
+harness = false
+
+[[bench]]
+name = "graph_read"
+harness = false
+
+[[bench]]
+name = "graph_update"
+harness = false
+
+[[bench]]
+name = "graph_delete"
+harness = false
+
+[[bench]]
+name = "bulk_insert_scaling"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "codec_node"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "codec_edge"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "codec_property"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "storage_internals"
+harness = false
+required-features = ["benchmarks"]
+
+[[bench]]
+name = "wal_impact"
+harness = false
+
+[[bench]]
+name = "query_engine"
+harness = false
+
+[[example]]
+name = "issue54_thrashing"
+required-features = ["pool-instrumentation"]
+
+[[example]]
+name = "overflow_waste_impact"
+required-features = ["pool-instrumentation"]
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Was "allow" crate-wide, which is how four silent-truncation bugs reached disk
+# undetected (issue #62: a 70 000-byte text value read back as 4 464 bytes, no
+# error). All 47 sites it flags are now audited: each surviving `as` carries a
+# per-site allow stating WHAT bounds it, and the reachable ones convert checked
+# and return RecordTooLarge. Denied so a new one cannot enter silently — an
+# allow without that sentence is what made index/codec.rs look audited while
+# being wrong (issue #65).
+cast_possible_truncation = "deny"
+module_name_repetitions = "allow"

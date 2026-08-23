@@ -1,20 +1,20 @@
-TesseraGraph Community contains components under two current licenses:
+ErmyaGraph Community contains components under two current licenses:
 
 1. MIT License
-   - crates/tessera-graph
-   - crates/tessera-graph-python
+   - crates/ermya-graph
+   - crates/ermya-graph-python
 
-   The full text is in crates/tessera-graph/LICENSE.
+   The full text is in crates/ermya-graph/LICENSE.
 
 2. Business Source License 1.1 (BSL 1.1)
-   - crates/tessera-graph-server
-   - crates/tessera-graph-cli
-   - crates/tessera-graph-config
-   - crates/tessera-graph-cypher
-   - crates/tessera-graph-protocol
+   - crates/ermya-graph-server
+   - crates/ermya-graph-cli
+   - crates/ermya-graph-config
+   - crates/ermya-graph-cypher
+   - crates/ermya-graph-protocol
 
    The full text and Additional Use Grant are in
-   crates/tessera-graph-server/LICENSE. Each version becomes available under
+   crates/ermya-graph-server/LICENSE. Each version becomes available under
    the Apache License, Version 2.0 on its Change Date.
 
 Files identify their applicable license with an SPDX-License-Identifier
