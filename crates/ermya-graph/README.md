@@ -57,4 +57,4 @@ crate.
 
 Licensed under the [MIT License](LICENSE).
 
-Part of [ErmyaGraph](https://ermya-vector.io).
+Part of [ErmyaGraph](https://ermya.com).

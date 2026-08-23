@@ -9,7 +9,7 @@ description = "Python bindings for ermya-graph — embeddable graph database."
 requires-python = ">=3.9"
 # The bindings expose the MIT-licensed embeddable core.
 license = "MIT"
-authors = [{ name = "Ermya DB", email = "info@ermya-vector.io" }]
+authors = [{ name = "Ermya DB", email = "info@ermya.com" }]
 keywords = ["graph", "database", "embedded", "property-graph"]
 classifiers = [
     "Development Status :: 3 - Alpha",

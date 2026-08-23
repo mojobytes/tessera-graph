@@ -220,4 +220,4 @@ backups) live in a separate repository and are not part of this one.
 
 ---
 
-[ermya-vector.io](https://ermya-vector.io)
+[ermya.com](https://ermya.com)
