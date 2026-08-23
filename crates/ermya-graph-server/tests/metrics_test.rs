@@ -299,6 +299,12 @@ async fn open_raw_bolt_connection(addr: SocketAddr) -> TcpStream {
         .await
         .expect("write bolt handshake");
     stream.flush().await.expect("flush bolt handshake");
+    let mut selected_version = [0u8; 4];
+    stream
+        .read_exact(&mut selected_version)
+        .await
+        .expect("read bolt handshake response");
+    assert_eq!(selected_version, [0x00, 0x00, 0x04, 0x04]);
     stream
 }
 
