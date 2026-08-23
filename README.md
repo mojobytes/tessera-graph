@@ -1,4 +1,4 @@
-# TesseraGraph Community
+# ErmyaGraph Community
 
 An embeddable graph database with a Bolt server.
 
@@ -14,13 +14,13 @@ suite passes.
 
 | Package | Description |
 | --- | --- |
-| `tessera-graph` | Graph engine: storage, indexes, and transactions |
-| `tessera-graph-cypher` | Query language interpreter |
-| `tessera-graph-protocol` | Bolt protocol encoding |
-| `tessera-graph-server` | Bolt server (`tessera-graph-server` binary) |
-| `tessera-graph-cli` | Administration tool (`tessera-graph-cli` binary) |
-| `tessera-graph-config` | Configuration loader |
-| `tessera-graph-python` | Python bindings |
+| `ermya-graph` | Graph engine: storage, indexes, and transactions |
+| `ermya-graph-cypher` | Query language interpreter |
+| `ermya-graph-protocol` | Bolt protocol encoding |
+| `ermya-graph-server` | Bolt server (`ermya-graph-server` binary) |
+| `ermya-graph-cli` | Administration tool (`ermya-graph-cli` binary) |
+| `ermya-graph-config` | Configuration loader |
+| `ermya-graph-python` | Python bindings |
 
 Requirements: Rust 1.88 or later, edition 2024.
 
@@ -41,13 +41,13 @@ openssl req -x509 -newkey rsa:4096 -nodes -days 365 \
 Start the server:
 
 ```bash
-export TESSERA_TLS_CERT=$PWD/server.crt
-export TESSERA_TLS_KEY=$PWD/server.key
-export TESSERA_DATA_DIR=$PWD/data
-export TESSERA_BIND=127.0.0.1:7687
-export TESSERA_PASSWORD='a-long-password'
+export ERMYA_TLS_CERT=$PWD/server.crt
+export ERMYA_TLS_KEY=$PWD/server.key
+export ERMYA_DATA_DIR=$PWD/data
+export ERMYA_BIND=127.0.0.1:7687
+export ERMYA_PASSWORD='a-long-password'
 
-cargo run --release --bin tessera-graph-server
+cargo run --release --bin ermya-graph-server
 ```
 
 Connect with any Bolt 4.4 client, such as the official Neo4j Python driver:
@@ -57,7 +57,7 @@ from neo4j import GraphDatabase
 
 driver = GraphDatabase.driver(
     "bolt+ssc://127.0.0.1:7687",  # +ssc accepts a self-signed certificate
-    auth=("tessera", "a-long-password"),
+    auth=("ermya", "a-long-password"),
 )
 
 with driver.session(database="neo4j") as session:
@@ -76,7 +76,7 @@ derived from documentation.
 
 ### The database must be named when opening a session
 
-Neo4j selects a default database; TesseraGraph rejects the first query if no
+Neo4j selects a default database; ErmyaGraph rejects the first query if no
 database is specified. The Community edition serves one database named
 `neo4j`.
 
@@ -102,7 +102,7 @@ MATCH (p:Person), (f:Field) CREATE (p)-[:WORKED_IN]->(f)
 ### Grouping requires an explicit `GROUP BY`
 
 When a grouping value is mixed with an aggregate function, Neo4j infers the
-grouping. TesseraGraph requires it to be written explicitly.
+grouping. ErmyaGraph requires it to be written explicitly.
 
 ```cypher
 -- Not supported
@@ -147,19 +147,19 @@ first.
 
 ## Configuration
 
-Settings are read from `/etc/tessera/tessera.toml` by default. Environment
+Settings are read from `/etc/ermya/ermya.toml` by default. Environment
 variables take precedence. The most commonly used variables are:
 
 | Variable | Purpose |
 | --- | --- |
-| `TESSERA_BIND` | Listen address and port |
-| `TESSERA_DATA_DIR` | Data directory |
-| `TESSERA_TLS_CERT` / `TESSERA_TLS_KEY` | TLS certificate and key (required) |
-| `TESSERA_PASSWORD` | Initial administrator password |
-| `TESSERA_METRICS_ADDR` | Metrics listen address |
-| `TESSERA_QUERY_TIMEOUT_MS` | Per-query timeout |
-| `TESSERA_MAX_CONNECTIONS` | Maximum concurrent connections |
-| `TESSERA_AUDIT_ENABLED` | Enables audit logging |
+| `ERMYA_BIND` | Listen address and port |
+| `ERMYA_DATA_DIR` | Data directory |
+| `ERMYA_TLS_CERT` / `ERMYA_TLS_KEY` | TLS certificate and key (required) |
+| `ERMYA_PASSWORD` | Initial administrator password |
+| `ERMYA_METRICS_ADDR` | Metrics listen address |
+| `ERMYA_QUERY_TIMEOUT_MS` | Per-query timeout |
+| `ERMYA_MAX_CONNECTIONS` | Maximum concurrent connections |
+| `ERMYA_AUDIT_ENABLED` | Enables audit logging |
 
 Around forty additional settings control resource limits, rate limiting, audit
 log rotation, and background maintenance.
@@ -168,7 +168,7 @@ log rotation, and background maintenance.
 
 ```bash
 cargo check --workspace --all-targets
-cargo test --workspace --exclude tessera-graph-python --features plain-tcp
+cargo test --workspace --exclude ermya-graph-python --features plain-tcp
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
@@ -185,15 +185,15 @@ a virtual environment:
 python3 -m venv .venv
 .venv/bin/pip install 'maturin>=1.7,<2.0' pytest
 VIRTUAL_ENV=$PWD/.venv .venv/bin/maturin develop --locked \
-  --manifest-path crates/tessera-graph-python/Cargo.toml
-.venv/bin/python -m pytest crates/tessera-graph-python/tests -q
+  --manifest-path crates/ermya-graph-python/Cargo.toml
+.venv/bin/python -m pytest crates/ermya-graph-python/tests -q
 ```
 
 A reproducible, isolated build is also available through Docker:
 
 ```bash
 docker build --target test \
-  -f crates/tessera-graph-python/Dockerfile .
+  -f crates/ermya-graph-python/Dockerfile .
 ```
 
 Before a release, the pipeline runs `scripts/check-release.sh`. A `vX.Y.Z` tag
@@ -207,7 +207,7 @@ to a GitHub release. Changes are documented in
 
 The licensing split between components is part of the product design:
 
-- **Engine** (`tessera-graph`) and Python bindings: MIT, published as an
+- **Engine** (`ermya-graph`) and Python bindings: MIT, published as an
   independent embeddable graph package.
 - **Community server and network components**: BSL 1.1. Internal production use
   is permitted, but DBaaS, redistribution/OEM, and competing products require a
@@ -220,4 +220,4 @@ backups) live in a separate repository and are not part of this one.
 
 ---
 
-[tesseradb.io](https://tesseradb.io)
+[ermya.com](https://ermya.com)

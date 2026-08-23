@@ -1,0 +1,17 @@
+[package]
+name        = "ermya-graph-cypher"
+description = "Cypher compatibility layer for ErmyaGraph"
+version.workspace     = true
+edition.workspace     = true
+authors.workspace     = true
+license-file          = "../ermya-graph-server/LICENSE"
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+ermya-graph  = { workspace = true }
+ermya-graph-config = { workspace = true }
+moka           = { workspace = true }
+
+[lints]
+workspace = true
