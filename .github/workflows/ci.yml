@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install --yes ripgrep
       - name: Check active tree
         run: bash scripts/check_brand_residue.sh
 
