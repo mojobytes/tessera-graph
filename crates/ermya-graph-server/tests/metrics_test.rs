@@ -32,7 +32,9 @@ use ermya_graph_protocol::{BOLT_MAGIC, PackStreamValue, decode_response, encode_
 use ermya_graph_server::{ServerConfig, ServerHandle};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{Mutex, oneshot, watch};
+
+static BOLT_METRICS_TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
 // ── Cycle 2: exporter endpoint ──────────────────────────────────────────────
 
@@ -332,6 +334,7 @@ where
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn active_connections_gauge_increments_on_connect_and_decrements_on_close() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let (bolt_addr, metrics_addr, shutdown_tx, server_join) = spawn_test_server().await;
 
     // Snapshot before opening any connection. Delta-based so the
@@ -573,6 +576,7 @@ async fn send_bolt_run_and_pull(addr: SocketAddr, db: &str, query: &str) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bolt_messages_counter_increments_on_hello_success() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let (bolt_addr, metrics_addr, shutdown_tx, server_join) = spawn_test_server().await;
 
     let before = snapshot(
@@ -636,6 +640,7 @@ async fn send_bolt_hello_with_creds(addr: SocketAddr, user: &str, pass: &str) ->
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn auth_attempts_counter_increments_on_success_and_failure() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let (bolt_addr, metrics_addr, shutdown_tx, server_join, _tmp) =
         spawn_test_server_with_db("authdb").await;
 
@@ -734,6 +739,7 @@ async fn send_bolt_run_no_pull(addr: SocketAddr, db: &str, query: &str) -> BoltR
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queries_counter_and_histogram_on_successful_run() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let (bolt_addr, metrics_addr, shutdown_tx, server_join, _tmp) =
         spawn_test_server_with_db("qdb").await;
 
@@ -833,6 +839,7 @@ async fn queries_counter_and_histogram_on_successful_run() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queries_counter_outcome_error_on_syntax_failure() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let (bolt_addr, metrics_addr, shutdown_tx, server_join, _tmp) =
         spawn_test_server_with_db("edb").await;
 
@@ -908,6 +915,7 @@ fn label_guard_caps_database_label_to_other() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bolt_messages_counter_increments_on_run_and_pull() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let (bolt_addr, metrics_addr, shutdown_tx, server_join, _tmp) =
         spawn_test_server_with_db("qdb").await;
 
@@ -976,6 +984,7 @@ async fn bolt_messages_counter_increments_on_run_and_pull() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wal_fsync_histogram_has_samples_after_writes() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     // `N_WRITES` lives at the top of the body so clippy's
     // `items_after_statements` lint stays quiet. The `_f64` companion
     // is declared as a literal (not a cast) to satisfy
@@ -1120,6 +1129,7 @@ async fn spawn_test_server_with_slow_log(
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn slow_query_threshold_zero_is_a_kill_switch() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     // threshold=0 must short-circuit emit_query_pair: no slow_query line
     // ever lands, regardless of how slow the RUNs are. This is the
     // deterministic proof that handle_run is wired through
@@ -1244,6 +1254,7 @@ fn install_capture_subscriber_once() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn handle_run_emits_tracing_span_with_dynamic_fields() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     install_capture_subscriber_once();
 
     // threshold huge so the slow-query path never fires; we only want the
@@ -1403,6 +1414,7 @@ async fn spawn_test_server_with_db_and_cap(
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn result_capped_counter_increments_on_over_cap_query() {
+    let _serial = BOLT_METRICS_TEST_LOCK.lock().await;
     let db = "capdb";
     let (bolt_addr, metrics_addr, shutdown_tx, server_join, _tmp) =
         spawn_test_server_with_db_and_cap(db, 3).await;
