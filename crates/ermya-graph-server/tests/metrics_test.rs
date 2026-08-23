@@ -337,7 +337,7 @@ async fn active_connections_gauge_increments_on_connect_and_decrements_on_close(
     // the task spawned by `listener::serve_with` — that spawn happens
     // immediately after `accept()` returns, but is not synchronous with
     // the client-side `connect()` completing, so we poll until visible.
-    let stream = open_raw_bolt_connection(bolt_addr).await;
+    let mut stream = open_raw_bolt_connection(bolt_addr).await;
 
     let saw_increment = poll_until(Duration::from_secs(2), Duration::from_millis(20), || {
         // `metrics_addr: SocketAddr` is `Copy`, so the `async move`
@@ -354,9 +354,10 @@ async fn active_connections_gauge_increments_on_connect_and_decrements_on_close(
         "gauge did not increment within 2 s (before={before}, during={during})",
     );
 
-    // Close the client side. The server's read returns EOF → handshake
-    // future returns Err → handler task ends → `connection_closed`
-    // runs. Same timing caveat as above: poll for decrement.
+    // Close the client side explicitly. Sending FIN makes the EOF
+    // observable by the server even when the runner delays destruction
+    // of the local socket under load.
+    stream.shutdown().await.expect("shutdown bolt connection");
     drop(stream);
 
     let saw_decrement = poll_until(
