@@ -10,11 +10,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::BuildHasher;
 use std::time::Instant;
 
-use crate::Direction;
 use crate::access::GraphAccess;
 use crate::error::{EdgeId, Error, NodeId};
 use crate::property::Property;
 use crate::query::pattern::PatternMatch;
+use crate::Direction;
 
 use super::ast::{
     AggFunc, AstDirection, BinOp, ConstReturnQuery, EdgeLength, EdgePattern, Expr, GqlQuery,
@@ -3310,8 +3310,8 @@ pub fn execute_const_return<G: GraphAccess + ?Sized>(
     deadline: Option<Instant>,
 ) -> crate::Result<GqlResult> {
     let _ = max_rows; // const return is always one row; cap is a no-op.
-    // const return performs no MATCH and no runaway loop; the deadline is a
-    // no-op here, accepted only for signature symmetry with `execute`.
+                      // const return performs no MATCH and no runaway loop; the deadline is a
+                      // no-op here, accepted only for signature symmetry with `execute`.
     let _ = deadline;
     // Defensive: param substitution must have run.
     for item in &query.items {
@@ -3774,6 +3774,77 @@ pub fn compile_match_rows<G: GraphAccess + ?Sized>(
                     && let Ok(node) = pm.get_node(v)
                 {
                     row.nodes.insert(v.clone(), node.id());
+                }
+            }
+        }
+        rows.push(row);
+    }
+    Ok(rows)
+}
+
+/// Resolves mutation MATCH bindings and applies the optional WHERE predicate
+/// before returning rows to the write phase.
+///
+/// This ensures `MATCH … WHERE … SET` can only write nodes selected by WHERE.
+///
+/// # Errors
+///
+/// Returns an error when pattern matching fails or exceeds its deadline, or
+/// when evaluating a `WHERE` predicate aborts due to that deadline.
+pub fn compile_match_rows_for_mutation<G: GraphAccess + ?Sized>(
+    graph: &G,
+    mc: &MatchClause,
+    where_clause: Option<&super::ast::WhereClause>,
+    deadline: Option<Instant>,
+) -> crate::Result<Vec<MatchRow>> {
+    let matches = compile_match(graph, mc, deadline)?;
+    let abort = DeadlineAbort::new(deadline);
+    let matches: Vec<PatternMatch> = if let Some(wc) = where_clause {
+        matches
+            .into_iter()
+            .filter(|pm| {
+                let paths = materialise_path_bindings(graph, mc, pm);
+                eval_as_tribool(&eval_expr(&wc.predicate, pm, &paths, graph, &abort)) == Some(true)
+            })
+            .collect()
+    } else {
+        matches
+    };
+    if abort.is_aborted() {
+        return Err(timeout_error());
+    }
+
+    let mut rows = Vec::with_capacity(matches.len());
+    for pm in &matches {
+        let mut row = MatchRow::default();
+        for pp in &mc.patterns {
+            match pp.start.var.as_ref() {
+                Some(v) => match pm.get_node(v) {
+                    Ok(node) => {
+                        row.nodes.insert(v.clone(), node.id());
+                    }
+                    Err(_) => {}
+                },
+                None => {}
+            }
+            for (ep, np) in &pp.hops {
+                match ep.var.as_ref() {
+                    Some(v) => match pm.get_edge(v) {
+                        Ok(edge) => {
+                            row.edges.insert(v.clone(), edge.id);
+                        }
+                        Err(_) => {}
+                    },
+                    None => {}
+                }
+                match np.var.as_ref() {
+                    Some(v) => match pm.get_node(v) {
+                        Ok(node) => {
+                            row.nodes.insert(v.clone(), node.id());
+                        }
+                        Err(_) => {}
+                    },
+                    None => {}
                 }
             }
         }
@@ -5625,8 +5696,8 @@ mod tests {
     /// wired into the evaluator.
     #[test]
     fn to_lower_via_function_call_pm() {
-        use crate::Graph;
         use crate::gql::ast::{Expr, Literal};
+        use crate::Graph;
         let g = Graph::new();
         let pm = PatternMatch::empty();
         let expr = Expr::FunctionCall {
@@ -5642,8 +5713,8 @@ mod tests {
     /// `toUpper` resolves through the same dispatcher arm.
     #[test]
     fn to_upper_via_function_call_pm() {
-        use crate::Graph;
         use crate::gql::ast::{Expr, Literal};
+        use crate::Graph;
         let g = Graph::new();
         let pm = PatternMatch::empty();
         let expr = Expr::FunctionCall {
@@ -5691,8 +5762,8 @@ mod tests {
     /// absent property that evaluates to `Null` — returns the fallback.
     #[test]
     fn coalesce_via_function_call_missing_prop_falls_back() {
-        use crate::Graph;
         use crate::gql::ast::{Expr, Literal};
+        use crate::Graph;
         let g = Graph::new();
         let pm = PatternMatch::empty();
         // First arg evaluates to Null (no binding named `n`), second is the
@@ -5717,7 +5788,7 @@ mod tests {
 
     #[test]
     fn properties_of_node_returns_map_of_all_props() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 })
             .unwrap();
@@ -5751,7 +5822,7 @@ mod tests {
 
     #[test]
     fn properties_of_edge_returns_map() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         let a = g.add_node("N", crate::Properties::new()).unwrap();
         let b = g.add_node("N", crate::Properties::new()).unwrap();
@@ -5771,8 +5842,8 @@ mod tests {
 
     #[test]
     fn properties_of_unbound_var_returns_null() {
-        use crate::Graph;
         use crate::gql::ast::Expr;
+        use crate::Graph;
         let g = Graph::new();
         let pm = PatternMatch::empty();
         let expr = Expr::FunctionCall {
@@ -5789,7 +5860,7 @@ mod tests {
 
     #[test]
     fn return_node_yields_node_value_not_int() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         g.add_node("Person", props! { "name" => "Alice", "age" => 30i64 })
             .unwrap();
@@ -5812,7 +5883,7 @@ mod tests {
 
     #[test]
     fn return_relationship_yields_relationship_value() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         let a = g.add_node("N", crate::Properties::new()).unwrap();
         let b = g.add_node("N", crate::Properties::new()).unwrap();
@@ -5866,7 +5937,7 @@ mod tests {
     #[test]
     fn properties_function_still_returns_map_after_node_migration() {
         // `properties(n)` keeps its Map shape; only bare `RETURN n` changed.
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         g.add_node("Person", props! { "name" => "Bob" }).unwrap();
 
@@ -5956,7 +6027,7 @@ mod tests {
     /// alongside the iteration variable — the ReBAC/GraphRAG-style usage.
     #[test]
     fn list_pred_predicate_references_outer_and_iteration_var() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         g.add_node("N", props! { "threshold" => 2i64 }).unwrap();
         // ANY(x IN [1,2,3] WHERE x > n.threshold) → 3 > 2 → true, node kept.
@@ -6057,7 +6128,7 @@ mod tests {
 
     #[test]
     fn match_label_and_property_uses_index() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
 
         // Add 1000 nodes: 999 with name "Other<i>", 1 with name "Target"
@@ -6188,7 +6259,7 @@ mod tests {
 
     #[test]
     fn execute_cap_a_aborts_when_match_count_exceeds_max_rows() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         // 3 A-nodes × 3 B-nodes = 9 cartesian matches.
         for i in 0_i64..3 {
@@ -6211,7 +6282,7 @@ mod tests {
 
     #[test]
     fn execute_cap_disabled_with_zero_allows_large_match() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         for i in 0_i64..3 {
             g.add_node("A", props! { "i" => i }).unwrap();
@@ -6228,7 +6299,7 @@ mod tests {
 
     #[test]
     fn execute_under_cap_passes_unchanged() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         for i in 0_i64..3 {
             g.add_node("A", props! { "i" => i }).unwrap();
@@ -6242,7 +6313,7 @@ mod tests {
 
     #[test]
     fn execute_pipeline_accepts_max_rows_param() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         g.add_node("A", props! { "i" => 1_i64 }).unwrap();
         let stmt = crate::gql::parse_statement("MATCH (a:A) WITH a RETURN a").unwrap();
@@ -6305,7 +6376,7 @@ mod tests {
 
     #[test]
     fn execute_with_expired_deadline_aborts_cross_join() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // Two-pattern MATCH → cross-join. With an already-expired deadline the
         // first deadline check inside compile_match's cross-join (counter == 0)
         // reads the clock and aborts.
@@ -6329,7 +6400,7 @@ mod tests {
 
     #[test]
     fn execute_with_no_deadline_completes_normally() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // deadline == None must never abort — the cross-join runs to completion.
         let mut g = Graph::new();
         for i in 0_i64..3 {
@@ -6345,7 +6416,7 @@ mod tests {
 
     #[test]
     fn execute_with_expired_deadline_aborts_variable_hop() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // A chain a→b→c→… so a `[*1..N]` expansion does real BFS work. With an
         // already-expired deadline the first BFS dequeue (counter == 0) reads
         // the clock and aborts.
@@ -6371,7 +6442,7 @@ mod tests {
 
     #[test]
     fn execute_variable_hop_with_no_deadline_completes() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // deadline == None: the [*1..N] expansion runs to completion.
         let mut g = Graph::new();
         let mut prev = g.add_node("N", props! { "i" => 0_i64 }).unwrap();
@@ -6395,7 +6466,7 @@ mod tests {
 
     #[test]
     fn shortest_path_bfs_constrained_trips_abort_cell_on_expired_deadline() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // A chain so the BFS would do real work if not aborted.
         let mut g = Graph::new();
         let mut ids = Vec::new();
@@ -6431,7 +6502,7 @@ mod tests {
 
     #[test]
     fn shortest_path_bfs_unconstrained_trips_abort_cell_on_expired_deadline() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         let mut ids = Vec::new();
         let mut prev = g.add_node("N", props! { "i" => 0_i64 }).unwrap();
@@ -6459,7 +6530,7 @@ mod tests {
     #[allow(clippy::literal_string_with_formatting_args)]
     #[test]
     fn materialization_maps_tripped_abort_cell_to_timeout_err() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // End-to-end: an expired deadline + a shortestPath projection aborts
         // with the timeout prefix. (Here the materialization per-row check and
         // the BFS abort cell both point at the same expired deadline; this
@@ -6492,7 +6563,7 @@ mod tests {
     #[allow(clippy::literal_string_with_formatting_args)]
     #[test]
     fn execute_shortest_path_with_no_deadline_completes() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // deadline == None: shortestPath resolves to a path.
         let mut g = Graph::new();
         let mut prev = g.add_node("N", props! { "i" => 0_i64 }).unwrap();
@@ -6519,7 +6590,7 @@ mod tests {
 
     #[test]
     fn execute_with_expired_deadline_aborts_materialization() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         // A single-pattern MATCH over enough rows that materialization is the
         // active loop (no cross-join, no var-hop). Row 0 lands on the
         // check_deadline slot (i == 0) and aborts immediately.
@@ -6542,7 +6613,7 @@ mod tests {
 
     #[test]
     fn execute_materialization_with_no_deadline_returns_all_rows() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         for i in 0_i64..50 {
             g.add_node("A", props! { "i" => i }).unwrap();
@@ -6588,7 +6659,7 @@ mod tests {
 
     #[test]
     fn apply_map_to_node_overwrite_replaces_all_props() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         use std::collections::HashMap;
 
         let mut g = Graph::new();
@@ -6619,7 +6690,7 @@ mod tests {
 
     #[test]
     fn apply_map_to_node_merge_preserves_existing_props() {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         use std::collections::HashMap;
 
         let mut g = Graph::new();
@@ -6699,7 +6770,7 @@ mod tests {
     /// keyed by `k` so the query can pin endpoints. `b_c_expired` flips the
     /// second link's `expired` flag for the ReBAC-fail case.
     fn seed_two_link_chain(b_c_expired: bool) -> crate::Graph {
-        use crate::{Graph, props};
+        use crate::{props, Graph};
         let mut g = Graph::new();
         let a = g.add_node("N", props! { "k" => "a" }).unwrap();
         let b = g.add_node("N", props! { "k" => "b" }).unwrap();

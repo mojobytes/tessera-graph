@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use ermya_graph::Graph;
 use ermya_graph::gql::{self, GqlMutationResult, GqlQuery, GqlValue};
+use ermya_graph::Graph;
 
 /// A single result row: column name → value.
 pub type ResultRow = std::collections::HashMap<String, GqlValue>;
@@ -677,7 +677,13 @@ pub(crate) fn execute_match_mutation(
         let graph = shared
             .read()
             .map_err(|_| "graph lock poisoned".to_owned())?;
-        gql::compile_match_rows(&*graph, match_clause, deadline).map_err(engine_err_to_string)?
+        gql::compile_match_rows_for_mutation(
+            &*graph,
+            match_clause,
+            mutation.where_clause.as_ref(),
+            deadline,
+        )
+        .map_err(engine_err_to_string)?
     };
 
     if rows.is_empty() {
@@ -716,7 +722,13 @@ fn execute_match_mutation_in_txn(
             .read()
             .map_err(|_| "graph lock poisoned".to_owned())?;
         let view = gql::TxnReadView::new(&graph, txn_id);
-        gql::compile_match_rows(&view, match_clause, deadline).map_err(engine_err_to_string)?
+        gql::compile_match_rows_for_mutation(
+            &view,
+            match_clause,
+            mutation.where_clause.as_ref(),
+            deadline,
+        )
+        .map_err(engine_err_to_string)?
     };
 
     if rows.is_empty() {
@@ -979,6 +991,68 @@ mod tests {
             .unwrap()
             .add_node("Person", props)
             .unwrap();
+    }
+
+    #[test]
+    fn parameterized_match_where_set_only_updates_the_matched_node() {
+        let accessor = make_accessor();
+        add_person(&accessor, "Alice");
+        add_person(&accessor, "Bob");
+        let mut statement = GqlStatement::Mutation(parse_mutation(
+            "MATCH (n:Person) WHERE n.name = $name SET n.status = 'active'",
+        ));
+        let params = HashMap::from([("name".to_owned(), GqlValue::Str("Alice".to_owned()))]);
+        gql::param_substitution::apply(&mut statement, &params).unwrap();
+        let GqlStatement::Mutation(mutation) = statement else {
+            unreachable!("constructed a mutation statement");
+        };
+        let alice_id = find_person(&accessor, "Alice");
+        let bob_id = find_person(&accessor, "Bob");
+
+        let (_rows, stats) = accessor.execute_mutation(&mutation, params, None).unwrap();
+        assert_eq!(stats.properties_set, 1);
+
+        let graph = accessor.graph.read().unwrap();
+        let alice = graph.node(alice_id).unwrap();
+        let bob = graph.node(bob_id).unwrap();
+        assert_eq!(
+            alice.properties().get("status"),
+            Some(&Property::String("active".into()))
+        );
+        assert!(!bob.properties().contains_key("status"));
+    }
+
+    #[test]
+    fn parameterized_match_where_set_only_updates_the_matched_node_in_a_transaction() {
+        let accessor = make_mvcc_accessor();
+        add_person(&accessor, "Alice");
+        add_person(&accessor, "Bob");
+        let mut statement = GqlStatement::Mutation(parse_mutation(
+            "MATCH (n:Person) WHERE n.name = $name SET n.status = 'active'",
+        ));
+        let params = HashMap::from([("name".to_owned(), GqlValue::Str("Alice".to_owned()))]);
+        gql::param_substitution::apply(&mut statement, &params).unwrap();
+        let GqlStatement::Mutation(mutation) = statement else {
+            unreachable!("constructed a mutation statement");
+        };
+        let alice_id = find_person(&accessor, "Alice");
+        let bob_id = find_person(&accessor, "Bob");
+        let txn_id = accessor.begin_txn().unwrap();
+
+        let (_rows, stats) = accessor
+            .execute_mutation_in_txn(txn_id, &mutation, params, None)
+            .unwrap();
+        assert_eq!(stats.properties_set, 1);
+        accessor.commit_txn(txn_id).unwrap();
+
+        let graph = accessor.graph.read().unwrap();
+        let alice = graph.node(alice_id).unwrap();
+        let bob = graph.node(bob_id).unwrap();
+        assert_eq!(
+            alice.properties().get("status"),
+            Some(&Property::String("active".into()))
+        );
+        assert!(!bob.properties().contains_key("status"));
     }
 
     /// Returns the `NodeId` of the Person node whose `name` property equals `name`.
