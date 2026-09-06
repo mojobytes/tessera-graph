@@ -46,9 +46,9 @@ pub mod token;
 pub mod txn_view;
 
 pub use mutation_exec::{
-    MergeLookup, ResultRow, apply_match_mutation_body, apply_merge_write, apply_unwind_create_body,
+    apply_match_mutation_body, apply_merge_write, apply_unwind_create_body,
     apply_unwind_delete_body, eval_unwind_and_match, execute_bare_merge, execute_bare_mutation,
-    execute_unwind_mutation, merge_lookup,
+    execute_unwind_mutation, merge_lookup, MergeLookup, ResultRow,
 };
 
 pub use txn_view::{TxnReadView, TxnView};
@@ -62,16 +62,17 @@ pub use ast::{
     SkipClause, UnwindClause, WhereClause, WithClause,
 };
 pub use compiler::{
+    execute, execute_call_result, execute_const_return, execute_expr, expr_surface_name,
     GqlMutationResult, GqlNode, GqlPath, GqlRelationship, GqlResult, GqlRow, GqlValue,
-    RESULT_CAP_MSG_PREFIX, TIMEOUT_MSG_PREFIX, execute, execute_call_result, execute_const_return,
-    execute_expr, expr_surface_name,
+    RESULT_CAP_MSG_PREFIX, TIMEOUT_MSG_PREFIX,
 };
 
 pub use compiler::{
-    MatchRow, apply_map_to_node_merge, apply_map_to_node_overwrite, compile_match_bindings,
-    compile_match_for_mutation, compile_match_rows, execute_pipeline, execute_pipeline_mutation,
-    execute_pipeline_with_deadline, execute_with_deadline, gql_value_from_property,
-    gql_value_to_property, resolve_create_props,
+    apply_map_to_node_merge, apply_map_to_node_overwrite, compile_match_bindings,
+    compile_match_for_mutation, compile_match_rows, compile_match_rows_for_mutation,
+    execute_pipeline, execute_pipeline_mutation, execute_pipeline_with_deadline,
+    execute_with_deadline, gql_value_from_property, gql_value_to_property, resolve_create_props,
+    MatchRow,
 };
 
 // Deprecated literal-only SET helper. Kept for API compatibility with

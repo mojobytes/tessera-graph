@@ -678,6 +678,10 @@ pub struct MutationStatement {
     pub unwind_clause: Option<UnwindClause>,
     /// The optional MATCH clause that binds variables for the mutation.
     pub match_clause: Option<MatchClause>,
+    /// Optional predicate that filters the rows produced by [`Self::match_clause`].
+    ///
+    /// The mutation executor must apply this before performing any write.
+    pub where_clause: Option<WhereClause>,
     /// The primary mutation operation.
     pub mutation: MutationClause,
     /// The optional SET clause applied after the mutation.
@@ -1152,6 +1156,7 @@ mod tests {
         let stmt = MutationStatement {
             unwind_clause: None,
             match_clause: None,
+            where_clause: None,
             mutation: MutationClause::Create(create),
             set_clause: None,
             return_clause: None,

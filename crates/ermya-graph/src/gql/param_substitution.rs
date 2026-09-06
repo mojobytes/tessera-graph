@@ -133,6 +133,9 @@ fn visit_mutation<S: BuildHasher>(
     if let Some(ref mut u) = m.unwind_clause {
         visit_unwind(u, params)?;
     }
+    if let Some(ref mut w) = m.where_clause {
+        visit_where(w, params)?;
+    }
     // MATCH inline-prop constraints are stored as `Vec<(String, Literal)>`
     // on `MatchClause`/`NodePattern`/`RelPattern`, not `Vec<(String, Expr)>`,
     // so no `Expr::ParamRef` can appear there and no walker is needed. If

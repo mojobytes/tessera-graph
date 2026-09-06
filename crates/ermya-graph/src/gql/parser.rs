@@ -7,7 +7,6 @@
 //! bounded look-ahead (at most 2 tokens) and explicit precedence levels for
 //! the expression sub-grammar.
 
-use crate::Error;
 use crate::gql::ast::{
     AggFunc, AstDirection, BinOp, ConstReturnQuery, CreateClause, CreatePattern, DeleteClause,
     EdgeLength, EdgePattern, Expr, GqlQuery, GqlStatement, LimitClause, ListPredKind, Literal,
@@ -16,6 +15,7 @@ use crate::gql::ast::{
     WhereClause,
 };
 use crate::gql::token::{self, Span, SpannedToken, Token};
+use crate::Error;
 
 // ── Internal struct for edge bracket content ──────────────────────────────────
 
@@ -328,6 +328,7 @@ impl Parser {
                 Ok(GqlStatement::Mutation(MutationStatement {
                     unwind_clause,
                     match_clause: None,
+                    where_clause: None,
                     mutation: MutationClause::Create(create),
                     set_clause: None,
                     return_clause,
@@ -341,6 +342,7 @@ impl Parser {
                 Ok(GqlStatement::Mutation(MutationStatement {
                     unwind_clause,
                     match_clause: None,
+                    where_clause: None,
                     mutation: MutationClause::Merge(merge),
                     set_clause: None,
                     return_clause: None,
@@ -465,6 +467,7 @@ impl Parser {
                 Ok(GqlStatement::Mutation(MutationStatement {
                     unwind_clause: None,
                     match_clause: Some(match_clause),
+                    where_clause,
                     mutation: MutationClause::Delete(delete),
                     set_clause: None,
                     return_clause: None,
@@ -479,6 +482,7 @@ impl Parser {
                 Ok(GqlStatement::Mutation(MutationStatement {
                     unwind_clause: None,
                     match_clause: Some(match_clause),
+                    where_clause,
                     mutation: MutationClause::Set(set),
                     set_clause: None,
                     return_clause,
@@ -493,6 +497,7 @@ impl Parser {
                 Ok(GqlStatement::Mutation(MutationStatement {
                     unwind_clause: None,
                     match_clause: Some(match_clause),
+                    where_clause,
                     mutation: MutationClause::Create(create),
                     set_clause: None,
                     return_clause,
